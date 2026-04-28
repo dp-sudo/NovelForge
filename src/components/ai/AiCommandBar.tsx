@@ -1,5 +1,10 @@
 import { useEffect, useState } from "react";
 import { listSkills, type SkillManifest } from "../../api/skillsApi.js";
+import {
+  EDITOR_AI_ACTIONS,
+  type EditorAiAction,
+  type EditorAiCategory,
+} from "../../utils/taskRouting.js";
 
 interface AiCommandBarProps {
   onCommand: (taskType: string, userInstruction: string) => void;
@@ -12,17 +17,16 @@ const CATEGORY_LABELS: Record<string, string> = {
   world: "世界观",
   plot: "剧情",
   review: "审稿",
-  utility: "工具",
 };
 
-const CATEGORY_ORDER = ["writing", "character", "world", "plot", "review", "utility"];
+const CATEGORY_ORDER: EditorAiCategory[] = ["writing", "character", "world", "plot", "review"];
 
 /** Skills whose IDs are excluded from the command bar (internal skills). */
 const HIDDEN_SKILLS = new Set(["context.collect", "import.extract_assets"]);
 
 export function AiCommandBar({ onCommand, disabled }: AiCommandBarProps) {
   const [skills, setSkills] = useState<SkillManifest[]>([]);
-  const [activeId, setActiveId] = useState<string | null>(null);
+  const [activeTaskType, setActiveTaskType] = useState<string | null>(null);
   const [instruction, setInstruction] = useState("");
 
   useEffect(() => {
@@ -31,21 +35,24 @@ export function AiCommandBar({ onCommand, disabled }: AiCommandBarProps) {
     }).catch(() => {});
   }, []);
 
-  function handleCommand(skill: SkillManifest) {
-    setActiveId(skill.id);
-    const userMsg = instruction.trim() || skill.name;
-    onCommand(skill.id, userMsg);
+  function handleCommand(action: EditorAiAction) {
+    const taskType = action.taskType;
+    const userMsg = instruction.trim() || action.label;
+    setActiveTaskType(taskType);
+    onCommand(taskType, userMsg);
     setInstruction("");
   }
 
-  // Group by category preserving order
+  const skillById = new Map(skills.map((skill) => [skill.id, skill] as const));
+
+  // 固定渲染编辑器 9 按钮，按 category 分组
   const groups = CATEGORY_ORDER
     .map((cat) => ({
       category: cat,
       label: CATEGORY_LABELS[cat] || cat,
-      skills: skills.filter((s) => s.category === cat),
+      actions: EDITOR_AI_ACTIONS.filter((action) => action.category === cat),
     }))
-    .filter((g) => g.skills.length > 0);
+    .filter((g) => g.actions.length > 0);
 
   return (
     <div className="rounded-xl border border-surface-700 bg-surface-900/40 p-3">
@@ -56,21 +63,26 @@ export function AiCommandBar({ onCommand, disabled }: AiCommandBarProps) {
               {group.label}
             </p>
             <div className="flex gap-1.5 flex-wrap">
-              {group.skills.map((skill) => (
+              {group.actions.map((action) => {
+                const skill = skillById.get(action.taskType);
+                const buttonLabel = skill?.name || action.label;
+                const icon = skill?.icon;
+                return (
                 <button
-                  key={skill.id}
-                  onClick={() => handleCommand(skill)}
+                  key={action.taskType}
+                  onClick={() => handleCommand(action)}
                   disabled={disabled}
                   className={`inline-flex items-center gap-1 px-2.5 py-1.5 text-xs rounded-lg transition-colors disabled:opacity-40 ${
-                    activeId === skill.id
+                    activeTaskType === action.taskType
                       ? "bg-primary/20 text-primary border border-primary/30"
                       : "bg-surface-700 text-surface-300 border border-surface-600 hover:bg-surface-600"
                   }`}
                 >
-                  {skill.icon && <span>{skill.icon}</span>}
-                  {skill.name}
+                  {icon && <span>{icon}</span>}
+                  {buttonLabel}
                 </button>
-              ))}
+                );
+              })}
             </div>
           </div>
         ))}

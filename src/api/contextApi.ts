@@ -50,6 +50,9 @@ export interface ChapterContext {
     evidence: string;
   }>;
   relationshipDrafts: Array<{
+    id: string;
+    batchId: string;
+    status: string;
     sourceLabel: string;
     targetLabel: string;
     relationshipType: string;
@@ -57,6 +60,9 @@ export interface ChapterContext {
     evidence: string;
   }>;
   involvementDrafts: Array<{
+    id: string;
+    batchId: string;
+    status: string;
     characterLabel: string;
     involvementType: string;
     occurrences: number;
@@ -64,6 +70,9 @@ export interface ChapterContext {
     evidence: string;
   }>;
   sceneDrafts: Array<{
+    id: string;
+    batchId: string;
+    status: string;
     sceneLabel: string;
     sceneType: string;
     confidence: number;
@@ -92,6 +101,7 @@ export interface ApplyAssetCandidateResult {
 }
 
 export interface ApplyStructuredDraftInput {
+  draftItemId?: string;
   draftKind: "relationship" | "involvement" | "scene";
   sourceLabel: string;
   targetLabel?: string;
@@ -104,6 +114,8 @@ export interface ApplyStructuredDraftInput {
 export interface ApplyStructuredDraftResult {
   action: "created" | "reused";
   draftKind: string;
+  draftItemId: string | null;
+  draftItemStatus: string | null;
   primaryTargetId: string;
   secondaryTargetId: string | null;
 }

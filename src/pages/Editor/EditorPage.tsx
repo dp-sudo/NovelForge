@@ -24,7 +24,11 @@ import {
   getChapterContext,
   type ChapterContext
 } from "../../api/contextApi";
-import { streamAiChapterTask } from "../../api/aiApi";
+import {
+  cancelTaskPipeline,
+  runTaskPipeline,
+  streamTaskPipelineByRequestId
+} from "../../api/pipelineApi";
 import type { ChapterRecord } from "../../api/chapterApi";
 import { Modal } from "../../components/dialogs/Modal";
 import { Input } from "../../components/forms/Input";
@@ -32,6 +36,7 @@ import { Select } from "../../components/forms/Select";
 import { Textarea } from "../../components/forms/Textarea";
 import { Button } from "../../components/ui/Button.js";
 import { FindBar } from "../../components/editor/FindBar.js";
+import { canonicalTaskType, getTaskRequirements } from "../../utils/taskRouting.js";
 
 const AUTOSAVE_DELAY_MS = 5000;
 
@@ -58,10 +63,11 @@ const CANDIDATE_STATUS_LABEL: Record<"idle" | "applying" | "applied" | "error", 
   error: "失败"
 };
 
-const STRUCTURED_DRAFT_STATUS_LABEL: Record<"idle" | "applying" | "applied" | "error", string> = {
-  idle: "待确认",
+const STRUCTURED_DRAFT_STATUS_LABEL: Record<"pending" | "applying" | "applied" | "rejected" | "error", string> = {
+  pending: "待确认",
   applying: "处理中",
   applied: "已入库",
+  rejected: "已忽略",
   error: "失败"
 };
 
@@ -69,6 +75,9 @@ export function EditorPage() {
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const selRef = useRef<{ start: number; end: number }>({ start: 0, end: 0 });
   const autosaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const activeAiRequestIdRef = useRef<string | null>(null);
+  const aiRunTokenRef = useRef(0);
+  const lastChapterIdRef = useRef<string | null>(null);
 
   const [chapters, setChapters] = useState<ChapterRecord[]>([]);
   const [volumes, setVolumes] = useState<VolumeRecord[]>([]);
@@ -89,7 +98,7 @@ export function EditorPage() {
   const [creatingSnapshot, setCreatingSnapshot] = useState(false);
   const [editorNotice, setEditorNotice] = useState<string | null>(null);
   const [candidateStatus, setCandidateStatus] = useState<Record<string, "idle" | "applying" | "applied" | "error">>({});
-  const [structuredDraftStatus, setStructuredDraftStatus] = useState<Record<string, "idle" | "applying" | "applied" | "error">>({});
+  const [structuredDraftStatus, setStructuredDraftStatus] = useState<Record<string, "applying" | "error">>({});
   const [currentTab, setCurrentTab] = useState<"characters" | "world" | "plot" | "glossary">("characters");
 
   const chapterId = useEditorStore((s) => s.activeChapterId);
@@ -129,10 +138,21 @@ export function EditorPage() {
   }, []);
 
   const getCandidateKey = useCallback((assetType: string, label: string) => `${assetType}:${label}`, []);
-  const getStructuredDraftKey = useCallback(
-    (kind: "relationship" | "involvement" | "scene", sourceLabel: string, targetLabel?: string) =>
-      `${kind}:${sourceLabel}:${targetLabel ?? ""}`,
-    []
+  const getStructuredDraftDisplayStatus = useCallback(
+    (draftId: string, persistedStatus: string): "pending" | "applying" | "applied" | "rejected" | "error" => {
+      const transient = structuredDraftStatus[draftId];
+      if (transient === "applying" || transient === "error") {
+        return transient;
+      }
+      if (persistedStatus === "applied") {
+        return "applied";
+      }
+      if (persistedStatus === "rejected") {
+        return "rejected";
+      }
+      return "pending";
+    },
+    [structuredDraftStatus]
   );
 
   useEffect(() => { void load(); }, [load]);
@@ -230,6 +250,46 @@ export function EditorPage() {
     }
   }
 
+  const formatPipelineError = useCallback((event: {
+    phase?: string;
+    errorCode?: string;
+    message?: string;
+  }) => {
+    const parts: string[] = [];
+    if (event.phase) {
+      parts.push(`阶段: ${event.phase}`);
+    }
+    if (event.errorCode) {
+      parts.push(`错误码: ${event.errorCode}`);
+    }
+    if (event.message) {
+      parts.push(event.message);
+    }
+    return parts.join(" | ") || "AI 生成异常，请检查控制台日志";
+  }, []);
+
+  const cancelActivePipeline = useCallback(async () => {
+    const requestId = activeAiRequestIdRef.current;
+    if (!requestId) return;
+    activeAiRequestIdRef.current = null;
+    aiRunTokenRef.current += 1;
+    store.setAiRequestId(null);
+    await cancelTaskPipeline(requestId).catch(() => undefined);
+  }, [store]);
+
+  useEffect(() => {
+    return () => {
+      void cancelActivePipeline();
+    };
+  }, [cancelActivePipeline]);
+
+  useEffect(() => {
+    if (lastChapterIdRef.current !== null && lastChapterIdRef.current !== chapterId) {
+      void cancelActivePipeline();
+    }
+    lastChapterIdRef.current = chapterId;
+  }, [chapterId, cancelActivePipeline]);
+
   async function handleSave() {
     if (!chapterId || !projectRoot) return;
     store.setSaveStatus("saving");
@@ -248,6 +308,7 @@ export function EditorPage() {
   }
 
   function handleSelectChapter(ch: ChapterRecord) {
+    void cancelActivePipeline();
     store.setActiveChapter(ch.id, ch.title);
     store.setContent("");
     store.setSaveStatus("saved");
@@ -283,42 +344,119 @@ export function EditorPage() {
     }
   }
 
-  async function handleAiCommand(taskType: string, _userInstruction: string) {
+  async function handleAiCommand(taskType: string, userInstruction: string) {
     if (!chapterId || !projectRoot) return;
-    setShowAiPanel(true);
-    store.resetAiPreview();
-    store.setAiTaskType(taskType);
-    store.setAiStreamStatus("streaming");
 
+    const canonicalTask = canonicalTaskType(taskType);
+    const requirements = getTaskRequirements(canonicalTask);
     const selectedText = selRef.current.start !== selRef.current.end
       ? content.slice(selRef.current.start, selRef.current.end)
       : undefined;
+    const trimmedInstruction = userInstruction.trim();
+    const selectedTextTrimmed = selectedText?.trim() || "";
+
+    if (requirements.requiresSelectedText && !selectedTextTrimmed) {
+      setShowAiPanel(true);
+      setOriginalText(undefined);
+      store.resetAiPreview();
+      store.setAiTaskType(canonicalTask);
+      store.setAiStreamStatus("error");
+      store.setAiStreamError(
+        formatPipelineError({
+          phase: "validate",
+          errorCode: "PIPELINE_SELECTED_TEXT_REQUIRED",
+          message: "请先选中需要处理的文本"
+        })
+      );
+      return;
+    }
+
+    if (requirements.requiresUserInstruction && !trimmedInstruction) {
+      setShowAiPanel(true);
+      setOriginalText(undefined);
+      store.resetAiPreview();
+      store.setAiTaskType(canonicalTask);
+      store.setAiStreamStatus("error");
+      store.setAiStreamError(
+        formatPipelineError({
+          phase: "validate",
+          errorCode: "PIPELINE_USER_INSTRUCTION_REQUIRED",
+          message: "请先输入任务描述"
+        })
+      );
+      return;
+    }
+
+    await cancelActivePipeline();
+    const runToken = aiRunTokenRef.current + 1;
+    aiRunTokenRef.current = runToken;
+
+    setShowAiPanel(true);
     setOriginalText(selectedText);
+    store.resetAiPreview();
+    store.setAiTaskType(canonicalTask);
+    store.setAiStreamStatus("streaming");
+    store.setAiStreamError(null);
 
     try {
-      const stream = streamAiChapterTask({
+      const requestId = await runTaskPipeline({
         projectRoot,
-        taskType: taskType,
-        userInstruction: _userInstruction,
+        taskType: canonicalTask,
         chapterId,
-        selectedText
+        uiAction: `editor.ai.${canonicalTask}`,
+        userInstruction: trimmedInstruction,
+        selectedText,
+        chapterContent: requirements.requiresChapterContent ? content : undefined
       });
 
+      if (runToken !== aiRunTokenRef.current) {
+        await cancelTaskPipeline(requestId).catch(() => undefined);
+        return;
+      }
+
+      activeAiRequestIdRef.current = requestId;
+      store.setAiRequestId(requestId);
+
+      const stream = streamTaskPipelineByRequestId(requestId);
       for await (const event of stream) {
+        if (runToken !== aiRunTokenRef.current) {
+          break;
+        }
         if (event.type === "delta" && event.delta) {
           store.appendAiPreviewContent(event.delta);
-        } else if (event.type === "delta" && event.reasoning) {
-          store.setAiPreviewContent((store.getState().aiPreviewContent || "") + "[思考]");
-        } else if (event.type === "done") {
+          continue;
+        }
+        if (event.type === "done") {
           store.setAiStreamStatus("completed");
-        } else if (event.type === "error") {
-          if (event.error) store.setAiStreamError(event.error);
+          continue;
+        }
+        if (event.type === "error") {
+          store.setAiStreamError(formatPipelineError(event));
           store.setAiStreamStatus("error");
         }
       }
-    } catch {
-      store.setAiStreamError("AI 生成异常，请检查控制台日志");
+    } catch (err) {
+      if (runToken !== aiRunTokenRef.current) {
+        return;
+      }
+      const fallback = (() => {
+        if (err && typeof err === "object") {
+          const candidate = err as { code?: unknown; message?: unknown };
+          return formatPipelineError({
+            phase: "run",
+            errorCode: typeof candidate.code === "string" ? candidate.code : undefined,
+            message: typeof candidate.message === "string" ? candidate.message : undefined
+          });
+        }
+        return formatPipelineError({ phase: "run", message: "AI 生成异常，请检查控制台日志" });
+      })();
+      store.setAiStreamError(fallback);
       store.setAiStreamStatus("error");
+    } finally {
+      if (runToken === aiRunTokenRef.current) {
+        activeAiRequestIdRef.current = null;
+        store.setAiRequestId(null);
+      }
     }
   }
 
@@ -344,6 +482,9 @@ export function EditorPage() {
   }
 
   function handleAiDiscard() {
+    if (aiStreamStatus === "streaming") {
+      void cancelActivePipeline();
+    }
     setShowAiPanel(false);
     store.resetAiPreview();
   }
@@ -478,23 +619,29 @@ export function EditorPage() {
   }
 
   async function handleApplyRelationshipDraft(draft: {
+    id: string;
+    status: string;
     sourceLabel: string;
     targetLabel: string;
     relationshipType: string;
     evidence: string;
   }) {
     if (!projectRoot || !chapterId) return;
-    const key = getStructuredDraftKey("relationship", draft.sourceLabel, draft.targetLabel);
-    setStructuredDraftStatus((prev) => ({ ...prev, [key]: "applying" }));
+    setStructuredDraftStatus((prev) => ({ ...prev, [draft.id]: "applying" }));
     try {
       const result = await applyStructuredDraft(projectRoot, chapterId, {
+        draftItemId: draft.id,
         draftKind: "relationship",
         sourceLabel: draft.sourceLabel,
         targetLabel: draft.targetLabel,
         relationshipType: draft.relationshipType,
         evidence: draft.evidence,
       });
-      setStructuredDraftStatus((prev) => ({ ...prev, [key]: "applied" }));
+      setStructuredDraftStatus((prev) => {
+        const next = { ...prev };
+        delete next[draft.id];
+        return next;
+      });
       setEditorNotice(
         result.action === "created"
           ? `关系已入库：${draft.sourceLabel} - ${draft.targetLabel}`
@@ -502,27 +649,33 @@ export function EditorPage() {
       );
       await refreshChapterContext(projectRoot, chapterId);
     } catch (err) {
-      setStructuredDraftStatus((prev) => ({ ...prev, [key]: "error" }));
+      setStructuredDraftStatus((prev) => ({ ...prev, [draft.id]: "error" }));
       setEditorNotice(err instanceof Error ? err.message : "关系草案入库失败");
     }
   }
 
   async function handleApplyInvolvementDraft(draft: {
+    id: string;
+    status: string;
     characterLabel: string;
     involvementType: string;
     evidence: string;
   }) {
     if (!projectRoot || !chapterId) return;
-    const key = getStructuredDraftKey("involvement", draft.characterLabel);
-    setStructuredDraftStatus((prev) => ({ ...prev, [key]: "applying" }));
+    setStructuredDraftStatus((prev) => ({ ...prev, [draft.id]: "applying" }));
     try {
       const result = await applyStructuredDraft(projectRoot, chapterId, {
+        draftItemId: draft.id,
         draftKind: "involvement",
         sourceLabel: draft.characterLabel,
         involvementType: draft.involvementType,
         evidence: draft.evidence,
       });
-      setStructuredDraftStatus((prev) => ({ ...prev, [key]: "applied" }));
+      setStructuredDraftStatus((prev) => {
+        const next = { ...prev };
+        delete next[draft.id];
+        return next;
+      });
       setEditorNotice(
         result.action === "created"
           ? `戏份已入库：${draft.characterLabel}`
@@ -530,27 +683,33 @@ export function EditorPage() {
       );
       await refreshChapterContext(projectRoot, chapterId);
     } catch (err) {
-      setStructuredDraftStatus((prev) => ({ ...prev, [key]: "error" }));
+      setStructuredDraftStatus((prev) => ({ ...prev, [draft.id]: "error" }));
       setEditorNotice(err instanceof Error ? err.message : "戏份草案入库失败");
     }
   }
 
   async function handleApplySceneDraft(draft: {
+    id: string;
+    status: string;
     sceneLabel: string;
     sceneType: string;
     evidence: string;
   }) {
     if (!projectRoot || !chapterId) return;
-    const key = getStructuredDraftKey("scene", draft.sceneLabel);
-    setStructuredDraftStatus((prev) => ({ ...prev, [key]: "applying" }));
+    setStructuredDraftStatus((prev) => ({ ...prev, [draft.id]: "applying" }));
     try {
       const result = await applyStructuredDraft(projectRoot, chapterId, {
+        draftItemId: draft.id,
         draftKind: "scene",
         sourceLabel: draft.sceneLabel,
         sceneType: draft.sceneType,
         evidence: draft.evidence,
       });
-      setStructuredDraftStatus((prev) => ({ ...prev, [key]: "applied" }));
+      setStructuredDraftStatus((prev) => {
+        const next = { ...prev };
+        delete next[draft.id];
+        return next;
+      });
       setEditorNotice(
         result.action === "created"
           ? `场景已入库：${draft.sceneLabel}`
@@ -558,7 +717,7 @@ export function EditorPage() {
       );
       await refreshChapterContext(projectRoot, chapterId);
     } catch (err) {
-      setStructuredDraftStatus((prev) => ({ ...prev, [key]: "error" }));
+      setStructuredDraftStatus((prev) => ({ ...prev, [draft.id]: "error" }));
       setEditorNotice(err instanceof Error ? err.message : "场景草案入库失败");
     }
   }
@@ -958,10 +1117,9 @@ export function EditorPage() {
                     <p className="text-xs text-surface-500">未发现关系草案</p>
                   ) : (
                     context.relationshipDrafts.slice(0, 4).map((draft) => {
-                      const key = getStructuredDraftKey("relationship", draft.sourceLabel, draft.targetLabel);
-                      const status = structuredDraftStatus[key] ?? "idle";
+                      const status = getStructuredDraftDisplayStatus(draft.id, draft.status);
                       return (
-                        <div key={key} className="p-2 bg-surface-700/50 rounded-lg">
+                        <div key={draft.id} className="p-2 bg-surface-700/50 rounded-lg">
                           <div className="flex items-center justify-between gap-2">
                             <span className="text-sm text-surface-200">
                               {draft.sourceLabel} ↔ {draft.targetLabel}
@@ -974,7 +1132,7 @@ export function EditorPage() {
                           <p className="text-xs text-surface-400 mt-1">{draft.evidence}</p>
                           <button
                             onClick={() => void handleApplyRelationshipDraft(draft)}
-                            disabled={status === "applying"}
+                            disabled={status === "applying" || status === "applied" || status === "rejected"}
                             className="mt-2 px-2 py-1 text-[11px] bg-surface-800 text-surface-200 border border-surface-600 rounded hover:bg-surface-700 disabled:opacity-40 transition-colors"
                           >
                             确认入库
@@ -991,10 +1149,9 @@ export function EditorPage() {
                     <p className="text-xs text-surface-500">未发现戏份草案</p>
                   ) : (
                     context.involvementDrafts.slice(0, 4).map((draft) => {
-                      const key = getStructuredDraftKey("involvement", draft.characterLabel);
-                      const status = structuredDraftStatus[key] ?? "idle";
+                      const status = getStructuredDraftDisplayStatus(draft.id, draft.status);
                       return (
-                        <div key={key} className="p-2 bg-surface-700/50 rounded-lg">
+                        <div key={draft.id} className="p-2 bg-surface-700/50 rounded-lg">
                           <div className="flex items-center justify-between gap-2">
                             <span className="text-sm text-surface-200">{draft.characterLabel}</span>
                             <span className="text-[11px] text-surface-500">
@@ -1007,7 +1164,7 @@ export function EditorPage() {
                           <p className="text-xs text-surface-400 mt-1">{draft.evidence}</p>
                           <button
                             onClick={() => void handleApplyInvolvementDraft(draft)}
-                            disabled={status === "applying"}
+                            disabled={status === "applying" || status === "applied" || status === "rejected"}
                             className="mt-2 px-2 py-1 text-[11px] bg-surface-800 text-surface-200 border border-surface-600 rounded hover:bg-surface-700 disabled:opacity-40 transition-colors"
                           >
                             确认入库
@@ -1024,10 +1181,9 @@ export function EditorPage() {
                     <p className="text-xs text-surface-500">未发现场景草案</p>
                   ) : (
                     context.sceneDrafts.slice(0, 4).map((draft) => {
-                      const key = getStructuredDraftKey("scene", draft.sceneLabel);
-                      const status = structuredDraftStatus[key] ?? "idle";
+                      const status = getStructuredDraftDisplayStatus(draft.id, draft.status);
                       return (
-                        <div key={key} className="p-2 bg-surface-700/50 rounded-lg">
+                        <div key={draft.id} className="p-2 bg-surface-700/50 rounded-lg">
                           <div className="flex items-center justify-between gap-2">
                             <span className="text-sm text-surface-200">{draft.sceneLabel}</span>
                             <span className="text-[11px] text-surface-500">
@@ -1038,7 +1194,7 @@ export function EditorPage() {
                           <p className="text-xs text-surface-400 mt-1">{draft.evidence}</p>
                           <button
                             onClick={() => void handleApplySceneDraft(draft)}
-                            disabled={status === "applying"}
+                            disabled={status === "applying" || status === "applied" || status === "rejected"}
                             className="mt-2 px-2 py-1 text-[11px] bg-surface-800 text-surface-200 border border-surface-600 rounded hover:bg-surface-700 disabled:opacity-40 transition-colors"
                           >
                             确认入库
