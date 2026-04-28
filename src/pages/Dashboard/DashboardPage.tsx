@@ -66,7 +66,7 @@ export function DashboardPage() {
         <div className="grid grid-cols-3 gap-4 mt-4 text-sm">
           <div>
             <span className="text-surface-400">已完成章节</span>
-            <p className="text-success font-semibold">{stats?.completedChapterCount ?? 0}</p>
+            <p className="text-success font-semibold">{stats?.completedChapterCount ?? stats?.chapterCount ?? 0}</p>
           </div>
           <div>
             <span className="text-surface-400">未解决问题</span>

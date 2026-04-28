@@ -111,7 +111,7 @@ export function CharactersPage() {
   }
 
   async function handleCreateFromAi() {
-    if (!aiResult) return;
+    if (!projectRoot || !aiResult) return;
     try {
       const json = JSON.parse(aiResult);
       await createCharacter({

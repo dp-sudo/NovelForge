@@ -71,6 +71,43 @@ const STRUCTURED_DRAFT_STATUS_LABEL: Record<"pending" | "applying" | "applied" |
   error: "失败"
 };
 
+const PIPELINE_PHASE_LABEL: Record<string, string> = {
+  validate: "参数校验",
+  context: "上下文聚合",
+  route: "任务路由",
+  prompt: "提示词构建",
+  generate: "模型生成",
+  postprocess: "结果整理",
+  persist: "结果落库",
+  done: "完成",
+  run: "任务启动"
+};
+
+const PIPELINE_SUGGESTION_BY_ERROR_CODE: Record<string, string> = {
+  PIPELINE_SELECTED_TEXT_REQUIRED: "先在正文中选中一段文本，再重试该任务。",
+  PIPELINE_USER_INSTRUCTION_REQUIRED: "先输入任务描述，再重新执行。",
+  PIPELINE_CHAPTER_ID_REQUIRED: "先选择目标章节，再执行该任务。",
+  PIPELINE_CHAPTER_CONTENT_REQUIRED: "先保存或填写章节内容，再执行一致性扫描。",
+  TASK_ROUTE_NOT_FOUND: "前往 设置 > 任务路由，为该任务配置 Provider 和模型 ID。",
+  MODEL_NOT_CONFIGURED: "前往 设置 > 模型配置，补齐该 Provider 的默认模型。",
+  PROVIDER_NOT_FOUND: "前往 设置 > 模型配置，确认 Provider 已创建且可用。",
+  LLM_ADAPTER_NOT_FOUND: "前往 设置 > 模型配置，先测试并重新加载该 Provider。",
+  LLM_NO_PROVIDER: "前往 设置 > 任务路由或模型配置，补齐可用模型后重试。",
+  PIPELINE_EVENT_TIMEOUT: "模型响应超时，请检查网络/API Key 或切换模型后重试。",
+  PIPELINE_CANCELLED: "任务已取消，可重新发起。"
+};
+
+const PIPELINE_SUGGESTION_BY_PHASE: Record<string, string> = {
+  validate: "检查输入参数（章节、选区、任务描述）后重试。",
+  context: "检查项目目录和章节数据是否可读，必要时重开项目。",
+  route: "检查任务路由的 Provider 与模型 ID 是否已配置。",
+  prompt: "检查技能模板或提示词参数是否完整。",
+  generate: "检查 API Key、模型可用性与网络状态，必要时切换模型。",
+  postprocess: "模型返回格式异常，请重试；若持续失败可更换模型。",
+  persist: "检查项目目录写权限和数据库状态后重试。",
+  run: "检查控制台日志，确认后端命令是否执行成功。"
+};
+
 export function EditorPage() {
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const selRef = useRef<{ start: number; end: number }>({ start: 0, end: 0 });
@@ -165,11 +202,12 @@ export function EditorPage() {
       setStructuredDraftStatus({});
       return;
     }
-    const cid = chapterId;
+    const cid: string = chapterId;
+    const root: string = projectRoot;
     let cancelled = false;
     async function loadChapterRuntimeData() {
       try {
-        const result = await recoverDraft(cid, projectRoot);
+        const result = await recoverDraft(cid, root);
         if (!cancelled && result.hasNewerDraft && result.draftContent) {
           setRecoveryContent(result.draftContent);
           setShowRecovery(true);
@@ -180,7 +218,7 @@ export function EditorPage() {
         }
       }
       if (!cancelled) {
-        await refreshChapterContext(projectRoot, cid);
+        await refreshChapterContext(root, cid);
       }
     }
     void loadChapterRuntimeData();
@@ -254,10 +292,24 @@ export function EditorPage() {
     phase?: string;
     errorCode?: string;
     message?: string;
+    recoverable?: boolean;
   }) => {
+    const suggestion = (() => {
+      if (event.errorCode && PIPELINE_SUGGESTION_BY_ERROR_CODE[event.errorCode]) {
+        return PIPELINE_SUGGESTION_BY_ERROR_CODE[event.errorCode];
+      }
+      if (event.phase && PIPELINE_SUGGESTION_BY_PHASE[event.phase]) {
+        return PIPELINE_SUGGESTION_BY_PHASE[event.phase];
+      }
+      if (event.recoverable === false) {
+        return "建议查看控制台日志，并在确认模型/路由配置后再重试。";
+      }
+      return "请检查控制台日志与模型配置后重试。";
+    })();
+
     const parts: string[] = [];
     if (event.phase) {
-      parts.push(`阶段: ${event.phase}`);
+      parts.push(`阶段: ${PIPELINE_PHASE_LABEL[event.phase] ?? event.phase}`);
     }
     if (event.errorCode) {
       parts.push(`错误码: ${event.errorCode}`);
@@ -265,6 +317,7 @@ export function EditorPage() {
     if (event.message) {
       parts.push(event.message);
     }
+    parts.push(`建议: ${suggestion}`);
     return parts.join(" | ") || "AI 生成异常，请检查控制台日志";
   }, []);
 

@@ -8,6 +8,7 @@ import { Modal } from "../../components/dialogs/Modal.js";
 import { ConfirmDialog } from "../../components/dialogs/ConfirmDialog.js";
 import { listWorldRules, createWorldRule, deleteWorldRule, aiGenerateWorldRule, type WorldRow } from "../../api/worldApi.js";
 import { useProjectStore } from "../../stores/projectStore.js";
+import type { WorldRuleInput } from "../../domain/types.js";
 
 const CATEGORIES = [
   { value: "世界规则", label: "世界规则" },
@@ -55,6 +56,24 @@ function normalizeConstraintLevel(value: unknown): "weak" | "normal" | "strong" 
   if (["strong", "high", "严格", "强"].some((x) => raw.includes(x))) return "strong";
   if (["absolute", "must", "forbid", "绝对", "不可"].some((x) => raw.includes(x))) return "absolute";
   return "normal";
+}
+
+function normalizeWorldCategory(value: unknown): WorldRuleInput["category"] {
+  const text = pickText(value);
+  if (!text) {
+    return "世界规则";
+  }
+  const matched = CATEGORIES.find((item) => item.value === text);
+  if (matched) {
+    return matched.value as WorldRuleInput["category"];
+  }
+  if (text.includes("地点")) return "地点";
+  if (text.includes("组织")) return "组织";
+  if (text.includes("道具")) return "道具";
+  if (text.includes("能力")) return "能力";
+  if (text.includes("历史")) return "历史事件";
+  if (text.includes("术语")) return "术语";
+  return "世界规则";
 }
 
 export function WorldPage() {
@@ -110,7 +129,7 @@ export function WorldPage() {
         ? (parsed.worldRule as Record<string, unknown>)
         : parsed;
       const title = pickText(candidate.title) ?? pickText(candidate.name) ?? "未命名设定";
-      const category = pickText(candidate.category) ?? pickText(candidate.type) ?? "世界规则";
+      const category = normalizeWorldCategory(candidate.category ?? candidate.type);
       const description = pickText(candidate.description) ?? pickText(candidate.summary) ?? "（AI 未返回描述）";
       const examplesSource = candidate.examples;
       const examples = typeof examplesSource === "string"

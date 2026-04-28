@@ -70,7 +70,13 @@ export function SkillsManager() {
     const file = e.target.files?.[0];
     if (!file) return;
     try {
-      const imported = await importSkillFile(file.path);
+      const filePath = (file as File & { path?: string }).path;
+      if (!filePath) {
+        setError("当前环境无法读取文件路径，请在桌面端导入技能文件。");
+        e.target.value = "";
+        return;
+      }
+      const imported = await importSkillFile(filePath);
       setError(null);
       await load();
       setSelectedId(imported.id);

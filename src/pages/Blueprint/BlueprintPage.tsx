@@ -7,11 +7,11 @@ import { Textarea } from "../../components/forms/Textarea.js";
 import { Select } from "../../components/forms/Select.js";
 import { listBlueprintSteps, saveBlueprintStep, markBlueprintCompleted, resetBlueprintStep, generateBlueprintSuggestion } from "../../api/blueprintApi.js";
 import { useProjectStore } from "../../stores/projectStore.js";
-import { BLUEPRINT_DEFAULTS, parseBlueprintContent, serializeBlueprintContent } from "../../domain/types.js";
-import type { BlueprintStepData } from "../../domain/types.js";
+import { parseBlueprintContent, serializeBlueprintContent } from "../../domain/types.js";
+import type { BlueprintStepKey } from "../../domain/constants.js";
 
 interface StepDef {
-  key: string;
+  key: BlueprintStepKey;
   label: string;
   desc: string;
 }
@@ -273,7 +273,7 @@ function ChaptersForm({ data, onChange }: { data: Record<string, string>; onChan
 
 // ── Form dispatcher ──
 
-function StepForm({ stepKey, data, onChange }: { stepKey: string; data: Record<string, string>; onChange: (d: Record<string, string>) => void }) {
+function StepForm({ stepKey, data, onChange }: { stepKey: BlueprintStepKey; data: Record<string, string>; onChange: (d: Record<string, string>) => void }) {
   switch (stepKey) {
     case "step-01-anchor": return <AnchorForm data={data} onChange={onChange} />;
     case "step-02-genre": return <GenreForm data={data} onChange={onChange} />;
@@ -325,7 +325,7 @@ export function BlueprintPage() {
   // Populate formData when active step changes or steps load
   useEffect(() => {
     const content = steps[activeIdx]?.content ?? "";
-    setFormData(parseBlueprintContent(cur.key, content) as Record<string, string>);
+    setFormData(parseBlueprintContent(cur.key, content));
     setAiResult(null);
   }, [steps, activeIdx, cur.key]);
 
@@ -368,8 +368,7 @@ export function BlueprintPage() {
   async function handleReset() {
     if (!projectRoot) return;
     await resetBlueprintStep(cur.key, projectRoot);
-    const defaults = BLUEPRINT_DEFAULTS[cur.key];
-    setFormData(defaults ? { ...(defaults as Record<string, string>) } : {});
+    setFormData(parseBlueprintContent(cur.key, ""));
     setAiResult(null);
     await load();
   }
@@ -397,10 +396,10 @@ export function BlueprintPage() {
 
   function handleApplyAiResult() {
     if (!aiResult) return;
+    const defaults = parseBlueprintContent(cur.key, "");
     // Try to parse AI result as JSON and merge into form fields
     try {
       const parsed = JSON.parse(aiResult);
-      const defaults = BLUEPRINT_DEFAULTS[cur.key] as Record<string, string>;
       if (typeof parsed === "object" && parsed !== null) {
         const merged = { ...defaults };
         for (const key of Object.keys(defaults)) {
@@ -414,7 +413,6 @@ export function BlueprintPage() {
       }
     } catch { /* not JSON, fall through to full-text replace */ }
     // Fallback: paste AI result into the first field
-    const defaults = BLUEPRINT_DEFAULTS[cur.key] as Record<string, string>;
     const firstKey = Object.keys(defaults)[0];
     setFormData((prev) => ({ ...prev, [firstKey]: aiResult }));
     setAiResult(null);

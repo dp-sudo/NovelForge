@@ -238,6 +238,7 @@ impl AiPipelineService {
         canonical_task: &str,
         input: &RunAiTaskPipelineInput,
     ) -> Result<PipelineSuccess, StageError> {
+        self.touch_pipeline_phase(&input.project_root, request_id, PHASE_VALIDATE);
         self.emit_event(
             app_handle,
             AiPipelineEvent {
@@ -261,6 +262,7 @@ impl AiPipelineService {
             error: err,
         })?;
 
+        self.touch_pipeline_phase(&input.project_root, request_id, PHASE_CONTEXT);
         self.emit_event(
             app_handle,
             AiPipelineEvent {
@@ -295,6 +297,7 @@ impl AiPipelineService {
             error: err,
         })?;
 
+        self.touch_pipeline_phase(&input.project_root, request_id, PHASE_ROUTE);
         self.emit_event(
             app_handle,
             AiPipelineEvent {
@@ -334,6 +337,7 @@ impl AiPipelineService {
             error: err,
         })?;
 
+        self.touch_pipeline_phase(&input.project_root, request_id, PHASE_PROMPT);
         self.emit_event(
             app_handle,
             AiPipelineEvent {
@@ -358,6 +362,7 @@ impl AiPipelineService {
             error: err,
         })?;
 
+        self.touch_pipeline_phase(&input.project_root, request_id, PHASE_GENERATE);
         self.emit_event(
             app_handle,
             AiPipelineEvent {
@@ -389,7 +394,7 @@ impl AiPipelineService {
             ..Default::default()
         };
         let mut rx = ai_service
-            .stream_generate(req, None)
+            .stream_generate_for_pipeline(req, None)
             .await
             .map_err(|err| StageError {
                 phase: PHASE_GENERATE,
@@ -403,6 +408,14 @@ impl AiPipelineService {
                 error: err,
             })?;
             if let Some(err_msg) = chunk.error {
+                if let Some((error_code, message)) =
+                    AiService::decode_pipeline_stream_error(&err_msg)
+                {
+                    return Err(StageError {
+                        phase: PHASE_GENERATE,
+                        error: AppErrorDto::new(&error_code, &message, true),
+                    });
+                }
                 return Err(StageError {
                     phase: PHASE_GENERATE,
                     error: AppErrorDto::new("PIPELINE_GENERATE_FAILED", &err_msg, true),
@@ -426,6 +439,7 @@ impl AiPipelineService {
             }
         }
 
+        self.touch_pipeline_phase(&input.project_root, request_id, PHASE_POSTPROCESS);
         self.emit_event(
             app_handle,
             AiPipelineEvent {
@@ -446,6 +460,7 @@ impl AiPipelineService {
                 error: err,
             })?;
 
+        self.touch_pipeline_phase(&input.project_root, request_id, PHASE_PERSIST);
         self.emit_event(
             app_handle,
             AiPipelineEvent {
@@ -754,6 +769,20 @@ impl AiPipelineService {
         );
     }
 
+    fn touch_pipeline_phase(&self, project_root: &str, request_id: &str, phase: &str) {
+        let conn = match open_database(Path::new(project_root)) {
+            Ok(conn) => conn,
+            Err(_) => return,
+        };
+        let _ = conn.execute(
+            "UPDATE ai_pipeline_runs
+             SET phase = ?1
+             WHERE id = ?2
+               AND status = 'running'",
+            params![phase, request_id],
+        );
+    }
+
     fn emit_event(&self, app_handle: &tauri::AppHandle, event: AiPipelineEvent) {
         let _ = app_handle.emit(PIPELINE_EVENT_NAME, event);
     }
@@ -801,7 +830,26 @@ impl AiPipelineService {
 
 #[cfg(test)]
 mod tests {
-    use super::{AiPipelineService, RunAiTaskPipelineInput};
+    use std::fs;
+    use std::path::PathBuf;
+
+    use rusqlite::params;
+    use uuid::Uuid;
+
+    use super::{AiPipelineService, RunAiTaskPipelineInput, PHASE_ROUTE};
+    use crate::infra::database::open_database;
+    use crate::services::project_service::{CreateProjectInput, ProjectService};
+
+    fn create_temp_workspace() -> PathBuf {
+        let workspace =
+            std::env::temp_dir().join(format!("novelforge-rust-tests-{}", Uuid::new_v4()));
+        fs::create_dir_all(&workspace).expect("create temp workspace");
+        workspace
+    }
+
+    fn remove_temp_workspace(path: &PathBuf) {
+        let _ = fs::remove_dir_all(path);
+    }
 
     fn base_input(task_type: &str) -> RunAiTaskPipelineInput {
         RunAiTaskPipelineInput {
@@ -846,5 +894,45 @@ mod tests {
             .normalize_output("```json\n{\"a\":1}\n```")
             .expect("normalized");
         assert_eq!(output, "{\"a\":1}");
+    }
+
+    #[test]
+    fn touch_pipeline_phase_updates_audit_phase() {
+        let workspace = create_temp_workspace();
+        let project_service = ProjectService;
+        let project = project_service
+            .create_project(CreateProjectInput {
+                name: "pipeline-audit-phase-test".to_string(),
+                author: None,
+                genre: "测试".to_string(),
+                target_words: None,
+                save_directory: workspace.to_string_lossy().to_string(),
+            })
+            .expect("project created");
+
+        let service = AiPipelineService::default();
+        let request_id = Uuid::new_v4().to_string();
+        service
+            .insert_pipeline_run(
+                &project.project_root,
+                &request_id,
+                None,
+                "chapter.draft",
+                Some("editor.ai.chapter.draft"),
+            )
+            .expect("insert run");
+        service.touch_pipeline_phase(&project.project_root, &request_id, PHASE_ROUTE);
+
+        let conn = open_database(std::path::Path::new(&project.project_root)).expect("open db");
+        let phase: String = conn
+            .query_row(
+                "SELECT phase FROM ai_pipeline_runs WHERE id = ?1",
+                params![request_id],
+                |row| row.get(0),
+            )
+            .expect("query phase");
+        assert_eq!(phase, PHASE_ROUTE);
+
+        remove_temp_workspace(&workspace);
     }
 }

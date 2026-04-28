@@ -15,6 +15,8 @@ use crate::infra::{app_database, credential_manager};
 use crate::services::skill_registry::{SkillRegistry, SkillTaskRouteOverride};
 use crate::services::task_routing;
 
+const PIPELINE_STREAM_ERROR_PREFIX: &str = "__NF_PIPELINE_ERROR__:";
+
 #[derive(Clone)]
 pub struct AiService {
     adapters: Arc<RwLock<HashMap<String, Box<dyn LlmService>>>>,
@@ -355,6 +357,23 @@ impl AiService {
         })
     }
 
+    fn encode_pipeline_stream_error(error: &AppErrorDto) -> String {
+        format!(
+            "{}{}::{}",
+            PIPELINE_STREAM_ERROR_PREFIX, error.code, error.message
+        )
+    }
+
+    pub(crate) fn decode_pipeline_stream_error(raw: &str) -> Option<(String, String)> {
+        let encoded = raw.strip_prefix(PIPELINE_STREAM_ERROR_PREFIX)?;
+        let (code, message) = encoded.split_once("::")?;
+        let code = code.trim();
+        if code.is_empty() {
+            return None;
+        }
+        Some((code.to_string(), message.to_string()))
+    }
+
     /// Start streaming generation with task routing.
     /// Returns an mpsc receiver that yields StreamChunks.
     /// Optionally accepts a SkillRegistry for skill taskRoute override support.
@@ -362,6 +381,24 @@ impl AiService {
         &self,
         req: UnifiedGenerateRequest,
         skill_registry: Option<&SkillRegistry>,
+    ) -> Result<mpsc::Receiver<StreamChunk>, AppErrorDto> {
+        self.stream_generate_inner(req, skill_registry, false).await
+    }
+
+    /// Start streaming generation with diagnostic error envelope for pipeline consumers.
+    pub async fn stream_generate_for_pipeline(
+        &self,
+        req: UnifiedGenerateRequest,
+        skill_registry: Option<&SkillRegistry>,
+    ) -> Result<mpsc::Receiver<StreamChunk>, AppErrorDto> {
+        self.stream_generate_inner(req, skill_registry, true).await
+    }
+
+    async fn stream_generate_inner(
+        &self,
+        req: UnifiedGenerateRequest,
+        skill_registry: Option<&SkillRegistry>,
+        with_pipeline_error_envelope: bool,
     ) -> Result<mpsc::Receiver<StreamChunk>, AppErrorDto> {
         let (provider_id, model, route) = match skill_registry {
             Some(reg) => Self::resolve_with_skill_override(&req, reg)?,
@@ -373,20 +410,20 @@ impl AiService {
         let service = self.clone();
 
         tokio::spawn(async move {
-            let mut last_error_msg: Option<String> = None;
+            let mut last_error: Option<AppErrorDto> = None;
 
             for (attempt_provider, attempt_model_hint) in attempts {
                 let resolved_model =
                     match Self::resolve_request_model(&attempt_provider, &attempt_model_hint) {
                         Ok(model_id) => model_id,
                         Err(e) => {
-                            last_error_msg = Some(e.message);
+                            last_error = Some(e);
                             continue;
                         }
                     };
 
                 if let Err(e) = service.ensure_provider_registered(&attempt_provider).await {
-                    last_error_msg = Some(e.message);
+                    last_error = Some(e);
                     continue;
                 }
 
@@ -398,24 +435,34 @@ impl AiService {
                     match adapter.stream_text(attempt_req, tx.clone()).await {
                         Ok(()) => return,
                         Err(e) => {
-                            last_error_msg = Some(e.user_message());
+                            last_error = Some(AppErrorDto::from(e));
                             continue;
                         }
                     }
                 } else {
-                    last_error_msg = Some(format!("Provider '{}' 未注册", attempt_provider));
+                    last_error = Some(AppErrorDto::new(
+                        "LLM_ADAPTER_NOT_FOUND",
+                        &format!("Provider '{}' 未注册", attempt_provider),
+                        true,
+                    ));
                     continue;
                 }
             }
 
+            let terminal_error = last_error.unwrap_or_else(|| {
+                AppErrorDto::new("LLM_GENERATE_FAILED", "All providers failed", false)
+            });
+            let error_text = if with_pipeline_error_envelope {
+                Self::encode_pipeline_stream_error(&terminal_error)
+            } else {
+                terminal_error.message.clone()
+            };
             let _ = tx
                 .send(StreamChunk {
                     content: String::new(),
                     finish_reason: None,
                     request_id: String::new(),
-                    error: Some(
-                        last_error_msg.unwrap_or_else(|| "All providers failed".to_string()),
-                    ),
+                    error: Some(error_text),
                     reasoning: None,
                 })
                 .await;
@@ -509,4 +556,27 @@ pub struct GeneratePreviewInput {
     pub user_instruction: String,
     pub chapter_id: Option<String>,
     pub selected_text: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AiService;
+    use crate::errors::AppErrorDto;
+
+    #[test]
+    fn pipeline_stream_error_roundtrip() {
+        let encoded = AiService::encode_pipeline_stream_error(&AppErrorDto::new(
+            "TASK_ROUTE_NOT_FOUND",
+            "route missing",
+            true,
+        ));
+        let parsed = AiService::decode_pipeline_stream_error(&encoded).expect("decode");
+        assert_eq!(parsed.0, "TASK_ROUTE_NOT_FOUND");
+        assert_eq!(parsed.1, "route missing");
+    }
+
+    #[test]
+    fn decode_pipeline_stream_error_rejects_plain_message() {
+        assert!(AiService::decode_pipeline_stream_error("just message").is_none());
+    }
 }
