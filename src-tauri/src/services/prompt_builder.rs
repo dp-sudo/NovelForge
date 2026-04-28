@@ -415,4 +415,193 @@ impl PromptBuilder {
 
         parts.join("\n")
     }
+
+    /// Build a chapter plan prompt. Returns JSON-oriented output.
+    pub fn build_chapter_plan(
+        context: &CollectedContext,
+        user_instruction: &str,
+    ) -> String {
+        let global = &context.global_context;
+        let related = &context.related_context;
+
+        let mut parts = vec![];
+        parts.push("# 角色".to_string());
+        parts.push("你是长篇小说剧情规划师，擅长将创作蓝图拆解为可执行的章节计划。".to_string());
+        parts.push(String::new());
+
+        parts.push("# 任务".to_string());
+        parts.push("为当前章节生成可执行的章节计划。".to_string());
+        parts.push(String::new());
+
+        parts.push("# 项目上下文".to_string());
+        parts.push(format!("作品名称：{}", global.project_name));
+        parts.push(format!("题材：{}", global.genre));
+        if let Some(ref pov) = global.narrative_pov {
+            parts.push(format!("叙事视角：{}", pov));
+        }
+        parts.push(String::new());
+
+        if let Some(ref ch) = related.chapter {
+            parts.push("# 当前章节".to_string());
+            parts.push(format!("标题：{}", ch.title));
+            if !ch.summary.is_empty() {
+                parts.push(format!("摘要：{}", ch.summary));
+            }
+            parts.push(String::new());
+        }
+
+        if !related.plot_nodes.is_empty() {
+            parts.push("# 关联主线节点".to_string());
+            for node in &related.plot_nodes {
+                parts.push(format!("- {}（{}）", node.title, node.node_type));
+            }
+            parts.push(String::new());
+        }
+
+        if !related.characters.is_empty() {
+            parts.push("# 出场角色".to_string());
+            for ch in &related.characters {
+                parts.push(format!("- {}（{}）", ch.name, ch.role_type));
+            }
+            parts.push(String::new());
+        }
+
+        if !user_instruction.is_empty() {
+            parts.push("# 用户要求".to_string());
+            parts.push(user_instruction.to_string());
+            parts.push(String::new());
+        }
+
+        parts.push("# 约束".to_string());
+        parts.push("1. 章节计划必须服务于主线推进。".to_string());
+        parts.push("2. 场景节拍应符合叙事节奏。".to_string());
+        parts.push("3. 伏笔应自然嵌入场景描述中。".to_string());
+        parts.push(String::new());
+
+        parts.push(r#"# 输出 JSON
+{
+  "title": "章节标题",
+  "summary": "章节摘要",
+  "sceneBeats": ["场景节拍1", "场景节拍2"],
+  "conflict": "本章核心冲突",
+  "characterProgress": "角色推进",
+  "foreshadowing": ["可埋伏笔"],
+  "risks": ["潜在风险"]
+}"#.to_string());
+
+        parts.join("\n")
+    }
+
+    /// Build a world rule creation prompt.
+    pub fn build_world_create_rule(
+        context: &CollectedContext,
+        user_instruction: &str,
+    ) -> String {
+        let global = &context.global_context;
+
+        let mut parts = vec![];
+        parts.push("# 角色".to_string());
+        parts.push("你是世界设定专家，擅长构建自洽且富有想象力的虚构世界体系。".to_string());
+        parts.push(String::new());
+
+        parts.push("# 任务".to_string());
+        parts.push("根据用户需求生成一条世界设定。".to_string());
+        parts.push(String::new());
+
+        parts.push("# 项目上下文".to_string());
+        parts.push(format!("作品名称：{}", global.project_name));
+        parts.push(format!("题材：{}", global.genre));
+        parts.push(String::new());
+
+        // Include existing completed blueprint steps for context
+        for step in &global.blueprint_summary {
+            if step.status == "completed" {
+                if let Some(ref content) = step.content {
+                    let preview: String = content.chars().take(150).collect();
+                    parts.push(format!("[已有设定] {}: {}", step.title, preview));
+                }
+            }
+        }
+        parts.push(String::new());
+
+        if !user_instruction.is_empty() {
+            parts.push("# 用户需求".to_string());
+            parts.push(user_instruction.to_string());
+            parts.push(String::new());
+        }
+
+        parts.push("# 约束".to_string());
+        parts.push("1. 新设定必须与现有设定一致，不得冲突。".to_string());
+        parts.push("2. 设定应有明确的约束等级。".to_string());
+        parts.push("3. 设定应具体、可操作、可检查。".to_string());
+        parts.push(String::new());
+
+        parts.push(r#"# 输出 JSON
+{
+  "title": "设定标题",
+  "category": "世界规则|地点|组织|道具|能力|历史事件|术语",
+  "description": "详细描述",
+  "constraintLevel": "weak|normal|strong|absolute",
+  "examples": "示例",
+  "contradictionPolicy": "冲突处理策略"
+}"#.to_string());
+
+        parts.join("\n")
+    }
+
+    /// Build a plot node creation prompt.
+    pub fn build_plot_create_node(
+        context: &CollectedContext,
+        user_instruction: &str,
+    ) -> String {
+        let global = &context.global_context;
+
+        let mut parts = vec![];
+        parts.push("# 角色".to_string());
+        parts.push("你是剧情策划师，擅长设计有张力的故事节点和冲突。".to_string());
+        parts.push(String::new());
+
+        parts.push("# 任务".to_string());
+        parts.push("根据用户需求生成一个剧情节点。".to_string());
+        parts.push(String::new());
+
+        parts.push("# 项目上下文".to_string());
+        parts.push(format!("作品名称：{}", global.project_name));
+        parts.push(format!("题材：{}", global.genre));
+        parts.push(String::new());
+
+        for step in &global.blueprint_summary {
+            if step.status == "completed" {
+                if let Some(ref content) = step.content {
+                    let preview: String = content.chars().take(150).collect();
+                    parts.push(format!("[已有设定] {}: {}", step.title, preview));
+                }
+            }
+        }
+        parts.push(String::new());
+
+        if !user_instruction.is_empty() {
+            parts.push("# 用户需求".to_string());
+            parts.push(user_instruction.to_string());
+            parts.push(String::new());
+        }
+
+        parts.push("# 约束".to_string());
+        parts.push("1. 新节点必须符合整体主线走向。".to_string());
+        parts.push("2. 节点应有明确的冲突和目标。".to_string());
+        parts.push("3. 节点顺序应符合叙事节奏。".to_string());
+        parts.push(String::new());
+
+        parts.push(r#"# 输出 JSON
+{
+  "title": "节点标题",
+  "nodeType": "开端|转折|冲突|失败|胜利|高潮|结局|支线",
+  "goal": "剧情目标",
+  "conflict": "核心冲突",
+  "emotionalCurve": "情绪曲线",
+  "order": 1
+}"#.to_string());
+
+        parts.join("\n")
+    }
 }

@@ -6,7 +6,7 @@ import { Select } from "../../components/forms/Select.js";
 import { Textarea } from "../../components/forms/Textarea.js";
 import { Modal } from "../../components/dialogs/Modal.js";
 import { ConfirmDialog } from "../../components/dialogs/ConfirmDialog.js";
-import { listWorldRules, createWorldRule, deleteWorldRule, type WorldRow } from "../../api/worldApi.js";
+import { listWorldRules, createWorldRule, deleteWorldRule, aiGenerateWorldRule, type WorldRow } from "../../api/worldApi.js";
 import { useProjectStore } from "../../stores/projectStore.js";
 
 const CATEGORIES = [
@@ -35,6 +35,10 @@ export function WorldPage() {
   const [showNew, setShowNew] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
   const [form, setForm] = useState(emptyForm);
+  const [aiDescription, setAiDescription] = useState("");
+  const [aiResult, setAiResult] = useState<string | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [showAiCreate, setShowAiCreate] = useState(false);
   const projectRoot = useProjectStore((s) => s.currentProjectPath);
 
   const load = useCallback(async () => {
@@ -73,7 +77,10 @@ export function WorldPage() {
     <div className="max-w-6xl mx-auto">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold text-surface-100">世界设定库</h1>
-        <Button variant="primary" size="sm" onClick={() => { setForm(emptyForm); setShowNew(true); }}>新建设定</Button>
+        <div className="flex gap-2">
+          <Button variant="ghost" size="sm" onClick={() => { setAiDescription(""); setAiResult(null); setShowAiCreate(true); }}>AI 生成</Button>
+          <Button variant="primary" size="sm" onClick={() => { setForm(emptyForm); setShowNew(true); }}>新建设定</Button>
+        </div>
       </div>
 
       <div className="flex gap-6">
@@ -166,6 +173,40 @@ export function WorldPage() {
         onConfirm={() => { if (selected && projectRoot) void deleteWorldRule(selected.id, projectRoot).then(() => load()); setShowDelete(false); setSelected(null); }}
         onCancel={() => setShowDelete(false)}
       />
+
+      <Modal open={showAiCreate} onClose={() => setShowAiCreate(false)} title="AI 生成世界设定" width="lg">
+        <div className="space-y-4">
+          <Textarea
+            label="描述你想要的设定"
+            value={aiDescription}
+            onChange={(e) => setAiDescription(e.target.value)}
+            placeholder="例如：一个以契约魔法为核心的修炼体系，魔法师通过签订契约获得力量"
+            className="min-h-[100px]"
+          />
+          <Button
+            variant="primary"
+            loading={aiLoading}
+            onClick={async () => {
+              if (!projectRoot) return;
+              setAiLoading(true);
+              try { setAiResult(await aiGenerateWorldRule(projectRoot, aiDescription)); }
+              catch { setAiResult("AI 生成失败。请检查 AI 供应商配置。"); }
+              finally { setAiLoading(false); }
+            }}
+            disabled={!aiDescription.trim()}
+          >
+            {aiLoading ? "生成中..." : "生成"}
+          </Button>
+          {aiResult && (
+            <div className="p-4 bg-primary/5 border border-primary/20 rounded-xl">
+              <pre className="text-sm text-surface-200 whitespace-pre-wrap font-sans leading-relaxed max-h-64 overflow-y-auto">{aiResult}</pre>
+              <div className="flex gap-2 mt-3">
+                <Button variant="primary" size="sm" onClick={() => { setAiResult(null); setShowAiCreate(false); }}>关闭</Button>
+              </div>
+            </div>
+          )}
+        </div>
+      </Modal>
     </div>
   );
 }

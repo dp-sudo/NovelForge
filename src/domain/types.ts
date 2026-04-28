@@ -167,3 +167,117 @@ export interface ExportOptions {
   separateByVolume?: boolean;
   includeWorldSettings?: boolean;
 }
+
+// ── Blueprint structured types (PRD §8.3) ──
+
+export interface BlueprintAnchorData {
+  coreInspiration: string;
+  coreProposition: string;
+  coreEmotion: string;
+  targetReader: string;
+  sellingPoint: string;
+  readerExpectation: string;
+}
+
+export interface BlueprintGenreData {
+  mainGenre: string;
+  subGenre: string;
+  narrativePov: string;
+  styleKeywords: string;
+  rhythmType: string;
+  bannedStyle: string;
+}
+
+export interface BlueprintPremiseData {
+  oneLineLogline: string;
+  threeParagraphSummary: string;
+  beginning: string;
+  middle: string;
+  climax: string;
+  ending: string;
+}
+
+export interface BlueprintCharactersData {
+  protagonist: string;
+  antagonist: string;
+  supportingCharacters: string;
+  relationshipSummary: string;
+  growthArc: string;
+}
+
+export interface BlueprintWorldData {
+  worldBackground: string;
+  rules: string;
+  locations: string;
+  organizations: string;
+  inviolableRules: string;
+}
+
+export interface BlueprintGlossaryData {
+  personNames: string;
+  placeNames: string;
+  organizationNames: string;
+  terms: string;
+  aliases: string;
+  bannedTerms: string;
+}
+
+export interface BlueprintPlotData {
+  mainGoal: string;
+  stages: string;
+  keyConflicts: string;
+  twists: string;
+  climax: string;
+  ending: string;
+}
+
+export interface BlueprintChaptersData {
+  volumeStructure: string;
+  chapterList: string;
+  chapterGoals: string;
+  characters: string;
+  plotNodes: string;
+}
+
+export type BlueprintStepData =
+  | BlueprintAnchorData
+  | BlueprintGenreData
+  | BlueprintPremiseData
+  | BlueprintCharactersData
+  | BlueprintWorldData
+  | BlueprintGlossaryData
+  | BlueprintPlotData
+  | BlueprintChaptersData;
+
+export const BLUEPRINT_DEFAULTS: Record<string, BlueprintStepData> = {
+  "step-01-anchor": { coreInspiration: "", coreProposition: "", coreEmotion: "", targetReader: "", sellingPoint: "", readerExpectation: "" },
+  "step-02-genre": { mainGenre: "", subGenre: "", narrativePov: "third_limited", styleKeywords: "", rhythmType: "", bannedStyle: "" },
+  "step-03-premise": { oneLineLogline: "", threeParagraphSummary: "", beginning: "", middle: "", climax: "", ending: "" },
+  "step-04-characters": { protagonist: "", antagonist: "", supportingCharacters: "", relationshipSummary: "", growthArc: "" },
+  "step-05-world": { worldBackground: "", rules: "", locations: "", organizations: "", inviolableRules: "" },
+  "step-06-glossary": { personNames: "", placeNames: "", organizationNames: "", terms: "", aliases: "", bannedTerms: "" },
+  "step-07-plot": { mainGoal: "", stages: "", keyConflicts: "", twists: "", climax: "", ending: "" },
+  "step-08-chapters": { volumeStructure: "", chapterList: "", chapterGoals: "", characters: "", plotNodes: "" },
+};
+
+export function parseBlueprintContent(stepKey: string, content: string): Record<string, string> {
+  const defaults = { ...BLUEPRINT_DEFAULTS[stepKey] } as Record<string, string>;
+  if (!content.trim()) return defaults;
+  try {
+    const parsed = JSON.parse(content);
+    if (typeof parsed !== "object" || parsed === null) return defaults;
+    const merged: Record<string, string> = { ...defaults };
+    for (const key of Object.keys(defaults)) {
+      if (typeof parsed[key] === "string") merged[key] = parsed[key];
+    }
+    return merged;
+  } catch {
+    // Not JSON — backward compat: put entire text into the first field
+    const firstKey = Object.keys(defaults)[0];
+    return { ...defaults, [firstKey]: content };
+  }
+}
+
+export function serializeBlueprintContent(data: Record<string, string>): string {
+  return JSON.stringify(data, null, 2);
+}

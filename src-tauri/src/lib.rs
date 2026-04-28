@@ -96,6 +96,8 @@ pub fn run() {
             commands::ai_commands::generate_blueprint_suggestion,
             commands::ai_commands::ai_generate_character,
             commands::ai_commands::ai_scan_consistency,
+            commands::ai_commands::ai_generate_world_rule,
+            commands::ai_commands::ai_generate_plot_node,
             commands::consistency_commands::scan_chapter_consistency,
             commands::consistency_commands::list_consistency_issues,
             commands::consistency_commands::update_issue_status,

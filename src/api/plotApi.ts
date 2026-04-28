@@ -27,3 +27,7 @@ export async function createPlotNode(input: PlotNodeInput, projectRoot: string):
 export async function reorderPlotNodes(orderedIds: string[], projectRoot: string): Promise<void> {
   await invokeCommand<void>("reorder_plot_nodes", { projectRoot, orderedIds });
 }
+
+export async function aiGeneratePlotNode(projectRoot: string, userDescription: string): Promise<string> {
+  return invokeCommand<string>("ai_generate_plot_node", { input: { projectRoot, userDescription } });
+}

@@ -7,7 +7,7 @@ import { Textarea } from "../../components/forms/Textarea.js";
 import { Modal } from "../../components/dialogs/Modal.js";
 import { Badge } from "../../components/ui/Badge.js";
 import type { PlotNodeInput } from "../../domain/types.js";
-import { listPlotNodes, createPlotNode, reorderPlotNodes, type PlotRow } from "../../api/plotApi.js";
+import { listPlotNodes, createPlotNode, reorderPlotNodes, aiGeneratePlotNode, type PlotRow } from "../../api/plotApi.js";
 import { useProjectStore } from "../../stores/projectStore.js";
 
 const NODE_TYPES = [
@@ -32,6 +32,10 @@ export function PlotPage() {
   const [showNew, setShowNew] = useState(false);
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [form, setForm] = useState({ title: "", nodeType: "开端", sortOrder: 1, goal: "", conflict: "", status: "规划中" });
+  const [aiDescription, setAiDescription] = useState("");
+  const [aiResult, setAiResult] = useState<string | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [showAiCreate, setShowAiCreate] = useState(false);
   const projectRoot = useProjectStore((s) => s.currentProjectPath);
 
   const load = useCallback(async () => {
@@ -81,7 +85,10 @@ export function PlotPage() {
     <div className="max-w-5xl mx-auto">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold text-surface-100">剧情骨架</h1>
-        <Button variant="primary" size="sm" onClick={() => setShowNew(true)}>新增节点</Button>
+        <div className="flex gap-2">
+          <Button variant="ghost" size="sm" onClick={() => { setAiDescription(""); setAiResult(null); setShowAiCreate(true); }}>AI 生成</Button>
+          <Button variant="primary" size="sm" onClick={() => setShowNew(true)}>新增节点</Button>
+        </div>
       </div>
 
       <div className="flex gap-6">
@@ -166,6 +173,40 @@ export function PlotPage() {
           )}
         </div>
       </div>
+
+      <Modal open={showAiCreate} onClose={() => setShowAiCreate(false)} title="AI 生成剧情节点" width="lg">
+        <div className="space-y-4">
+          <Textarea
+            label="描述你想要的剧情节点"
+            value={aiDescription}
+            onChange={(e) => setAiDescription(e.target.value)}
+            placeholder="例如：主角发现幕后黑手的真实身份，在废弃工厂展开决战"
+            className="min-h-[100px]"
+          />
+          <Button
+            variant="primary"
+            loading={aiLoading}
+            onClick={async () => {
+              if (!projectRoot) return;
+              setAiLoading(true);
+              try { setAiResult(await aiGeneratePlotNode(projectRoot, aiDescription)); }
+              catch { setAiResult("AI 生成失败。请检查 AI 供应商配置。"); }
+              finally { setAiLoading(false); }
+            }}
+            disabled={!aiDescription.trim()}
+          >
+            {aiLoading ? "生成中..." : "生成"}
+          </Button>
+          {aiResult && (
+            <div className="p-4 bg-primary/5 border border-primary/20 rounded-xl">
+              <pre className="text-sm text-surface-200 whitespace-pre-wrap font-sans leading-relaxed max-h-64 overflow-y-auto">{aiResult}</pre>
+              <div className="flex gap-2 mt-3">
+                <Button variant="primary" size="sm" onClick={() => { setAiResult(null); setShowAiCreate(false); }}>关闭</Button>
+              </div>
+            </div>
+          )}
+        </div>
+      </Modal>
 
       <Modal open={showNew} onClose={() => setShowNew(false)} title="新增剧情节点" width="sm">
         <div className="space-y-4">

@@ -160,6 +160,9 @@ pub async fn stream_ai_chapter_task(
         "prose_naturalize" | "deai_text" => {
             PromptBuilder::build_naturalize(&context, input.selected_text.as_deref().unwrap_or(""))
         }
+        "chapter_plan" | "plan_chapter" => {
+            PromptBuilder::build_chapter_plan(&context, &input.user_instruction)
+        }
         _ => PromptBuilder::build_chapter_draft(&context, &input.user_instruction),
     };
 
@@ -379,6 +382,126 @@ pub async fn ai_generate_character(
         system_prompt: Some(prompt),
         stream: false,
         task_type: Some("character.create".to_string()),
+        ..Default::default()
+    };
+
+    match state.ai_service.generate_text(req).await {
+        Ok(resp) => {
+            let text = resp
+                .choices
+                .first()
+                .and_then(|c| c.message.content.first())
+                .and_then(|c| c.text.clone())
+                .unwrap_or_default();
+            Ok(text)
+        }
+        Err(e) => Err(e),
+    }
+}
+
+// ── AI world rule creation (non-streaming) ──
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiWorldRuleInput {
+    pub project_root: String,
+    pub user_description: String,
+}
+
+#[tauri::command]
+pub async fn ai_generate_world_rule(
+    input: AiWorldRuleInput,
+    state: State<'_, AppState>,
+) -> Result<String, AppErrorDto> {
+    crate::infra::logger::log_ai_call("world", "default", "world.create_rule", None);
+
+    let context = state
+        .context_service
+        .collect_global_context_only(&input.project_root)?;
+
+    let prompt = PromptBuilder::build_world_create_rule(&context, &input.user_description);
+
+    let _ = state.ai_service.log_ai_request(
+        &input.project_root,
+        "world.create_rule",
+        None,
+        None,
+        &prompt,
+        "running",
+    );
+
+    let req = UnifiedGenerateRequest {
+        model: "default".to_string(),
+        messages: vec![Message {
+            role: "user".to_string(),
+            content: vec![ContentBlock {
+                block_type: "text".to_string(),
+                text: Some("请根据用户设想生成世界设定 JSON。".to_string()),
+            }],
+        }],
+        system_prompt: Some(prompt),
+        stream: false,
+        task_type: Some("world.create_rule".to_string()),
+        ..Default::default()
+    };
+
+    match state.ai_service.generate_text(req).await {
+        Ok(resp) => {
+            let text = resp
+                .choices
+                .first()
+                .and_then(|c| c.message.content.first())
+                .and_then(|c| c.text.clone())
+                .unwrap_or_default();
+            Ok(text)
+        }
+        Err(e) => Err(e),
+    }
+}
+
+// ── AI plot node creation (non-streaming) ──
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiPlotNodeInput {
+    pub project_root: String,
+    pub user_description: String,
+}
+
+#[tauri::command]
+pub async fn ai_generate_plot_node(
+    input: AiPlotNodeInput,
+    state: State<'_, AppState>,
+) -> Result<String, AppErrorDto> {
+    crate::infra::logger::log_ai_call("plot", "default", "plot.create_node", None);
+
+    let context = state
+        .context_service
+        .collect_global_context_only(&input.project_root)?;
+
+    let prompt = PromptBuilder::build_plot_create_node(&context, &input.user_description);
+
+    let _ = state.ai_service.log_ai_request(
+        &input.project_root,
+        "plot.create_node",
+        None,
+        None,
+        &prompt,
+        "running",
+    );
+
+    let req = UnifiedGenerateRequest {
+        model: "default".to_string(),
+        messages: vec![Message {
+            role: "user".to_string(),
+            content: vec![ContentBlock {
+                block_type: "text".to_string(),
+                text: Some("请根据用户设想生成剧情节点 JSON。".to_string()),
+            }],
+        }],
+        system_prompt: Some(prompt),
+        stream: false,
+        task_type: Some("plot.create_node".to_string()),
         ..Default::default()
     };
 

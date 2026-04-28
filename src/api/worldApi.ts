@@ -27,3 +27,7 @@ export async function createWorldRule(input: WorldRuleInput, projectRoot: string
 export async function deleteWorldRule(id: string, projectRoot: string): Promise<void> {
   await invokeCommand<void>("delete_world_rule", { projectRoot, id });
 }
+
+export async function aiGenerateWorldRule(projectRoot: string, userDescription: string): Promise<string> {
+  return invokeCommand<string>("ai_generate_world_rule", { input: { projectRoot, userDescription } });
+}

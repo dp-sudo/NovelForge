@@ -8,6 +8,7 @@ interface AiCommand {
 
 const COMMANDS: AiCommand[] = [
   { id: "draft", label: "生成草稿", taskType: "generate_chapter_draft" },
+  { id: "plan", label: "章节计划", taskType: "chapter_plan" },
   { id: "continue", label: "续写", taskType: "continue_chapter" },
   { id: "rewrite", label: "改写", taskType: "rewrite_selection" },
   { id: "naturalize", label: "去 AI 味", taskType: "deai_text" },

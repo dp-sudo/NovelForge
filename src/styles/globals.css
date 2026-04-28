@@ -18,12 +18,34 @@
 
   --color-accent: #f97316;
   --color-success: #22c55e;
+  --color-success-300: #86efac;
   --color-warning: #eab308;
   --color-error: #ef4444;
+  --color-error-300: #fca5a5;
   --color-info: #3b82f6;
 
   --font-sans: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   --font-mono: "Cascadia Code", "JetBrains Mono", "Fira Code", monospace;
+
+  /* ── shadcn/ui CSS variables (Tailwind v4) ── */
+  --color-background: var(--color-surface-900);
+  --color-foreground: var(--color-surface-100);
+  --color-card: var(--color-surface-800);
+  --color-card-foreground: var(--color-surface-100);
+  --color-popover: var(--color-surface-800);
+  --color-popover-foreground: var(--color-surface-100);
+  --color-primary-foreground: #fff;
+  --color-secondary: var(--color-surface-700);
+  --color-secondary-foreground: var(--color-surface-200);
+  --color-muted: var(--color-surface-700);
+  --color-muted-foreground: var(--color-surface-400);
+  --color-accent-foreground: var(--color-surface-100);
+  --color-destructive: var(--color-error);
+  --color-destructive-foreground: #fff;
+  --color-border: var(--color-surface-600);
+  --color-input: var(--color-surface-600);
+  --color-ring: var(--color-primary);
+  --radius: 0.5rem;
 }
 
 @layer base {

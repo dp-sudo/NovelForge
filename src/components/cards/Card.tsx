@@ -1,4 +1,5 @@
-import type { PropsWithChildren, HTMLAttributes } from "react";
+import { forwardRef, type HTMLAttributes } from "react";
+import { cn } from "../../lib/utils.js";
 
 interface CardProps extends HTMLAttributes<HTMLDivElement> {
   hover?: boolean;
@@ -9,24 +10,26 @@ const paddingStyles = {
   none: "",
   sm: "p-3",
   md: "p-4",
-  lg: "p-6"
+  lg: "p-6",
 };
 
-export function Card({
-  hover = false,
-  padding = "md",
-  className = "",
-  children,
-  ...props
-}: PropsWithChildren<CardProps>) {
-  return (
-    <div
-      className={`bg-surface-800 border border-surface-700 rounded-xl ${
-        paddingStyles[padding]
-      } ${hover ? "hover:border-surface-500 transition-colors cursor-pointer" : ""} ${className}`}
-      {...props}
-    >
-      {children}
-    </div>
-  );
-}
+export const Card = forwardRef<HTMLDivElement, CardProps>(
+  ({ hover = false, padding = "md", className, children, ...props }, ref) => {
+    return (
+      <div
+        ref={ref}
+        className={cn(
+          "bg-card border border-border rounded-xl",
+          paddingStyles[padding],
+          hover && "hover:border-surface-500 transition-colors cursor-pointer",
+          className,
+        )}
+        {...props}
+      >
+        {children}
+      </div>
+    );
+  },
+);
+
+Card.displayName = "Card";

@@ -1,10 +1,10 @@
-import type { PropsWithChildren } from "react";
+import { type HTMLAttributes, forwardRef } from "react";
+import { cn } from "../../lib/utils.js";
 
 type BadgeVariant = "default" | "success" | "warning" | "error" | "info";
 
-interface BadgeProps {
+interface BadgeProps extends HTMLAttributes<HTMLSpanElement> {
   variant?: BadgeVariant;
-  className?: string;
 }
 
 const variantStyles: Record<BadgeVariant, string> = {
@@ -12,19 +12,25 @@ const variantStyles: Record<BadgeVariant, string> = {
   success: "bg-success/15 text-success",
   warning: "bg-warning/15 text-warning",
   error: "bg-error/15 text-error",
-  info: "bg-info/15 text-info"
+  info: "bg-info/15 text-info",
 };
 
-export function Badge({
-  variant = "default",
-  className = "",
-  children
-}: PropsWithChildren<BadgeProps>) {
-  return (
-    <span
-      className={`inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full ${variantStyles[variant]} ${className}`}
-    >
-      {children}
-    </span>
-  );
-}
+export const Badge = forwardRef<HTMLSpanElement, BadgeProps>(
+  ({ variant = "default", className, children, ...props }, ref) => {
+    return (
+      <span
+        ref={ref}
+        className={cn(
+          "inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full",
+          variantStyles[variant],
+          className,
+        )}
+        {...props}
+      >
+        {children}
+      </span>
+    );
+  },
+);
+
+Badge.displayName = "Badge";

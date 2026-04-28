@@ -57,6 +57,7 @@ export function EditorPage() {
   const [showRecovery, setShowRecovery] = useState(false);
   const [recoveryContent, setRecoveryContent] = useState("");
   const [showAiPanel, setShowAiPanel] = useState(false);
+  const [originalText, setOriginalText] = useState<string | undefined>(undefined);
   const [showSnapshotModal, setShowSnapshotModal] = useState(false);
   const [snapshotTitle, setSnapshotTitle] = useState("");
   const [snapshotNote, setSnapshotNote] = useState("");
@@ -229,6 +230,7 @@ export function EditorPage() {
     const selectedText = selRef.current.start !== selRef.current.end
       ? content.slice(selRef.current.start, selRef.current.end)
       : undefined;
+    setOriginalText(selectedText);
 
     try {
       const stream = streamAiChapterTask({
@@ -561,6 +563,7 @@ export function EditorPage() {
           <AiPreviewPanel
             status={aiStreamStatus}
             content={aiPreviewContent}
+            originalText={originalText}
             taskType={aiTaskType}
             onInsert={handleAiInsert}
             onDiscard={handleAiDiscard}

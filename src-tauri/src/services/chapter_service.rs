@@ -272,6 +272,9 @@ impl ChapterService {
             word_count: 0,
             created_at: &created_at,
             updated_at: &created_at,
+            linked_plot_nodes: Vec::new(),
+            appearing_characters: Vec::new(),
+            linked_world_rules: Vec::new(),
             content: "",
         });
 
@@ -389,6 +392,9 @@ impl ChapterService {
         let current_words = content_word_count(content);
         let next_version = chapter_row.version + 1;
 
+        let (linked_plot_nodes, appearing_characters, linked_world_rules) =
+            load_chapter_links_for_frontmatter(&conn, chapter_id)?;
+
         let markdown = build_chapter_markdown(ChapterMarkdownInput {
             id: &chapter_row.id,
             index: chapter_row.chapter_index,
@@ -398,6 +404,9 @@ impl ChapterService {
             word_count: current_words,
             created_at: &chapter_row.created_at,
             updated_at: &updated_at,
+            linked_plot_nodes,
+            appearing_characters,
+            linked_world_rules,
             content,
         });
         write_file_atomic(&absolute_path, &markdown).map_err(|err| {
@@ -671,7 +680,49 @@ struct ChapterMarkdownInput<'a> {
     word_count: i64,
     created_at: &'a str,
     updated_at: &'a str,
+    linked_plot_nodes: Vec<String>,
+    appearing_characters: Vec<String>,
+    linked_world_rules: Vec<String>,
     content: &'a str,
+}
+
+fn fmt_yaml_list(items: &[String]) -> String {
+    if items.is_empty() {
+        "[]".to_string()
+    } else {
+        items.iter().map(|v| format!("  - {}", v)).collect::<Vec<_>>().join("\n")
+    }
+}
+
+fn load_chapter_links_for_frontmatter(
+    conn: &rusqlite::Connection,
+    chapter_id: &str,
+) -> Result<(Vec<String>, Vec<String>, Vec<String>), AppErrorDto> {
+    let mut stmt = conn.prepare(
+        "SELECT target_type, target_id FROM chapter_links WHERE chapter_id = ?1"
+    ).map_err(|e| AppErrorDto::new("DB_READ_FAILED", "Cannot read chapter links", true).with_detail(e.to_string()))?;
+
+    let rows = stmt.query_map(rusqlite::params![chapter_id], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    }).map_err(|e| AppErrorDto::new("DB_READ_FAILED", "Cannot read chapter links", true).with_detail(e.to_string()))?;
+
+    let mut plot_nodes = Vec::new();
+    let mut characters = Vec::new();
+    let mut world_rules = Vec::new();
+
+    for row in rows {
+        let (ty, id) = row.map_err(|e| {
+            AppErrorDto::new("DB_READ_FAILED", "Cannot read chapter link row", true).with_detail(e.to_string())
+        })?;
+        match ty.as_str() {
+            "plot_node" => plot_nodes.push(id),
+            "character" => characters.push(id),
+            "world_rule" => world_rules.push(id),
+            _ => {}
+        }
+    }
+
+    Ok((plot_nodes, characters, world_rules))
 }
 
 fn build_chapter_markdown(input: ChapterMarkdownInput<'_>) -> String {
@@ -691,9 +742,9 @@ fn build_chapter_markdown(input: ChapterMarkdownInput<'_>) -> String {
         format!("wordCount: {}", input.word_count),
         format!("createdAt: {}", input.created_at),
         format!("updatedAt: {}", input.updated_at),
-        "linkedPlotNodes: []".to_string(),
-        "appearingCharacters: []".to_string(),
-        "linkedWorldRules: []".to_string(),
+        format!("linkedPlotNodes:\n{}", fmt_yaml_list(&input.linked_plot_nodes)),
+        format!("appearingCharacters:\n{}", fmt_yaml_list(&input.appearing_characters)),
+        format!("linkedWorldRules:\n{}", fmt_yaml_list(&input.linked_world_rules)),
         "---".to_string(),
         "".to_string(),
         format!("# {}", input.title),

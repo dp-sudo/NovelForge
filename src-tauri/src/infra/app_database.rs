@@ -110,6 +110,8 @@ CREATE TABLE IF NOT EXISTS llm_model_registry_state (
 );
 "#;
 
+use log::info;
+
 /// Get the path to the app-level database.
 pub fn app_database_path() -> Result<PathBuf, AppErrorDto> {
     let app_dir = app_dir()?;
@@ -144,14 +146,11 @@ pub fn open_or_create() -> Result<Connection, AppErrorDto> {
         AppErrorDto::new("APP_DB_OPEN_FAILED", "Cannot open app database", true)
             .with_detail(e.to_string())
     })?;
-    conn.execute_batch(SCHEMA_SQL).map_err(|e| {
-        AppErrorDto::new(
-            "APP_DB_INIT_FAILED",
-            "Cannot initialize app database",
-            false,
-        )
-        .with_detail(e.to_string())
-    })?;
+    // Run migrations (will create tables and track versions if not already done)
+    let result = crate::infra::migrator::run_app_pending(&conn)?;
+    for v in &result.applied {
+        log::info!("[DB] Applied app migration: {}", v);
+    }
     ensure_schema_compatibility(&conn)?;
     Ok(conn)
 }

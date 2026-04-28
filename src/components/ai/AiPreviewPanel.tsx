@@ -1,8 +1,11 @@
+import { useState } from "react";
+import { DiffView } from "./DiffView.js";
 import type { AiStreamStatus } from "../../stores/editorStore";
 
 interface AiPreviewPanelProps {
   status: AiStreamStatus;
   content: string;
+  originalText?: string;
   taskType: string;
   onInsert: (strategy: "cursor" | "replace" | "append") => void;
   onDiscard: () => void;
@@ -29,17 +32,25 @@ const TASK_LABELS: Record<string, string> = {
   rewrite_selection: "改写",
   deai_text: "去 AI 味",
   scan_consistency: "检查",
+  chapter_plan: "章节计划",
   custom: "自定义"
 };
+
+/** Task types where showing a diff view is meaningful. */
+const DIFF_TASKS = new Set(["rewrite_selection", "deai_text"]);
 
 export function AiPreviewPanel({
   status,
   content,
+  originalText,
   taskType,
   onInsert,
   onDiscard,
   onCopy
 }: AiPreviewPanelProps) {
+  const [showDiff, setShowDiff] = useState(true);
+  const canDiff = DIFF_TASKS.has(taskType) && status === "completed" && !!originalText;
+
   if (status === "idle") return null;
 
   return (
@@ -54,6 +65,18 @@ export function AiPreviewPanel({
           </span>
         </div>
         <div className="flex items-center gap-1">
+          {canDiff && (
+            <button
+              onClick={() => setShowDiff(!showDiff)}
+              className={`px-2 py-1 text-xs rounded transition-colors ${
+                showDiff
+                  ? "bg-primary/20 text-primary border border-primary/30"
+                  : "bg-surface-700 text-surface-300 border border-surface-600"
+              }`}
+            >
+              {showDiff ? "差异对比" : "生成结果"}
+            </button>
+          )}
           {status === "completed" && (
             <>
               <button
@@ -96,6 +119,8 @@ export function AiPreviewPanel({
             <span className="w-2 h-2 bg-primary rounded-full animate-pulse" />
             等待 AI 响应...
           </div>
+        ) : canDiff && showDiff ? (
+          <DiffView original={originalText!} revised={content} />
         ) : (
           <pre className="text-sm text-surface-200 whitespace-pre-wrap font-sans leading-relaxed">
             {content}
