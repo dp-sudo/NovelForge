@@ -13,6 +13,7 @@ use crate::infra::database::open_database;
 use crate::infra::time::now_iso;
 use crate::infra::{app_database, credential_manager};
 use crate::services::skill_registry::{SkillRegistry, SkillTaskRouteOverride};
+use crate::services::task_routing;
 
 #[derive(Clone)]
 pub struct AiService {
@@ -28,20 +29,57 @@ impl Default for AiService {
 }
 
 impl AiService {
-    fn canonical_task_type(task_type: &str) -> &str {
-        match task_type {
-            "chapter_draft" | "generate_chapter_draft" | "draft" => "chapter.draft",
-            "chapter_continue" | "continue_chapter" | "continue_draft" => "chapter.continue",
-            "chapter_rewrite" | "rewrite_selection" => "chapter.rewrite",
-            "chapter_plan" | "plan_chapter" => "chapter.plan",
-            "prose_naturalize" | "deai_text" => "prose.naturalize",
-            "character_create" => "character.create",
-            "world.generate" | "world_create_rule" => "world.create_rule",
-            "plot.generate" | "plot_create_node" => "plot.create_node",
-            "consistency_scan" => "consistency.scan",
-            "blueprint_generate" => "blueprint.generate_step",
-            _ => task_type,
+    fn is_usable_route(route: &TaskRoute) -> bool {
+        !route.provider_id.trim().is_empty() && !route.model_id.trim().is_empty()
+    }
+
+    fn pick_task_route<'a>(routes: &'a [TaskRoute], task_type: &str) -> Option<&'a TaskRoute> {
+        let canonical_task = task_routing::canonical_task_type(task_type);
+        if let Some(route) = routes
+            .iter()
+            .find(|r| r.task_type == canonical_task.as_ref() && Self::is_usable_route(r))
+        {
+            return Some(route);
         }
+
+        routes.iter().find(|r| {
+            Self::is_usable_route(r)
+                && task_routing::canonical_task_type(&r.task_type).as_ref()
+                    == canonical_task.as_ref()
+        })
+    }
+
+    fn build_attempt_chain(
+        provider_id: &str,
+        model: &str,
+        route: Option<&TaskRoute>,
+    ) -> Vec<(String, String)> {
+        let max_attempts = route
+            .map(|r| r.max_retries.max(1).min(8) as usize)
+            .unwrap_or(1);
+        let fallback = route.and_then(|r| {
+            r.fallback_provider_id.as_ref().map(|fp| {
+                let fallback_model = r
+                    .fallback_model_id
+                    .as_ref()
+                    .map(|m| m.trim().to_string())
+                    .filter(|m| !m.is_empty())
+                    .unwrap_or_else(|| "default".to_string());
+                (fp.clone(), fallback_model)
+            })
+        });
+
+        let mut attempts = Vec::with_capacity(max_attempts);
+        for idx in 0..max_attempts {
+            if idx == 0 {
+                attempts.push((provider_id.to_string(), model.to_string()));
+            } else if let Some((ref fp, ref fm)) = fallback {
+                attempts.push((fp.clone(), fm.clone()));
+            } else {
+                attempts.push((provider_id.to_string(), model.to_string()));
+            }
+        }
+        attempts
     }
 
     /// Register a provider adapter at runtime.
@@ -122,45 +160,41 @@ impl AiService {
     fn resolve_route(task_type: &str) -> Result<(String, String, Option<TaskRoute>), AppErrorDto> {
         let conn = app_database::open_or_create()?;
         let routes = app_database::load_task_routes(&conn)?;
-        let canonical_task = Self::canonical_task_type(task_type);
+        let canonical_task = task_routing::canonical_task_type(task_type).into_owned();
 
-        // First try exact match
-        if let Some(r) = routes.iter().find(|r| r.task_type == task_type) {
+        if let Some(r) = Self::pick_task_route(&routes, task_type) {
             return Ok((r.provider_id.clone(), r.model_id.clone(), Some(r.clone())));
         }
 
-        // Then try alias match (legacy task type names)
-        if let Some(r) = routes
-            .iter()
-            .find(|r| Self::canonical_task_type(&r.task_type) == canonical_task)
-        {
-            return Ok((r.provider_id.clone(), r.model_id.clone(), Some(r.clone())));
-        }
-
-        // For "custom" with no dedicated route, use the first available route
-        if task_type == "custom" {
-            if let Some(first) = routes.first() {
-                return Ok((first.provider_id.clone(), first.model_id.clone(), Some(first.clone())));
+        // Unknown skill/task types can explicitly fallback to a dedicated "custom" route.
+        if !task_routing::is_core_task_type(&canonical_task) {
+            if let Some(custom_route) = Self::pick_task_route(&routes, "custom") {
+                let mut inferred = custom_route.clone();
+                inferred.task_type = canonical_task.clone();
+                return Ok((
+                    custom_route.provider_id.clone(),
+                    custom_route.model_id.clone(),
+                    Some(inferred),
+                ));
             }
         }
 
-        // Safety fallback: if at least one route exists, reuse the first route
-        // so unconfigured task types can still run instead of hard-failing.
-        if let Some(first) = routes.first() {
-            let mut inferred = first.clone();
-            inferred.task_type = task_type.to_string();
-            return Ok((
-                first.provider_id.clone(),
-                first.model_id.clone(),
-                Some(inferred),
-            ));
+        // Compatibility for old behavior: `custom` can still fallback to first route.
+        if canonical_task == "custom" {
+            if let Some(first) = routes.iter().find(|r| Self::is_usable_route(r)) {
+                return Ok((
+                    first.provider_id.clone(),
+                    first.model_id.clone(),
+                    Some(first.clone()),
+                ));
+            }
         }
 
         Err(AppErrorDto::new(
             "TASK_ROUTE_NOT_FOUND",
             &format!(
-                "No route configured for task type '{}'. 请先在「任务路由」中配置至少一个 Provider。",
-                task_type
+                "No route configured for task type '{}'. 请在「设置 > 任务路由」配置该任务，或配置 'custom' 作为兜底路由。",
+                canonical_task
             ),
             true,
         ))
@@ -240,42 +274,33 @@ impl AiService {
             None => Self::resolve_request_target(&req)?,
         };
 
-        let retries = route.as_ref().map(|r| r.max_retries).unwrap_or(1);
-        let fallback_ids = route.as_ref().and_then(|r| {
-            r.fallback_provider_id
-                .as_ref()
-                .map(|fp| (fp.clone(), r.fallback_model_id.clone().unwrap_or_default()))
-        });
+        let attempts = Self::build_attempt_chain(&provider_id, &model, route.as_ref());
 
         let mut last_error = None;
-        for attempt in 0..retries.max(1) {
-            let current_pid = if attempt == 0 {
-                &provider_id
-            } else {
-                match &fallback_ids {
-                    Some((fp, _)) => fp,
-                    None => break,
-                }
-            };
-            let current_model = if attempt == 0 {
-                &model
-            } else {
-                match &fallback_ids {
-                    Some((_, ref fm)) if !fm.is_empty() => fm,
-                    _ => &model,
-                }
-            };
+        for (attempt_provider, attempt_model_hint) in attempts {
+            let resolved_model =
+                match Self::resolve_request_model(&attempt_provider, &attempt_model_hint) {
+                    Ok(model_id) => model_id,
+                    Err(_) => {
+                        last_error = Some(LlmError::ModelNotFound);
+                        continue;
+                    }
+                };
 
-            if self.ensure_provider_registered(current_pid).await.is_err() {
+            if self
+                .ensure_provider_registered(&attempt_provider)
+                .await
+                .is_err()
+            {
                 last_error = Some(LlmError::ModelNotFound);
                 continue;
             }
 
             let guard = self.adapters.read().await;
-            if let Some(adapter) = guard.get(current_pid) {
+            if let Some(adapter) = guard.get(&attempt_provider) {
                 let mut attempt_req = req.clone();
-                attempt_req.provider_id = Some(current_pid.clone());
-                attempt_req.model = current_model.clone();
+                attempt_req.provider_id = Some(attempt_provider.clone());
+                attempt_req.model = resolved_model;
                 match adapter.generate_text(attempt_req).await {
                     Ok(resp) => return Ok(resp),
                     Err(e) => {
@@ -307,70 +332,58 @@ impl AiService {
             Some(reg) => Self::resolve_with_skill_override(&req, reg)?,
             None => Self::resolve_request_target(&req)?,
         };
-        let fallback = route.as_ref().and_then(|r| {
-            r.fallback_provider_id
-                .as_ref()
-                .map(|fp| (fp.clone(), r.fallback_model_id.clone()))
-        });
+        let attempts = Self::build_attempt_chain(&provider_id, &model, route.as_ref());
 
         let (tx, rx) = mpsc::channel(256);
         let service = self.clone();
 
         tokio::spawn(async move {
-            let mut attempts: Vec<(String, String)> = vec![(provider_id.clone(), model.clone())];
-            if let Some((fallback_provider, fallback_model)) = fallback {
-                let fallback_model_id = fallback_model.unwrap_or_else(|| model.clone());
-                attempts.push((fallback_provider, fallback_model_id));
-            }
+            let mut last_error_msg: Option<String> = None;
 
-            for (attempt_provider, attempt_model) in &attempts {
-                // Try to ensure provider is registered; send error if not
-                if let Err(e) = service.ensure_provider_registered(attempt_provider).await {
-                    let _ = tx
-                        .send(StreamChunk {
-                            content: String::new(),
-                            finish_reason: None,
-                            request_id: String::new(),
-                            error: Some(e.message),
-                            reasoning: None,
-                        })
-                        .await;
+            for (attempt_provider, attempt_model_hint) in attempts {
+                let resolved_model =
+                    match Self::resolve_request_model(&attempt_provider, &attempt_model_hint) {
+                        Ok(model_id) => model_id,
+                        Err(e) => {
+                            last_error_msg = Some(e.message);
+                            continue;
+                        }
+                    };
+
+                if let Err(e) = service.ensure_provider_registered(&attempt_provider).await {
+                    last_error_msg = Some(e.message);
                     continue;
                 }
 
                 let guard = service.adapters.read().await;
-                if let Some(adapter) = guard.get(attempt_provider) {
+                if let Some(adapter) = guard.get(&attempt_provider) {
                     let mut attempt_req = req.clone();
                     attempt_req.provider_id = Some(attempt_provider.clone());
-                    attempt_req.model = attempt_model.clone();
+                    attempt_req.model = resolved_model;
                     match adapter.stream_text(attempt_req, tx.clone()).await {
                         Ok(()) => return,
                         Err(e) => {
-                            let _ = tx
-                                .send(StreamChunk {
-                                    content: String::new(),
-                                    finish_reason: None,
-                                    request_id: String::new(),
-                                    error: Some(e.user_message()),
-                                    reasoning: None,
-                                })
-                                .await;
+                            last_error_msg = Some(e.user_message());
                             continue;
                         }
                     }
                 } else {
-                    let _ = tx
-                        .send(StreamChunk {
-                            content: String::new(),
-                            finish_reason: None,
-                            request_id: String::new(),
-                            error: Some(format!("Provider '{}' 未注册", attempt_provider)),
-                            reasoning: None,
-                        })
-                        .await;
+                    last_error_msg = Some(format!("Provider '{}' 未注册", attempt_provider));
                     continue;
                 }
             }
+
+            let _ = tx
+                .send(StreamChunk {
+                    content: String::new(),
+                    finish_reason: None,
+                    request_id: String::new(),
+                    error: Some(
+                        last_error_msg.unwrap_or_else(|| "All providers failed".to_string()),
+                    ),
+                    reasoning: None,
+                })
+                .await;
         });
 
         Ok(rx)

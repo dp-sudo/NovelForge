@@ -152,5 +152,7 @@ pub async fn list_project_history(
     limit: Option<usize>,
     state: State<'_, AppState>,
 ) -> Result<Vec<crate::services::git_service::GitCommitRecord>, AppErrorDto> {
-    state.git_service.list_history(&project_root, limit.unwrap_or(20))
+    state
+        .git_service
+        .list_history(&project_root, limit.unwrap_or(20))
 }

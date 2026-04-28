@@ -19,7 +19,11 @@ pub fn initialize_database(project_root: &Path, now: &str) -> SqlResult<()> {
     let conn = Connection::open(db_path)?;
     // Run migrations (will create tables and track versions)
     let result = crate::infra::migrator::run_project_pending(&conn).map_err(|e| {
-        rusqlite::Error::InvalidParameterName(format!("Migration failed: {}", e.message))
+        let detail = e.detail.unwrap_or_else(|| "unknown migration error".to_string());
+        rusqlite::Error::InvalidParameterName(format!(
+            "Migration failed: {} ({detail})",
+            e.message
+        ))
     })?;
     for v in &result.applied {
         info!("[DB] Applied project migration: {}", v);
@@ -32,7 +36,11 @@ pub fn open_database(project_root: &Path) -> SqlResult<Connection> {
     let conn = Connection::open(get_database_path(project_root))?;
     // Run pending migrations on open (idempotent)
     let result = crate::infra::migrator::run_project_pending(&conn).map_err(|e| {
-        rusqlite::Error::InvalidParameterName(format!("Migration failed: {}", e.message))
+        let detail = e.detail.unwrap_or_else(|| "unknown migration error".to_string());
+        rusqlite::Error::InvalidParameterName(format!(
+            "Migration failed: {} ({detail})",
+            e.message
+        ))
     })?;
     for v in &result.applied {
         info!("[DB] Applied project migration on open: {}", v);

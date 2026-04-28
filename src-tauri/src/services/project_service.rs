@@ -219,8 +219,8 @@ impl ProjectService {
                 .with_suggested_action("请检查 project.json 写入权限")
         })?;
 
-        let writing_style_json =
-            serde_json::to_string(&project_json.settings.writing_style).map_err(|err| {
+        let writing_style_json = serde_json::to_string(&project_json.settings.writing_style)
+            .map_err(|err| {
                 AppErrorDto::new("PROJECT_CREATE_FAILED", "创建项目失败", true)
                     .with_detail(err.to_string())
                     .with_suggested_action("请检查默认写作风格配置")

@@ -54,6 +54,7 @@ import {
   type CapabilityReport,
 } from "../../types/ai";
 import { SkillsManager } from "../../components/skills/SkillsManager.js";
+import { TASK_ROUTE_OPTIONS, canonicalTaskType } from "../../utils/taskRouting.js";
 
 type TabKey = "model" | "routing" | "skills" | "editor" | "writing" | "backup" | "about";
 
@@ -438,55 +439,6 @@ export function SettingsPage() {
   const [writingStyleSaving, setWritingStyleSaving] = useState(false);
   const [writingStyleSaved, setWritingStyleSaved] = useState(false);
   const [writingStyleMessage, setWritingStyleMessage] = useState<string | null>(null);
-
-  const TASK_ROUTE_OPTIONS = [
-    { value: "chapter.draft", label: "章节草稿" },
-    { value: "chapter.continue", label: "章节续写" },
-    { value: "chapter.rewrite", label: "局部改写" },
-    { value: "chapter.plan", label: "章节计划" },
-    { value: "prose.naturalize", label: "去 AI 味" },
-    { value: "character.create", label: "角色生成" },
-    { value: "world.create_rule", label: "世界观生成" },
-    { value: "consistency.scan", label: "一致性检查" },
-    { value: "blueprint.generate_step", label: "蓝图生成" },
-    { value: "plot.create_node", label: "剧情生成" },
-  ] as const;
-
-  function canonicalTaskType(taskType: string): string {
-    switch (taskType) {
-      case "chapter_draft":
-      case "generate_chapter_draft":
-      case "draft":
-        return "chapter.draft";
-      case "chapter_continue":
-      case "continue_chapter":
-      case "continue_draft":
-        return "chapter.continue";
-      case "chapter_rewrite":
-      case "rewrite_selection":
-        return "chapter.rewrite";
-      case "chapter_plan":
-      case "plan_chapter":
-        return "chapter.plan";
-      case "prose_naturalize":
-      case "deai_text":
-        return "prose.naturalize";
-      case "character_create":
-        return "character.create";
-      case "world.generate":
-      case "world_create_rule":
-        return "world.create_rule";
-      case "plot.generate":
-      case "plot_create_node":
-        return "plot.create_node";
-      case "consistency_scan":
-        return "consistency.scan";
-      case "blueprint_generate":
-        return "blueprint.generate_step";
-      default:
-        return taskType;
-    }
-  }
 
   function mapToInput(value?: Record<string, string>): string {
     if (!value) return "";

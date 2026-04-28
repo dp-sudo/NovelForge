@@ -267,7 +267,7 @@ mod tests {
         let report = isvc.check_project(&project.project_root).expect("check_project failed");
         assert_eq!(report.status, "healthy");
         assert!(report.issues.is_empty());
-        assert_eq!(report.summary.schema_version, "0001_init");
+        assert_eq!(report.summary.schema_version, "0002_task_route_unique");
 
         remove_temp_workspace(&ws);
     }

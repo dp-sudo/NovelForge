@@ -6,14 +6,17 @@ mod infra;
 mod services;
 mod state;
 
-use std::path::PathBuf;
 use state::AppState;
+use std::path::PathBuf;
 use tauri::Manager;
 
 /// Resolve the builtin skills directory from multiple possible locations.
 fn resolve_builtin_skills_dir(app: &tauri::App) -> PathBuf {
     // 1. Try Tauri's resource directory (production bundles)
-    if let Ok(path) = app.path().resolve("resources/builtin-skills", tauri::path::BaseDirectory::Resource) {
+    if let Ok(path) = app.path().resolve(
+        "resources/builtin-skills",
+        tauri::path::BaseDirectory::Resource,
+    ) {
         if path.exists() {
             return path;
         }
@@ -72,21 +75,33 @@ pub fn run() {
                 Err(e) => {
                     log::warn!("[SKILLS] Cannot determine app dir: {}", e.message);
                     let builtin_dir = resolve_builtin_skills_dir(app);
-                    let reg = crate::services::skill_registry::SkillRegistry::new(builtin_dir.clone(), builtin_dir);
+                    let reg = crate::services::skill_registry::SkillRegistry::new(
+                        builtin_dir.clone(),
+                        builtin_dir,
+                    );
                     let _ = reg.reload();
                     app.manage(AppState::new(reg));
                     return Ok(());
                 }
             };
             let builtin_dir = resolve_builtin_skills_dir(app);
-            match crate::services::skill_registry::initialize_global_registry(&app_data_dir, &builtin_dir) {
+            match crate::services::skill_registry::initialize_global_registry(
+                &app_data_dir,
+                &builtin_dir,
+            ) {
                 Ok(reg) => {
-                    log::info!("[SKILLS] Initialized with {} skill(s)", reg.list_skills().map(|l| l.len()).unwrap_or(0));
+                    log::info!(
+                        "[SKILLS] Initialized with {} skill(s)",
+                        reg.list_skills().map(|l| l.len()).unwrap_or(0)
+                    );
                     app.manage(AppState::new(reg));
                 }
                 Err(e) => {
                     log::warn!("[SKILLS] Init failed: {} — using fallback", e.message);
-                    let reg = crate::services::skill_registry::SkillRegistry::new(builtin_dir.clone(), builtin_dir);
+                    let reg = crate::services::skill_registry::SkillRegistry::new(
+                        builtin_dir.clone(),
+                        builtin_dir,
+                    );
                     let _ = reg.reload();
                     app.manage(AppState::new(reg));
                 }
@@ -100,15 +115,24 @@ pub fn run() {
                     tokio::time::sleep(std::time::Duration::from_secs(3)).await;
                     match crate::infra::app_database::open_or_create() {
                         Ok(conn) => {
-                            if let Ok(providers) = crate::infra::app_database::load_all_providers(&conn) {
+                            if let Ok(providers) =
+                                crate::infra::app_database::load_all_providers(&conn)
+                            {
                                 let count = providers.len();
                                 for provider in &providers {
                                     if let Err(e) = ai_service.reload_provider(&provider.id).await {
-                                        log::warn!("[PRELOAD] Failed to reload provider '{}': {}", provider.id, e.message);
+                                        log::warn!(
+                                            "[PRELOAD] Failed to reload provider '{}': {}",
+                                            provider.id,
+                                            e.message
+                                        );
                                     }
                                 }
                                 if count > 0 {
-                                    log::info!("[PRELOAD] Pre-loaded {} provider adapter(s)", count);
+                                    log::info!(
+                                        "[PRELOAD] Pre-loaded {} provider adapter(s)",
+                                        count
+                                    );
                                 }
                             }
                         }

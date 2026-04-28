@@ -1,3 +1,5 @@
+use crate::services::task_routing;
+
 /// Token budget estimation and context window management.
 ///
 /// Provides utilities for estimating token counts and checking whether
@@ -68,11 +70,12 @@ impl TokenBudget {
 
     /// Recommended max_tokens for common NovelForge task types.
     pub fn recommended_max_tokens(task_type: &str) -> u32 {
-        match task_type {
-            "character.create" | "world.generate" | "world.create_rule" | "plot.generate" | "plot.create_node" => 4096,
-            "chapter_plan" | "plan_chapter" | "chapter.plan" => 8192,
-            "chapter_draft" | "chapter_continue" | "chapter.draft" | "chapter.continue" => 16000,
-            "chapter_rewrite" | "prose_naturalize" | "chapter.rewrite" | "prose.naturalize" => 4096,
+        let canonical = task_routing::canonical_task_type(task_type);
+        match canonical.as_ref() {
+            "character.create" | "world.create_rule" | "plot.create_node" => 4096,
+            "chapter.plan" => 8192,
+            "chapter.draft" | "chapter.continue" => 16000,
+            "chapter.rewrite" | "prose.naturalize" => 4096,
             "consistency.scan" => 8192,
             _ => 4096,
         }
@@ -116,8 +119,14 @@ mod tests {
     fn recommended_max_per_task() {
         assert_eq!(TokenBudget::recommended_max_tokens("chapter_draft"), 16000);
         assert_eq!(TokenBudget::recommended_max_tokens("chapter.draft"), 16000);
-        assert_eq!(TokenBudget::recommended_max_tokens("world.create_rule"), 4096);
-        assert_eq!(TokenBudget::recommended_max_tokens("consistency.scan"), 8192);
+        assert_eq!(
+            TokenBudget::recommended_max_tokens("world.create_rule"),
+            4096
+        );
+        assert_eq!(
+            TokenBudget::recommended_max_tokens("consistency.scan"),
+            8192
+        );
         assert_eq!(TokenBudget::recommended_max_tokens("unknown_type"), 4096);
     }
 }

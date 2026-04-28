@@ -44,10 +44,7 @@ impl PromptBuilder {
     }
 
     /// Build a chapter draft generation prompt.
-    pub fn build_chapter_draft(
-        context: &CollectedContext,
-        user_instruction: &str,
-    ) -> String {
+    pub fn build_chapter_draft(context: &CollectedContext, user_instruction: &str) -> String {
         let global = &context.global_context;
         let related = &context.related_context;
 
@@ -164,7 +161,10 @@ impl PromptBuilder {
         parts.push("5. 对话、动作、环境描写要服务于冲突推进。".to_string());
         parts.push("6. 保持叙事视角一致。".to_string());
         if !global.banned_terms.is_empty() {
-            parts.push(format!("7. 禁止使用以下词汇：{}。", global.banned_terms.join("、")));
+            parts.push(format!(
+                "7. 禁止使用以下词汇：{}。",
+                global.banned_terms.join("、")
+            ));
         }
         parts.push(String::new());
 
@@ -239,10 +239,7 @@ impl PromptBuilder {
     }
 
     /// Build a de-AI-ify prompt.
-    pub fn build_naturalize(
-        _context: &CollectedContext,
-        selected_text: &str,
-    ) -> String {
+    pub fn build_naturalize(_context: &CollectedContext, selected_text: &str) -> String {
         let mut parts = vec![];
 
         parts.push("# 角色".to_string());
@@ -297,7 +294,10 @@ impl PromptBuilder {
         parts.push(String::new());
 
         parts.push("# 任务".to_string());
-        parts.push(format!("为作品「{}」生成「{}」步骤的建议内容。", context.global_context.project_name, step_title));
+        parts.push(format!(
+            "为作品「{}」生成「{}」步骤的建议内容。",
+            context.global_context.project_name, step_title
+        ));
         if !user_instruction.is_empty() {
             parts.push(format!("用户需求：{}", user_instruction));
         }
@@ -324,10 +324,7 @@ impl PromptBuilder {
     }
 
     /// Build a character creation prompt. Returns JSON-oriented output.
-    pub fn build_character_create(
-        context: &CollectedContext,
-        user_description: &str,
-    ) -> String {
+    pub fn build_character_create(context: &CollectedContext, user_description: &str) -> String {
         let mut parts = vec![];
 
         parts.push("# 角色".to_string());
@@ -335,7 +332,10 @@ impl PromptBuilder {
         parts.push(String::new());
 
         parts.push("# 任务".to_string());
-        parts.push("根据用户设想生成结构化角色卡，包含完整的动机、欲望、恐惧、缺陷和成长弧线。".to_string());
+        parts.push(
+            "根据用户设想生成结构化角色卡，包含完整的动机、欲望、恐惧、缺陷和成长弧线。"
+                .to_string(),
+        );
         parts.push(String::new());
 
         parts.push("# 项目上下文".to_string());
@@ -356,7 +356,8 @@ impl PromptBuilder {
         parts.push(String::new());
 
         parts.push("# 输出 JSON 格式".to_string());
-        parts.push(r#"{
+        parts.push(
+            r#"{
   "name": "角色名",
   "aliases": ["别名"],
   "roleType": "主角/反派/配角/路人/组织角色",
@@ -368,16 +369,15 @@ impl PromptBuilder {
   "arcStage": "成长弧线",
   "appearance": "外貌描述",
   "notes": "备注"
-}"#.to_string());
+}"#
+            .to_string(),
+        );
 
         parts.join("\n")
     }
 
     /// Build a consistency scan prompt.
-    pub fn build_consistency_scan(
-        context: &CollectedContext,
-        chapter_content: &str,
-    ) -> String {
+    pub fn build_consistency_scan(context: &CollectedContext, chapter_content: &str) -> String {
         let global = &context.global_context;
         let related = &context.related_context;
 
@@ -433,7 +433,10 @@ impl PromptBuilder {
             parts.push("# 世界规则".to_string());
             for rule in &related.world_rules {
                 let preview: String = rule.description.chars().take(120).collect();
-                parts.push(format!("- [{}] {}：{}", rule.constraint_level, rule.title, preview));
+                parts.push(format!(
+                    "- [{}] {}：{}",
+                    rule.constraint_level, rule.title, preview
+                ));
             }
             parts.push(String::new());
         }
@@ -453,7 +456,8 @@ impl PromptBuilder {
         parts.push(String::new());
 
         parts.push("# 输出 JSON 格式".to_string());
-        parts.push(r#"{
+        parts.push(
+            r#"{
   "issues": [
     {
       "issueType": "glossary/character/world_rule/timeline/prose_style",
@@ -463,16 +467,15 @@ impl PromptBuilder {
       "suggestedFix": "修复建议"
     }
   ]
-}"#.to_string());
+}"#
+            .to_string(),
+        );
 
         parts.join("\n")
     }
 
     /// Build a chapter plan prompt. Returns JSON-oriented output.
-    pub fn build_chapter_plan(
-        context: &CollectedContext,
-        user_instruction: &str,
-    ) -> String {
+    pub fn build_chapter_plan(context: &CollectedContext, user_instruction: &str) -> String {
         let global = &context.global_context;
         let related = &context.related_context;
 
@@ -533,7 +536,8 @@ impl PromptBuilder {
         parts.push("3. 伏笔应自然嵌入场景描述中。".to_string());
         parts.push(String::new());
 
-        parts.push(r#"# 输出 JSON
+        parts.push(
+            r#"# 输出 JSON
 {
   "title": "章节标题",
   "summary": "章节摘要",
@@ -542,16 +546,15 @@ impl PromptBuilder {
   "characterProgress": "角色推进",
   "foreshadowing": ["可埋伏笔"],
   "risks": ["潜在风险"]
-}"#.to_string());
+}"#
+            .to_string(),
+        );
 
         parts.join("\n")
     }
 
     /// Build a world rule creation prompt.
-    pub fn build_world_create_rule(
-        context: &CollectedContext,
-        user_instruction: &str,
-    ) -> String {
+    pub fn build_world_create_rule(context: &CollectedContext, user_instruction: &str) -> String {
         let global = &context.global_context;
 
         let mut parts = vec![];
@@ -591,7 +594,8 @@ impl PromptBuilder {
         parts.push("3. 设定应具体、可操作、可检查。".to_string());
         parts.push(String::new());
 
-        parts.push(r#"# 输出 JSON
+        parts.push(
+            r#"# 输出 JSON
 {
   "title": "设定标题",
   "category": "世界规则|地点|组织|道具|能力|历史事件|术语",
@@ -599,16 +603,15 @@ impl PromptBuilder {
   "constraintLevel": "weak|normal|strong|absolute",
   "examples": "示例",
   "contradictionPolicy": "冲突处理策略"
-}"#.to_string());
+}"#
+            .to_string(),
+        );
 
         parts.join("\n")
     }
 
     /// Build a plot node creation prompt.
-    pub fn build_plot_create_node(
-        context: &CollectedContext,
-        user_instruction: &str,
-    ) -> String {
+    pub fn build_plot_create_node(context: &CollectedContext, user_instruction: &str) -> String {
         let global = &context.global_context;
 
         let mut parts = vec![];
@@ -647,7 +650,8 @@ impl PromptBuilder {
         parts.push("3. 节点顺序应符合叙事节奏。".to_string());
         parts.push(String::new());
 
-        parts.push(r#"# 输出 JSON
+        parts.push(
+            r#"# 输出 JSON
 {
   "title": "节点标题",
   "nodeType": "开端|转折|冲突|失败|胜利|高潮|结局|支线",
@@ -655,7 +659,9 @@ impl PromptBuilder {
   "conflict": "核心冲突",
   "emotionalCurve": "情绪曲线",
   "order": 1
-}"#.to_string());
+}"#
+            .to_string(),
+        );
 
         parts.join("\n")
     }

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { DiffView } from "./DiffView.js";
 import type { AiStreamStatus } from "../../stores/editorStore";
+import { TASK_TYPE_LABELS, DIFF_TASK_TYPES, canonicalTaskType } from "../../utils/taskRouting.js";
 
 interface AiPreviewPanelProps {
   status: AiStreamStatus;
@@ -27,19 +28,6 @@ const STATUS_COLORS: Record<AiStreamStatus, string> = {
   error: "text-error"
 };
 
-const TASK_LABELS: Record<string, string> = {
-  generate_chapter_draft: "生成草稿",
-  continue_chapter: "续写",
-  rewrite_selection: "改写",
-  deai_text: "去 AI 味",
-  scan_consistency: "检查",
-  chapter_plan: "章节计划",
-  custom: "自定义"
-};
-
-/** Task types where showing a diff view is meaningful. */
-const DIFF_TASKS = new Set(["rewrite_selection", "deai_text"]);
-
 export function AiPreviewPanel({
   status,
   content,
@@ -51,7 +39,8 @@ export function AiPreviewPanel({
   onCopy
 }: AiPreviewPanelProps) {
   const [showDiff, setShowDiff] = useState(true);
-  const canDiff = DIFF_TASKS.has(taskType) && status === "completed" && !!originalText;
+  const normalizedTaskType = canonicalTaskType(taskType);
+  const canDiff = DIFF_TASK_TYPES.has(normalizedTaskType) && status === "completed" && !!originalText;
 
   if (status === "idle") return null;
 
@@ -60,7 +49,7 @@ export function AiPreviewPanel({
       <div className="flex items-center justify-between px-4 py-2 border-b border-surface-700">
         <div className="flex items-center gap-2">
           <span className="text-xs font-medium text-surface-200">
-            {TASK_LABELS[taskType] || "AI 生成"}
+            {TASK_TYPE_LABELS[normalizedTaskType] || "AI 生成"}
           </span>
           <span className={`text-xs ${STATUS_COLORS[status]}`}>
             {STATUS_LABELS[status]}

@@ -10,6 +10,7 @@ use crate::services::ai_service::{AiService, GeneratePreviewInput};
 use crate::services::context_service::{CollectedContext, ContextService};
 use crate::services::prompt_builder::PromptBuilder;
 use crate::services::skill_registry::SkillRegistry;
+use crate::services::task_routing;
 use crate::state::AppState;
 
 // ── Legacy preview command ──
@@ -26,7 +27,11 @@ pub async fn generate_ai_preview(
     let chapter_id = match &input.chapter_id {
         Some(cid) if !cid.is_empty() => cid.clone(),
         _ => {
-            crate::infra::logger::log_service("ai_commands", "generate_ai_preview", "no chapter_id, using mock");
+            crate::infra::logger::log_service(
+                "ai_commands",
+                "generate_ai_preview",
+                "no chapter_id, using mock",
+            );
             return Ok(legacy_mock_preview(&input));
         }
     };
@@ -37,14 +42,22 @@ pub async fn generate_ai_preview(
     {
         Ok(ctx) => ctx,
         Err(_) => {
-            crate::infra::logger::log_service("ai_commands", "generate_ai_preview", "context collection failed, fallback to mock");
+            crate::infra::logger::log_service(
+                "ai_commands",
+                "generate_ai_preview",
+                "context collection failed, fallback to mock",
+            );
             return Ok(legacy_mock_preview(&input));
         }
     };
 
-    let prompt = resolve_or_build_prompt(&state, &context, &input.task_type,
+    let prompt = resolve_or_build_prompt(
+        &state,
+        &context,
+        &input.task_type,
         input.selected_text.as_deref().unwrap_or(""),
-        &input.user_instruction)?;
+        &input.user_instruction,
+    )?;
 
     let request_id = Uuid::new_v4().to_string();
     let used_context = vec![
@@ -137,9 +150,13 @@ pub async fn stream_ai_chapter_task(
         .collect_chapter_context(&input.project_root, &input.chapter_id)?;
 
     // 2. Build prompt (try skill Markdown first, fallback to PromptBuilder)
-    let prompt = resolve_or_build_prompt(&state, &context, &input.task_type,
+    let prompt = resolve_or_build_prompt(
+        &state,
+        &context,
+        &input.task_type,
         input.selected_text.as_deref().unwrap_or(""),
-        &input.user_instruction)?;
+        &input.user_instruction,
+    )?;
 
     // 3. Build unified request with task routing
     let req = UnifiedGenerateRequest {
@@ -250,7 +267,12 @@ pub async fn generate_blueprint_suggestion(
     input: BlueprintSuggestionInput,
     state: State<'_, AppState>,
 ) -> Result<String, AppErrorDto> {
-    crate::infra::logger::log_ai_call("blueprint", "default", &format!("blueprint.{}", input.step_key), None);
+    crate::infra::logger::log_ai_call(
+        "blueprint",
+        "default",
+        &format!("blueprint.{}", input.step_key),
+        None,
+    );
 
     // Collect global context
     let context = state
@@ -554,23 +576,11 @@ fn resolve_or_build_prompt(
     selected_text: &str,
     user_instruction: &str,
 ) -> Result<String, AppErrorDto> {
-    let skill_id = match task_type {
-        "generate_chapter_draft" | "chapter_draft" | "draft" => "chapter.draft",
-        "continue_chapter" | "chapter_continue" | "continue_draft" => "chapter.continue",
-        "rewrite_selection" | "chapter_rewrite" => "chapter.rewrite",
-        "deai_text" | "prose_naturalize" => "prose.naturalize",
-        "chapter_plan" | "plan_chapter" => "chapter.plan",
-        "scan_consistency" | "consistency_scan" => "consistency.scan",
-        "blueprint_generate" | "blueprint.generate_step" => "blueprint.generate_step",
-        "character_create" | "character.create" => "character.create",
-        "world_create_rule" | "world.create_rule" => "world.create_rule",
-        "plot_create_node" | "plot.create_node" => "plot.create_node",
-        _ => task_type,
-    };
+    let skill_id = task_routing::canonical_task_type(task_type).into_owned();
 
     // Try loading from Skill Markdown
     if let Ok(guard) = state.skill_registry.read() {
-        if let Ok(Some(content)) = guard.read_skill_content(skill_id) {
+        if let Ok(Some(content)) = guard.read_skill_content(&skill_id) {
             let context_str = context_to_string(context, selected_text, user_instruction);
             let rendered = content
                 .replace("{projectContext}", &context_str)
@@ -581,19 +591,13 @@ fn resolve_or_build_prompt(
     }
 
     // Fallback to PromptBuilder
-    let prompt = match task_type {
-        "chapter_continue" | "continue_chapter" | "chapter.continue" => {
+    let prompt = match skill_id.as_str() {
+        "chapter.continue" => {
             PromptBuilder::build_continue(context, selected_text, user_instruction)
         }
-        "chapter_rewrite" | "rewrite_selection" | "chapter.rewrite" => {
-            PromptBuilder::build_rewrite(context, selected_text, user_instruction)
-        }
-        "prose_naturalize" | "deai_text" | "prose.naturalize" => {
-            PromptBuilder::build_naturalize(context, selected_text)
-        }
-        "chapter_plan" | "plan_chapter" | "chapter.plan" => {
-            PromptBuilder::build_chapter_plan(context, user_instruction)
-        }
+        "chapter.rewrite" => PromptBuilder::build_rewrite(context, selected_text, user_instruction),
+        "prose.naturalize" => PromptBuilder::build_naturalize(context, selected_text),
+        "chapter.plan" => PromptBuilder::build_chapter_plan(context, user_instruction),
         _ => PromptBuilder::build_chapter_draft(context, user_instruction),
     };
     Ok(prompt)

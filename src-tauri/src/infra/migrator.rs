@@ -5,8 +5,10 @@
 //!
 //! File layout:
 //!   migrations/project/0001_init.sql
+//!   migrations/project/0002_task_route_unique.sql
 //!   migrations/app/0001_init.sql
-//!   migrations/app/0002_add_model_fields.sql
+//!   migrations/app/0002_skill_index.sql
+//!   migrations/app/0003_task_route_unique.sql
 
 use log::{info, warn};
 use rusqlite::Connection;
@@ -29,10 +31,16 @@ pub struct MigrationResult {
 
 /// Return the ordered list of project-db migrations embedded at compile time.
 fn project_migrations() -> Vec<Migration> {
-    vec![Migration {
-        version: "0001_init",
-        sql: include_str!("../../migrations/project/0001_init.sql"),
-    }]
+    vec![
+        Migration {
+            version: "0001_init",
+            sql: include_str!("../../migrations/project/0001_init.sql"),
+        },
+        Migration {
+            version: "0002_task_route_unique",
+            sql: include_str!("../../migrations/project/0002_task_route_unique.sql"),
+        },
+    ]
 }
 
 /// Return the ordered list of app-db migrations embedded at compile time.
@@ -45,6 +53,10 @@ fn app_migrations() -> Vec<Migration> {
         Migration {
             version: "0002_skill_index",
             sql: include_str!("../../migrations/app/0002_skill_index.sql"),
+        },
+        Migration {
+            version: "0003_task_route_unique",
+            sql: include_str!("../../migrations/app/0003_task_route_unique.sql"),
         },
     ]
 }
@@ -190,4 +202,179 @@ fn has_any_table(conn: &Connection) -> bool {
         |row| row.get(0),
     );
     count.unwrap_or(0) > 0
+}
+
+#[cfg(test)]
+mod tests {
+    use rusqlite::{params, Connection};
+
+    use super::{run_app_pending, run_project_pending};
+
+    fn insert_migration_marker(conn: &Connection, version: &str) {
+        conn.execute(
+            "INSERT INTO schema_migrations(version, applied_at) VALUES (?1, ?2)",
+            params![version, "2026-04-28T00:00:00Z"],
+        )
+        .expect("insert schema migration marker");
+    }
+
+    fn has_index(conn: &Connection, table: &str, index_name: &str) -> bool {
+        let mut stmt = conn
+            .prepare(&format!("PRAGMA index_list({table})"))
+            .expect("prepare index list");
+        let rows = stmt
+            .query_map([], |row| row.get::<_, String>(1))
+            .expect("query index list")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("collect index names");
+        rows.iter().any(|name| name == index_name)
+    }
+
+    fn insert_provider(conn: &Connection, provider_id: &str) {
+        conn.execute(
+            "INSERT INTO llm_providers(
+                id, display_name, vendor, protocol, base_url, created_at, updated_at
+             ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                provider_id,
+                provider_id,
+                "test-vendor",
+                "openai_compatible",
+                "https://example.invalid",
+                "2026-04-28T00:00:00Z",
+                "2026-04-28T00:00:00Z"
+            ],
+        )
+        .expect("insert provider");
+    }
+
+    #[test]
+    fn app_task_route_unique_migration_canonicalizes_and_deduplicates() {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        conn.execute_batch(include_str!("../../migrations/app/0001_init.sql"))
+            .expect("apply app 0001");
+        insert_migration_marker(&conn, "0001_init");
+        insert_provider(&conn, "provider-a");
+        insert_provider(&conn, "provider-b");
+
+        conn.execute(
+            "INSERT INTO llm_task_routes(id, task_type, provider_id, model_id, max_retries, created_at, updated_at)
+             VALUES(?1, ?2, ?3, ?4, 1, ?5, ?6)",
+            params![
+                "legacy-row",
+                "chapter_draft",
+                "provider-a",
+                "model-a",
+                "2026-04-27T10:00:00Z",
+                "2026-04-27T10:00:00Z"
+            ],
+        )
+        .expect("insert legacy app route");
+        conn.execute(
+            "INSERT INTO llm_task_routes(id, task_type, provider_id, model_id, max_retries, created_at, updated_at)
+             VALUES(?1, ?2, ?3, ?4, 1, ?5, ?6)",
+            params![
+                "canonical-row",
+                "chapter.draft",
+                "provider-b",
+                "model-b",
+                "2026-04-28T10:00:00Z",
+                "2026-04-28T10:00:00Z"
+            ],
+        )
+        .expect("insert canonical app route");
+
+        run_app_pending(&conn).expect("apply app pending migrations");
+
+        let canonical_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM llm_task_routes WHERE task_type = 'chapter.draft'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count canonical app routes");
+        let legacy_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM llm_task_routes WHERE task_type = 'chapter_draft'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count legacy app routes");
+        assert_eq!(canonical_count, 1);
+        assert_eq!(legacy_count, 0);
+        assert!(has_index(
+            &conn,
+            "llm_task_routes",
+            "ux_llm_task_routes_task_type"
+        ));
+    }
+
+    #[test]
+    fn project_task_route_unique_migration_canonicalizes_and_deduplicates() {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        conn.execute_batch(include_str!("../../migrations/project/0001_init.sql"))
+            .expect("apply project 0001");
+        insert_migration_marker(&conn, "0001_init");
+        insert_provider(&conn, "provider-a");
+        insert_provider(&conn, "provider-b");
+
+        conn.execute(
+            "INSERT INTO llm_task_routes(
+                id, project_id, task_type, provider_id, model_id, priority, max_retries, created_at, updated_at
+             ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, 1, ?7, ?8)",
+            params![
+                "legacy-row",
+                "project-1",
+                "chapter_continue",
+                "provider-a",
+                "model-a",
+                0_i64,
+                "2026-04-27T10:00:00Z",
+                "2026-04-27T10:00:00Z"
+            ],
+        )
+        .expect("insert legacy project route");
+        conn.execute(
+            "INSERT INTO llm_task_routes(
+                id, project_id, task_type, provider_id, model_id, priority, max_retries, created_at, updated_at
+             ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, 1, ?7, ?8)",
+            params![
+                "canonical-row",
+                "project-1",
+                "chapter.continue",
+                "provider-b",
+                "model-b",
+                10_i64,
+                "2026-04-28T10:00:00Z",
+                "2026-04-28T10:00:00Z"
+            ],
+        )
+        .expect("insert canonical project route");
+
+        run_project_pending(&conn).expect("apply project pending migrations");
+
+        let canonical_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM llm_task_routes
+                 WHERE project_id = 'project-1' AND task_type = 'chapter.continue'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count canonical project routes");
+        let legacy_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM llm_task_routes
+                 WHERE project_id = 'project-1' AND task_type = 'chapter_continue'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count legacy project routes");
+        assert_eq!(canonical_count, 1);
+        assert_eq!(legacy_count, 0);
+        assert!(has_index(
+            &conn,
+            "llm_task_routes",
+            "ux_llm_task_routes_project_task_type"
+        ));
+    }
 }

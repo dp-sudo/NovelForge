@@ -1,28 +1,32 @@
-use tauri::State;
-use uuid::Uuid;
 use serde::Serialize;
+use std::collections::BTreeMap;
+use tauri::State;
 use tauri_plugin_updater::UpdaterExt;
+use uuid::Uuid;
 
 use crate::adapters::llm_types::{ProviderConfig, TaskRoute};
 use crate::errors::AppErrorDto;
 use crate::infra::app_database;
 use crate::services::settings_service::EditorSettings;
+use crate::services::task_routing;
 use crate::state::AppState;
 
-fn canonical_task_type(task_type: &str) -> &str {
-    match task_type {
-        "chapter_draft" | "generate_chapter_draft" | "draft" => "chapter.draft",
-        "chapter_continue" | "continue_chapter" | "continue_draft" => "chapter.continue",
-        "chapter_rewrite" | "rewrite_selection" => "chapter.rewrite",
-        "chapter_plan" | "plan_chapter" => "chapter.plan",
-        "prose_naturalize" | "deai_text" => "prose.naturalize",
-        "character_create" => "character.create",
-        "world.generate" | "world_create_rule" => "world.create_rule",
-        "plot.generate" | "plot_create_node" => "plot.create_node",
-        "consistency_scan" => "consistency.scan",
-        "blueprint_generate" => "blueprint.generate_step",
-        _ => task_type,
+fn normalize_task_routes(routes: Vec<TaskRoute>) -> Vec<TaskRoute> {
+    let mut dedup: BTreeMap<String, (bool, TaskRoute)> = BTreeMap::new();
+    for mut route in routes {
+        let canonical = task_routing::canonical_task_type(&route.task_type).into_owned();
+        let is_exact_canonical = route.task_type == canonical;
+        route.task_type = canonical.clone();
+
+        let should_replace = match dedup.get(&canonical) {
+            None => true,
+            Some((existing_exact, _)) => is_exact_canonical && !*existing_exact,
+        };
+        if should_replace {
+            dedup.insert(canonical, (is_exact_canonical, route));
+        }
     }
+    dedup.into_values().map(|(_, route)| route).collect()
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -111,14 +115,15 @@ pub async fn install_app_update(
     };
 
     update
-        .download_and_install(
-            |_chunk_length, _content_length| {},
-            || {},
-        )
+        .download_and_install(|_chunk_length, _content_length| {}, || {})
         .await
         .map_err(|err| {
-            AppErrorDto::new("UPDATER_INSTALL_FAILED", "Cannot download or install update", true)
-                .with_detail(err.to_string())
+            AppErrorDto::new(
+                "UPDATER_INSTALL_FAILED",
+                "Cannot download or install update",
+                true,
+            )
+            .with_detail(err.to_string())
         })?;
 
     Ok(AppUpdateInfo {
@@ -144,7 +149,10 @@ pub async fn save_provider(
     state: State<'_, AppState>,
 ) -> Result<ProviderConfig, AppErrorDto> {
     let saved = state.settings_service.save_provider(config, api_key)?;
-    crate::infra::logger::log_security("save_provider", &format!("provider={}", saved.display_name));
+    crate::infra::logger::log_security(
+        "save_provider",
+        &format!("provider={}", saved.display_name),
+    );
     state.ai_service.reload_provider(&saved.id).await?;
 
     // Auto-create default task routes for every task type if not already configured
@@ -153,22 +161,11 @@ pub async fn save_provider(
             let conn = app_database::open_or_create()?;
             let existing_routes = app_database::load_task_routes(&conn)?;
             let now = crate::infra::time::now_iso();
-            let task_types = [
-                "chapter.draft",
-                "chapter.continue",
-                "chapter.rewrite",
-                "chapter.plan",
-                "prose.naturalize",
-                "character.create",
-                "world.create_rule",
-                "consistency.scan",
-                "blueprint.generate_step",
-                "plot.create_node",
-            ];
-            for tt in &task_types {
+            let task_types = task_routing::TASK_ROUTE_TYPES_WITH_CUSTOM;
+            for tt in task_types {
                 if !existing_routes
                     .iter()
-                    .any(|r| canonical_task_type(&r.task_type) == *tt)
+                    .any(|r| task_routing::canonical_task_type(&r.task_type).as_ref() == *tt)
                 {
                     let route = TaskRoute {
                         id: Uuid::new_v4().to_string(),
@@ -251,7 +248,8 @@ pub async fn get_refresh_logs(
 #[tauri::command]
 pub async fn list_task_routes(state: State<'_, AppState>) -> Result<Vec<TaskRoute>, AppErrorDto> {
     let conn = app_database::open_or_create()?;
-    app_database::load_task_routes(&conn)
+    let routes = app_database::load_task_routes(&conn)?;
+    Ok(normalize_task_routes(routes))
 }
 
 #[tauri::command]
@@ -262,11 +260,58 @@ pub async fn save_task_route(
     let now = crate::infra::time::now_iso();
     let conn = app_database::open_or_create()?;
     let mut r = route;
-    if r.id.is_empty() {
-        r.id = Uuid::new_v4().to_string();
+    r.task_type = task_routing::canonical_task_type(&r.task_type).into_owned();
+    r.provider_id = r.provider_id.trim().to_string();
+    r.model_id = r.model_id.trim().to_string();
+    r.max_retries = r.max_retries.max(1).min(8);
+    r.fallback_provider_id = r
+        .fallback_provider_id
+        .as_ref()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty());
+    r.fallback_model_id = r
+        .fallback_model_id
+        .as_ref()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty());
+    if r.fallback_provider_id.is_none() {
+        r.fallback_model_id = None;
     }
+
+    if r.provider_id.is_empty() {
+        return Err(AppErrorDto::new("INVALID_INPUT", "Provider 不能为空", true));
+    }
+    if r.model_id.is_empty() {
+        return Err(AppErrorDto::new("INVALID_INPUT", "模型 ID 不能为空", true));
+    }
+
+    let existing_routes = app_database::load_task_routes(&conn)?;
+    let existing_same_task = existing_routes.iter().find(|existing| {
+        task_routing::canonical_task_type(&existing.task_type).as_ref() == r.task_type
+    });
+    if r.id.is_empty() {
+        if let Some(existing) = existing_same_task {
+            r.id = existing.id.clone();
+            r.created_at = existing.created_at.clone();
+        } else {
+            r.id = Uuid::new_v4().to_string();
+            r.created_at = Some(now.clone());
+        }
+    } else if let Some(existing) = existing_same_task {
+        if existing.id != r.id {
+            return Err(AppErrorDto::new(
+                "TASK_ROUTE_DUPLICATE",
+                &format!("任务类型 '{}' 已存在路由配置", r.task_type),
+                true,
+            ));
+        }
+        r.created_at = existing.created_at.clone();
+    }
+
     app_database::upsert_task_route(&conn, &r, &now)?;
-    r.created_at = Some(now.clone());
+    if r.created_at.is_none() {
+        r.created_at = Some(now.clone());
+    }
     r.updated_at = Some(now);
     Ok(r)
 }
@@ -277,7 +322,21 @@ pub async fn delete_task_route(
     state: State<'_, AppState>,
 ) -> Result<(), AppErrorDto> {
     let conn = app_database::open_or_create()?;
-    app_database::delete_task_route(&conn, &route_id)
+    let routes = app_database::load_task_routes(&conn)?;
+    let target = routes.iter().find(|r| r.id == route_id);
+    let Some(target_route) = target else {
+        return Ok(());
+    };
+    let canonical_target = task_routing::canonical_task_type(&target_route.task_type).into_owned();
+
+    app_database::delete_task_route(&conn, &route_id)?;
+    for alias_route in routes.iter().filter(|r| {
+        r.id != route_id
+            && task_routing::canonical_task_type(&r.task_type).as_ref() == canonical_target
+    }) {
+        app_database::delete_task_route(&conn, &alias_route.id)?;
+    }
+    Ok(())
 }
 
 // ── Remote registry commands ──

@@ -274,9 +274,7 @@ impl ContextService {
 
         // Locked & banned terms from glossary
         let locked_terms: Vec<String> = conn
-            .prepare(
-                "SELECT term FROM glossary_terms WHERE project_id = ?1 AND locked = 1",
-            )
+            .prepare("SELECT term FROM glossary_terms WHERE project_id = ?1 AND locked = 1")
             .map_err(|_| AppErrorDto::new("DB_QUERY_FAILED", "查询名词库失败", true))?
             .query_map(params![project_id], |row| row.get::<_, String>(0))
             .map_err(|_| AppErrorDto::new("DB_QUERY_FAILED", "查询名词库失败", true))?
@@ -284,9 +282,7 @@ impl ContextService {
             .collect();
 
         let banned_terms: Vec<String> = conn
-            .prepare(
-                "SELECT term FROM glossary_terms WHERE project_id = ?1 AND banned = 1",
-            )
+            .prepare("SELECT term FROM glossary_terms WHERE project_id = ?1 AND banned = 1")
             .map_err(|_| AppErrorDto::new("DB_QUERY_FAILED", "查询禁用词失败", true))?
             .query_map(params![project_id], |row| row.get::<_, String>(0))
             .map_err(|_| AppErrorDto::new("DB_QUERY_FAILED", "查询禁用词失败", true))?
