@@ -10,7 +10,7 @@ use zip::CompressionMethod;
 use zip::ZipWriter;
 
 use crate::errors::AppErrorDto;
-use crate::infra::time::now_iso;
+use crate::infra::time::{now_iso, today_date_str};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -109,6 +109,44 @@ impl BackupService {
             file_size,
             created_at: now,
         })
+    }
+
+    /// Check if a daily backup already exists, and create one if not.
+    /// This is a "best effort" operation — failures are logged but not returned,
+    /// so it never blocks project opening.
+    pub fn try_auto_backup(&self, project_root: &str) {
+        let today = crate::infra::time::today_date_str();
+
+        // Check if any existing backup filename starts with today's date
+        let existing = match self.list_backups(project_root) {
+            Ok(list) => list,
+            Err(_) => {
+                log::warn!("[AUTO_BACKUP] Cannot list backups for {}", project_root);
+                return;
+            }
+        };
+
+        let already_backed_up = existing.iter().any(|b| {
+            b.file_path.contains(&today)
+        });
+
+        if already_backed_up {
+            log::info!("[AUTO_BACKUP] Daily backup already exists for {}", today);
+            return;
+        }
+
+        match self.create_backup(project_root) {
+            Ok(result) => {
+                log::info!(
+                    "[AUTO_BACKUP] Created daily backup: {} ({} bytes)",
+                    result.file_path,
+                    result.file_size
+                );
+            }
+            Err(e) => {
+                log::warn!("[AUTO_BACKUP] Failed to create daily backup: {}", e.message);
+            }
+        }
     }
 
     pub fn list_backups(&self, project_root: &str) -> Result<Vec<BackupResult>, AppErrorDto> {

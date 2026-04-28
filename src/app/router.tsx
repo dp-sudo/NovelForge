@@ -2,6 +2,7 @@ import { useUiStore, type AppRoute } from "../stores/uiStore";
 import { useProjectStore } from "../stores/projectStore";
 import type { ComponentType } from "react";
 import { AppShell } from "../components/layout/AppShell";
+import { PageTransition } from "../components/ui/PageTransition.js";
 import { ProjectCenterPage } from "../pages/ProjectCenter/ProjectCenterPage";
 import { DashboardPage } from "../pages/Dashboard/DashboardPage";
 import { BlueprintPage } from "../pages/Blueprint/BlueprintPage";
@@ -39,7 +40,11 @@ const routeMap: Record<AppRoute, ComponentType> = {
 function PageContent() {
   const activeRoute = useUiStore((s) => s.activeRoute);
   const Page = routeMap[activeRoute] ?? DashboardPage;
-  return <Page />;
+  return (
+    <PageTransition routeKey={activeRoute}>
+      <Page />
+    </PageTransition>
+  );
 }
 
 export function AppRouter() {

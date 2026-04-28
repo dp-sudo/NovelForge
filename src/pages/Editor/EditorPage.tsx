@@ -26,6 +26,7 @@ import { Input } from "../../components/forms/Input";
 import { Select } from "../../components/forms/Select";
 import { Textarea } from "../../components/forms/Textarea";
 import { Button } from "../../components/ui/Button.js";
+import { FindBar } from "../../components/editor/FindBar.js";
 
 const AUTOSAVE_DELAY_MS = 5000;
 
@@ -58,6 +59,7 @@ export function EditorPage() {
   const [recoveryContent, setRecoveryContent] = useState("");
   const [showAiPanel, setShowAiPanel] = useState(false);
   const [originalText, setOriginalText] = useState<string | undefined>(undefined);
+  const [findOpen, setFindOpen] = useState(false);
   const [showSnapshotModal, setShowSnapshotModal] = useState(false);
   const [snapshotTitle, setSnapshotTitle] = useState("");
   const [snapshotNote, setSnapshotNote] = useState("");
@@ -160,17 +162,40 @@ export function EditorPage() {
     };
   }, [content, isDirty, chapterId, projectRoot]);
 
-  // Keyboard shortcut: Ctrl+S
+  // Keyboard shortcuts: Ctrl+S (save), Ctrl+F (find), Ctrl+P (navigate — handled globally)
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
-      if ((e.ctrlKey || e.metaKey) && e.key === "s") {
-        e.preventDefault();
-        if (chapterId) void handleSave();
+      if (e.ctrlKey || e.metaKey) {
+        switch (e.key) {
+          case "s":
+            e.preventDefault();
+            if (chapterId) void handleSave();
+            break;
+          case "f":
+            e.preventDefault();
+            setFindOpen(true);
+            break;
+        }
+      }
+      if (e.key === "Escape" && findOpen) {
+        setFindOpen(false);
       }
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [chapterId, content]);
+  }, [chapterId, content, findOpen]);
+
+  function handleFindSelectMatch(start: number, end: number) {
+    if (editorRef.current) {
+      editorRef.current.focus();
+      editorRef.current.setSelectionRange(start, end);
+      // Rough scroll: estimate line height and scroll to the match area
+      const textBefore = content.slice(0, start);
+      const linesBefore = textBefore.split("\n").length - 1;
+      const lineHeight = 22; // approximate
+      editorRef.current.scrollTop = Math.max(0, linesBefore * lineHeight - 100);
+    }
+  }
 
   async function handleSave() {
     if (!chapterId || !projectRoot) return;
@@ -537,16 +562,24 @@ export function EditorPage() {
               从左侧选择一个章节开始写作
             </div>
           ) : (
-            <textarea
-              ref={editorRef}
-              value={content}
-              onChange={handleEditorInput}
-              onSelect={handleEditorSelect}
-              onClick={handleEditorSelect}
-              className="flex-1 w-full bg-surface-900 text-surface-100 p-6 resize-none focus:outline-none text-base leading-relaxed font-sans placeholder-surface-500"
-              placeholder="开始写作..."
-              spellCheck={false}
-            />
+            <div className="flex-1 flex flex-col">
+              <FindBar
+                open={findOpen}
+                content={content}
+                onClose={() => setFindOpen(false)}
+                onSelectMatch={handleFindSelectMatch}
+              />
+              <textarea
+                ref={editorRef}
+                value={content}
+                onChange={handleEditorInput}
+                onSelect={handleEditorSelect}
+                onClick={handleEditorSelect}
+                className="flex-1 w-full bg-surface-900 text-surface-100 p-6 resize-none focus:outline-none text-base leading-relaxed font-sans placeholder-surface-500"
+                placeholder="开始写作..."
+                spellCheck={false}
+              />
+            </div>
           )}
         </Card>
 

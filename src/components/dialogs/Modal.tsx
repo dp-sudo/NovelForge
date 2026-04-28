@@ -19,13 +19,13 @@ export function Modal({ open, onClose, title, width = "md", children }: PropsWit
   return (
     <Dialog.Root open={open} onOpenChange={(open) => { if (!open) onClose(); }}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-black/60 data-[state=open]:animate-in data-[state=closed]:animate-out" />
+        <Dialog.Overlay className="fixed inset-0 z-50 bg-black/60 animate-fade-in" />
         <Dialog.Content
           className={cn(
             "fixed left-1/2 top-1/2 z-50 -translate-x-1/2 -translate-y-1/2",
             "bg-card border border-border rounded-xl shadow-2xl",
             "w-full mx-4 max-h-[85vh] flex flex-col",
-            "data-[state=open]:animate-in data-[state=closed]:animate-out",
+            "animate-scale-in",
             widthStyles[width],
           )}
         >

@@ -46,7 +46,69 @@
   --color-input: var(--color-surface-600);
   --color-ring: var(--color-primary);
   --radius: 0.5rem;
+
+  /* ── Custom animations ── */
+  --animate-fade-in: fade-in 0.2s ease-out;
+  --animate-fade-in-up: fade-in-up 0.25s ease-out;
+  --animate-slide-in-right: slide-in-right 0.2s ease-out;
+  --animate-slide-in-down: slide-in-down 0.2s ease-out;
+  --animate-scale-in: scale-in 0.15s ease-out;
+  --animate-skeleton: skeleton 1.5s ease-in-out infinite;
 }
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slide-in-right {
+  from { opacity: 0; transform: translateX(8px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes slide-in-down {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes scale-in {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes skeleton {
+  0% { background-color: var(--color-surface-700); }
+  50% { background-color: var(--color-surface-600); }
+  100% { background-color: var(--color-surface-700); }
+}
+
+/* ── Animation utility classes ── */
+.animate-fade-in { animation: fade-in 0.2s ease-out; }
+.animate-fade-in-up { animation: fade-in-up 0.25s ease-out; }
+.animate-slide-in-right { animation: slide-in-right 0.2s ease-out; }
+.animate-slide-in-down { animation: slide-in-down 0.2s ease-out; }
+.animate-scale-in { animation: scale-in 0.15s ease-out; }
+.animate-skeleton { animation: skeleton 1.5s ease-in-out infinite; }
+
+/* Staggered children: each child fades in with a delay based on its index */
+.stagger-children > * {
+  animation: fade-in-up 0.25s ease-out both;
+}
+.stagger-children > *:nth-child(1) { animation-delay: 0ms; }
+.stagger-children > *:nth-child(2) { animation-delay: 40ms; }
+.stagger-children > *:nth-child(3) { animation-delay: 80ms; }
+.stagger-children > *:nth-child(4) { animation-delay: 120ms; }
+.stagger-children > *:nth-child(5) { animation-delay: 160ms; }
+.stagger-children > *:nth-child(6) { animation-delay: 200ms; }
+.stagger-children > *:nth-child(7) { animation-delay: 240ms; }
+.stagger-children > *:nth-child(8) { animation-delay: 280ms; }
+.stagger-children > *:nth-child(9) { animation-delay: 320ms; }
+.stagger-children > *:nth-child(10) { animation-delay: 360ms; }
 
 @layer base {
   * {

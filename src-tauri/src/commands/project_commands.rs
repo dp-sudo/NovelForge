@@ -72,6 +72,8 @@ pub async fn open_project(
 ) -> Result<ProjectOpenResult, AppErrorDto> {
     let result = state.project_service.open_project(&input.project_root)?;
     crate::infra::logger::log_user_action("open_project", &input.project_root);
+    // Auto-backup on first open of the day (best-effort, never blocks)
+    state.backup_service.try_auto_backup(&input.project_root);
     Ok(result)
 }
 

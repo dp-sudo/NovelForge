@@ -80,10 +80,10 @@ export function CommandPalette({ open, onClose, onNavigate }: CommandPaletteProp
 
   return (
     <div
-      className="fixed inset-0 z-[60] flex items-start justify-center pt-[15vh] bg-black/60"
+      className="fixed inset-0 z-[60] flex items-start justify-center pt-[15vh] bg-black/60 animate-fade-in"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div className="w-full max-w-lg bg-card border border-border rounded-xl shadow-2xl overflow-hidden">
+      <div className="w-full max-w-lg bg-card border border-border rounded-xl shadow-2xl overflow-hidden animate-scale-in">
         <input
           autoFocus
           value={query}
