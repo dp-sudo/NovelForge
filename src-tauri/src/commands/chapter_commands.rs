@@ -21,6 +21,7 @@ pub struct SaveChapterRequest {
     pub project_root: String,
     pub chapter_id: String,
     pub content: String,
+    pub request_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -80,19 +81,40 @@ pub async fn save_chapter_content(
     input: SaveChapterRequest,
     state: State<'_, AppState>,
 ) -> Result<SaveChapterOutput, AppErrorDto> {
-    let result = state.chapter_service.save_chapter_content(
+    let request_id = input.request_id.as_deref().unwrap_or("n/a");
+    crate::infra::logger::log_user_action(
+        "save_chapter.start",
+        &format!("requestId={}, chapter={}", request_id, input.chapter_id),
+    );
+    match state.chapter_service.save_chapter_content(
         &input.project_root,
         &input.chapter_id,
         &input.content,
-    )?;
-    crate::infra::logger::log_user_action(
-        "save_chapter",
-        &format!(
-            "chapter={}, words={}",
-            input.chapter_id, result.current_words
-        ),
-    );
-    Ok(result)
+    ) {
+        Ok(result) => {
+            crate::infra::logger::log_user_action(
+                "save_chapter.done",
+                &format!(
+                    "requestId={}, chapter={}, words={}, version={}",
+                    request_id, input.chapter_id, result.current_words, result.version
+                ),
+            );
+            Ok(result)
+        }
+        Err(err) => {
+            crate::infra::logger::log_command_error(
+                "save_chapter_content",
+                &format!(
+                    "requestId={}, chapter={}, code={}, message={}",
+                    request_id,
+                    input.chapter_id,
+                    err.code.as_str(),
+                    err.message.as_str()
+                ),
+            );
+            Err(err)
+        }
+    }
 }
 
 #[tauri::command]
@@ -100,9 +122,36 @@ pub async fn autosave_draft(
     input: AutosaveDraftInput,
     state: State<'_, AppState>,
 ) -> Result<String, AppErrorDto> {
-    state
+    let request_id = input.request_id.as_deref().unwrap_or("n/a");
+    crate::infra::logger::log_user_action(
+        "autosave.start",
+        &format!("requestId={}, chapter={}", request_id, input.chapter_id),
+    );
+    match state
         .chapter_service
         .autosave_draft(&input.project_root, &input.chapter_id, &input.content)
+    {
+        Ok(draft_path) => {
+            crate::infra::logger::log_user_action(
+                "autosave.done",
+                &format!("requestId={}, chapter={}", request_id, input.chapter_id),
+            );
+            Ok(draft_path)
+        }
+        Err(err) => {
+            crate::infra::logger::log_command_error(
+                "autosave_draft",
+                &format!(
+                    "requestId={}, chapter={}, code={}, message={}",
+                    request_id,
+                    input.chapter_id,
+                    err.code.as_str(),
+                    err.message.as_str()
+                ),
+            );
+            Err(err)
+        }
+    }
 }
 
 #[tauri::command]

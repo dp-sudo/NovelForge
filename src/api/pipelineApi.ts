@@ -1,5 +1,5 @@
 import { listen } from "@tauri-apps/api/event";
-import { invokeCommand } from "./tauriClient.js";
+import { invokeCommand, logUI } from "./tauriClient.js";
 
 const PIPELINE_EVENT_NAME = "ai:pipeline:event";
 const DEFAULT_EVENT_TIMEOUT_MS = 120000;
@@ -47,7 +47,7 @@ export interface TaskPipelineStreamOptions {
 }
 
 export async function runTaskPipeline(input: RunTaskPipelineInput): Promise<string> {
-  return invokeCommand<string>("run_ai_task_pipeline", {
+  const requestId = await invokeCommand<string>("run_ai_task_pipeline", {
     input: {
       projectRoot: input.projectRoot,
       taskType: input.taskType,
@@ -60,10 +60,19 @@ export async function runTaskPipeline(input: RunTaskPipelineInput): Promise<stri
       blueprintStepTitle: input.blueprintStepTitle,
     },
   });
+  logUI("PIPELINE.START", `requestId=${requestId} taskType=${input.taskType}`);
+  return requestId;
 }
 
-export async function cancelTaskPipeline(requestId: string): Promise<void> {
-  await invokeCommand<void>("cancel_ai_task_pipeline", { requestId });
+export async function cancelTaskPipeline(requestId: string, reason: string = "manual"): Promise<void> {
+  logUI("PIPELINE.CANCEL", `requestId=${requestId} reason=${reason}`);
+  try {
+    await invokeCommand<void>("cancel_ai_task_pipeline", { requestId });
+    logUI("PIPELINE.CANCELLED", `requestId=${requestId} reason=${reason}`);
+  } catch (error) {
+    logUI("PIPELINE.CANCEL_ERROR", `requestId=${requestId} reason=${reason}`);
+    throw error;
+  }
 }
 
 export async function* streamTaskPipeline(
@@ -83,7 +92,9 @@ export async function* streamTaskPipelineByRequestId(
     options.timeoutMs ?? DEFAULT_EVENT_TIMEOUT_MS,
     MIN_EVENT_TIMEOUT_MS,
   );
+  const cancelOnExit = options.cancelOnExit ?? true;
   let done = false;
+  let terminalLogged = false;
   let resolveWaiter: (() => void) | null = null;
   let lastEventTime = Date.now();
 
@@ -96,6 +107,16 @@ export async function* streamTaskPipelineByRequestId(
     lastEventTime = Date.now();
     if (parsed.type === "done" || parsed.type === "error") {
       done = true;
+      if (!terminalLogged) {
+        const action = parsed.type === "done" ? "PIPELINE.DONE" : "PIPELINE.ERROR";
+        const detailParts = [
+          `requestId=${requestId}`,
+          `phase=${parsed.phase}`,
+          parsed.errorCode ? `errorCode=${parsed.errorCode}` : undefined,
+        ].filter(Boolean);
+        logUI(action, detailParts.join(" "));
+        terminalLogged = true;
+      }
     }
     if (resolveWaiter) {
       resolveWaiter();
@@ -114,6 +135,10 @@ export async function* streamTaskPipelineByRequestId(
       const remaining = timeoutMs - elapsed;
       if (remaining <= 0) {
         done = true;
+        if (!terminalLogged) {
+          logUI("PIPELINE.ERROR", `requestId=${requestId} phase=done errorCode=PIPELINE_EVENT_TIMEOUT`);
+          terminalLogged = true;
+        }
         yield {
           requestId,
           phase: "done",
@@ -127,6 +152,7 @@ export async function* streamTaskPipelineByRequestId(
       }
 
       try {
+        let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
         const waitPromise = new Promise<void>((resolve) => {
           resolveWaiter = resolve;
           if (pending.length > 0) {
@@ -135,12 +161,19 @@ export async function* streamTaskPipelineByRequestId(
           }
         });
         const timeoutPromise = new Promise<void>((_, reject) => {
-          setTimeout(() => reject(new Error("TIMEOUT")), remaining);
+          timeoutHandle = setTimeout(() => reject(new Error("TIMEOUT")), remaining);
         });
         await Promise.race([waitPromise, timeoutPromise]);
+        if (timeoutHandle !== null) {
+          clearTimeout(timeoutHandle);
+        }
       } catch {
         resolveWaiter = null;
         done = true;
+        if (!terminalLogged) {
+          logUI("PIPELINE.ERROR", `requestId=${requestId} phase=done errorCode=PIPELINE_EVENT_TIMEOUT`);
+          terminalLogged = true;
+        }
         yield {
           requestId,
           phase: "done",
@@ -154,10 +187,11 @@ export async function* streamTaskPipelineByRequestId(
       }
     }
   } finally {
-    unlisten();
-    if (!done && options.cancelOnExit) {
-      await cancelTaskPipeline(requestId).catch(() => undefined);
+    if (!done && cancelOnExit) {
+      await cancelTaskPipeline(requestId, "stream_exit").catch(() => undefined);
     }
+    await Promise.resolve(unlisten()).catch(() => undefined);
+    logUI("PIPELINE.STREAM_CLOSED", `requestId=${requestId} done=${done}`);
   }
 }
 

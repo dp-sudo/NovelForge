@@ -1,4 +1,4 @@
-import { invokeCommand } from "./tauriClient.js";
+import { invokeCommand, logUI } from "./tauriClient.js";
 import type { ChapterInput } from "../domain/types.js";
 import type { ChapterStatus } from "../domain/constants.js";
 
@@ -119,6 +119,13 @@ export interface RecoverDraftResult {
   draftContent?: string;
 }
 
+function createClientRequestId(prefix: string): string {
+  const randomPart = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return `${prefix}-${randomPart}`;
+}
+
 export async function listChapters(projectRoot: string): Promise<ChapterRecord[]> {
   return invokeCommand<ChapterRecord[]>("list_chapters", { projectRoot });
 }
@@ -132,9 +139,18 @@ export async function saveChapterContent(
   content: string,
   projectRoot: string
 ): Promise<SaveChapterOutput> {
-  return invokeCommand<SaveChapterOutput>("save_chapter_content", {
-    input: { projectRoot, chapterId, content }
-  });
+  const requestId = createClientRequestId("save");
+  logUI("SAVE.START", `requestId=${requestId} chapterId=${chapterId}`);
+  try {
+    const result = await invokeCommand<SaveChapterOutput>("save_chapter_content", {
+      input: { projectRoot, chapterId, content, requestId }
+    });
+    logUI("SAVE.DONE", `requestId=${requestId} chapterId=${chapterId} version=${result.version}`);
+    return result;
+  } catch (error) {
+    logUI("SAVE.ERROR", `requestId=${requestId} chapterId=${chapterId}`);
+    throw error;
+  }
 }
 
 export async function autosaveDraft(
@@ -142,9 +158,18 @@ export async function autosaveDraft(
   content: string,
   projectRoot: string
 ): Promise<string> {
-  return invokeCommand<string>("autosave_draft", {
-    input: { projectRoot, chapterId, content }
-  });
+  const requestId = createClientRequestId("autosave");
+  logUI("AUTOSAVE.START", `requestId=${requestId} chapterId=${chapterId}`);
+  try {
+    const result = await invokeCommand<string>("autosave_draft", {
+      input: { projectRoot, chapterId, content, requestId }
+    });
+    logUI("AUTOSAVE.DONE", `requestId=${requestId} chapterId=${chapterId}`);
+    return result;
+  } catch (error) {
+    logUI("AUTOSAVE.ERROR", `requestId=${requestId} chapterId=${chapterId}`);
+    throw error;
+  }
 }
 
 export async function recoverDraft(chapterId: string, projectRoot: string): Promise<RecoverDraftResult> {

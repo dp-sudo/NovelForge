@@ -1,6 +1,24 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { AppErrorDto } from "../types/error.js";
 
+type InvokeInput = Record<string, unknown> | undefined;
+
+interface InflightInvokeRecord {
+  callId: number;
+  command: string;
+  requestId?: string;
+  startedAt: number;
+}
+
+const inflightInvokes = new Map<number, InflightInvokeRecord>();
+let invokeSequence = 0;
+
+declare global {
+  interface Window {
+    __NOVELFORGE_INFLIGHT_DIAGNOSTIC_BOUND__?: boolean;
+  }
+}
+
 function parseTauriError(error: unknown): AppErrorDto {
   if (typeof error === "string") {
     try {
@@ -38,35 +56,98 @@ function nowISO(): string {
   return new Date().toISOString();
 }
 
-function logApiCall(command: string, input: Record<string, unknown> | undefined): void {
+function extractRequestId(input: InvokeInput): string | undefined {
+  if (!input) {
+    return undefined;
+  }
+  if (typeof input.requestId === "string" && input.requestId.trim()) {
+    return input.requestId.trim();
+  }
+  const nested = input.input;
+  if (nested && typeof nested === "object" && !Array.isArray(nested)) {
+    const candidate = (nested as Record<string, unknown>).requestId;
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+  return undefined;
+}
+
+function formatRequestLabel(requestId: string | undefined): string {
+  return requestId ? ` requestId=${requestId}` : "";
+}
+
+function logApiCall(callId: number, command: string, requestId: string | undefined, input: InvokeInput): void {
   const safe = input
     ? { ...input, apiKey: input.apiKey ? "[REDACTED]" : undefined, content: input.content ? `[${String(input.content).length} chars]` : undefined }
     : {};
-  console.log(`[${nowISO()}] [API] >> ${command}`, Object.keys(safe).length ? safe : "");
+  console.log(`[${nowISO()}] [API] >> #${callId} ${command}${formatRequestLabel(requestId)}`, Object.keys(safe).length ? safe : "");
 }
 
-function logApiResult(command: string, elapsedMs: number): void {
-  console.log(`[${nowISO()}] [API] << ${command} (${elapsedMs}ms)`);
+function logApiResult(callId: number, command: string, requestId: string | undefined, elapsedMs: number): void {
+  console.log(`[${nowISO()}] [API] << #${callId} ${command}${formatRequestLabel(requestId)} (${elapsedMs}ms)`);
 }
 
-function logApiError(command: string, elapsedMs: number, error: AppErrorDto): void {
-  console.warn(`[${nowISO()}] [API] !! ${command} (${elapsedMs}ms) FAILED: [${error.code}] ${error.message}`);
+function logApiError(callId: number, command: string, requestId: string | undefined, elapsedMs: number, error: AppErrorDto): void {
+  console.warn(`[${nowISO()}] [API] !! #${callId} ${command}${formatRequestLabel(requestId)} (${elapsedMs}ms) FAILED: [${error.code}] ${error.message}`);
+}
+
+function logInflightSnapshot(reason: string): void {
+  if (inflightInvokes.size === 0) {
+    return;
+  }
+  const details = Array.from(inflightInvokes.values())
+    .map((row) => {
+      const ageMs = Math.max(0, Math.round(performance.now() - row.startedAt));
+      return `#${row.callId} ${row.command}${formatRequestLabel(row.requestId)} age=${ageMs}ms`;
+    })
+    .join("; ");
+  console.warn(`[${nowISO()}] [API] !! in-flight invoke snapshot | reason=${reason} | count=${inflightInvokes.size} | ${details}`);
+}
+
+function bindUnloadDiagnosticsOnce(): void {
+  if (typeof window === "undefined" || window.__NOVELFORGE_INFLIGHT_DIAGNOSTIC_BOUND__) {
+    return;
+  }
+  window.__NOVELFORGE_INFLIGHT_DIAGNOSTIC_BOUND__ = true;
+  window.addEventListener("beforeunload", () => {
+    logInflightSnapshot("beforeunload");
+  });
+}
+
+bindUnloadDiagnosticsOnce();
+
+const hotContext = (import.meta as ImportMeta & {
+  hot?: {
+    on: (event: string, cb: () => void) => void;
+  };
+}).hot;
+
+if (hotContext) {
+  hotContext.on("vite:beforeFullReload", () => {
+    logInflightSnapshot("vite:beforeFullReload");
+  });
 }
 
 export async function invokeCommand<TOutput>(
   command: string,
   input?: Record<string, unknown>
 ): Promise<TOutput> {
+  const callId = ++invokeSequence;
+  const requestId = extractRequestId(input);
   const start = performance.now();
-  logApiCall(command, input);
+  inflightInvokes.set(callId, { callId, command, requestId, startedAt: start });
+  logApiCall(callId, command, requestId, input);
   try {
     const result = await invoke<TOutput>(command, input);
-    logApiResult(command, Math.round(performance.now() - start));
+    logApiResult(callId, command, requestId, Math.round(performance.now() - start));
     return result;
   } catch (error) {
     const parsed = parseTauriError(error);
-    logApiError(command, Math.round(performance.now() - start), parsed);
+    logApiError(callId, command, requestId, Math.round(performance.now() - start), parsed);
     throw parsed;
+  } finally {
+    inflightInvokes.delete(callId);
   }
 }
 

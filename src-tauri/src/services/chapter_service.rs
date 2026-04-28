@@ -74,6 +74,7 @@ pub struct AutosaveDraftInput {
     pub project_root: String,
     pub chapter_id: String,
     pub content: String,
+    pub request_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

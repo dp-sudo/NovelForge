@@ -102,8 +102,8 @@ function createEventStream<T>(
         }
       }
     } finally {
-      unlistenChunk();
-      unlistenDone();
+      await Promise.resolve(unlistenChunk()).catch(() => undefined);
+      await Promise.resolve(unlistenDone()).catch(() => undefined);
     }
   })();
 }

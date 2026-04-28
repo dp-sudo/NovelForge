@@ -1,114 +1,156 @@
 # NovelForge Windows 桌面端技术架构文档
 
 ## 1. 文档信息
-- 版本：v0.5
-- 状态：S17 发布能力接入（语义检索 / Git / 授权 / 自动更新）
-- 最后更新：2026-04-27
+- 版本：v0.6
+- 状态：S18（AI Pipeline v1 + 结构化草案池 + 写作风格 + 技能管理）
+- 最后更新：2026-04-28
 - 代码基线：`src/` + `src-tauri/src/`
 
 ## 2. 架构目标
-- 本地优先：项目数据与正文文件默认本机持久化
-- 主闭环优先：项目 -> 蓝图/资产 -> 章节写作 -> 检查 -> 导出
-- 安全基线：API Key 不写入项目目录和日志明文
-- 主链路收口：项目/蓝图/资产/章节/编辑/检查链路以 Tauri command 为唯一默认执行路径
+- 本地优先：项目数据与正文文件默认本机持久化。
+- 主闭环优先：项目 -> 蓝图/资产 -> 章节写作 -> AI 任务 -> 人工确认 -> 检查 -> 导出。
+- 安全基线：API Key 不写入项目目录与日志明文（存于 Windows Credential Manager）。
+- 主链路收口：前端业务能力默认通过 Tauri command 调用，不走并行 Node 业务运行时。
 
 ## 3. 技术栈
 - 桌面框架：Tauri 2.x
 - 前端：React + TypeScript + Zustand + Vite
 - 后端本地服务：Rust
 - 本地数据库：SQLite（`rusqlite`）
-- 网络客户端：`reqwest`（模型注册表与供应商能力探测）
+- 网络客户端：`reqwest`（模型探活、远端 registry 检查）
 
 ## 4. 分层设计（当前实现）
 ### 4.1 Renderer（`src/`）
-- 页面、交互、状态存储
-- 通过 `src/api/*` 调用 Tauri command
-- 兼容回退仅保留在非主闭环模块（如设置/导出）
-- S16 新增页面：`TimelinePage`, `RelationshipsPage`
+- 页面、交互、状态存储。
+- 通过 `src/api/*` 调用 Tauri command。
+- 编辑器 AI 主链路使用 `pipelineApi`（`runTaskPipeline` + `streamTaskPipelineByRequestId`）。
+- 编辑器右侧上下文面板支持：
+  - `assetCandidates` 候选采纳。
+  - `relationshipDrafts` / `involvementDrafts` / `sceneDrafts` 人工确认入库。
 
 ### 4.2 API 适配层（`src/api/*`）
-- `tauriClient.invokeCommand()` 统一 `invoke` 与错误解析
-- 主闭环 API 已去除隐式 fallback，强制透传 `projectRoot`
-- `contextApi` 已接入 Rust command（`get_chapter_context`）
-- S16 新增：`timelineApi`（`list_timeline_entries`）
-- S17 新增：`settingsApi` 中 Git/授权/更新调用（仍保持编辑器设置 localStorage）
+- `tauriClient.invokeCommand()` 统一调用与错误对象转换。
+- 关键模块：`projectApi`, `chapterApi`, `contextApi`, `pipelineApi`, `settingsApi`, `skillsApi`。
+- 当前业务 API 为 invoke-only（未使用 DevEngine fallback 主路径）。
 
 ### 4.3 Command 层（`src-tauri/src/commands/*`）
-- 参数反序列化、调用 service、返回 DTO
-- 由 `src-tauri/src/lib.rs` 统一注册 invoke handler
+- 参数反序列化、调用 service、返回 DTO。
+- 由 `src-tauri/src/lib.rs` 统一注册 invoke handler。
+- 重点新增面：
+  - AI Pipeline：`run_ai_task_pipeline`, `cancel_ai_task_pipeline`。
+  - 结构化确认：`apply_asset_candidate`, `apply_structured_draft`。
+  - 写作风格：`save_writing_style`, `get_writing_style`。
+  - 技能管理：`get_skill`, `get_skill_content`, `create_skill`, `update_skill`, `delete_skill`, `import_skill_file`, `reset_builtin_skill`, `refresh_skills`。
 
 ### 4.4 Service 层（`src-tauri/src/services/*`）
-- 业务规则、事务更新、导出、AI 调用、上下文收集、Prompt 构建
-- `AppState` 当前包含：
-  - `ProjectService`, `ChapterService`, `BlueprintService`
-  - `CharacterService`, `RelationshipService`
-  - `WorldService`, `GlossaryService`, `PlotService`
-  - `ConsistencyService`, `ExportService`, `DashboardService`
-  - `SettingsService`, `ModelRegistryService`
-  - `VectorService`, `GitService`, `LicenseService`
-  - `AiService`, `ContextService`, `SkillRegistry`
+- `AppState` 现有服务：
+  - `AiPipelineService`, `AiService`
+  - `BackupService`, `ImportService`
+  - `ProjectService`, `ChapterService`, `VolumeService`
+  - `BlueprintService`, `CharacterService`, `RelationshipService`
+  - `WorldService`, `GlossaryService`, `PlotService`, `NarrativeService`
+  - `ContextService`, `ConsistencyService`, `DashboardService`, `IntegrityService`
+  - `SearchService`, `VectorService`
+  - `SettingsService`, `ModelRegistryService`, `GitService`, `LicenseService`
+  - `SkillRegistry`
 
 ### 4.5 Infra 层（`src-tauri/src/infra/*`）
-- `database.rs`：项目级 SQLite schema
-- `app_database.rs`：应用级 SQLite schema
-- `credential_manager.rs`：Windows Credential Manager API Key 存取
-- `fs_utils.rs`：原子写入（temp + rename）
-- `path_utils.rs`、`recent_projects.rs`、`time.rs`
+- `migrator.rs` + `migrations/*`：项目库/应用库迁移管理。
+- `database.rs`：项目库初始化与兼容补列（含 `projects.writing_style`）。
+- `app_database.rs`：应用级 Provider/模型/路由/编辑器配置存储。
+- `credential_manager.rs`：API Key 与系统凭据管理。
+- `fs_utils.rs`：原子写入（temp + rename）。
+- `recent_projects.rs`, `path_utils.rs`, `time.rs` 等基础设施。
 
 ## 5. 数据与存储协议
 ### 5.1 项目目录协议（Project Root）
 - `project.json`
 - `database/project.sqlite`
-- `manuscript/chapters/`（章节正文）
-- `manuscript/drafts/`（自动保存草稿）
-- `database/vector-index.json`（本地语义检索索引）
-- `.git/`（可选，Git 快照功能初始化后创建）
+- `manuscript/chapters/`（正文）
+- `manuscript/drafts/`（自动保存）
+- `manuscript/snapshots/`（章节快照）
+- `database/vector-index.json`（语义索引）
 - `exports/`
-- 以及 `blueprint/`, `assets/`, `prompts/`, `workflows/`, `logs/` 等目录
+- `backups/`
+- 可选 `.git/`（Git 快照能力初始化后创建）
 
 ### 5.2 项目级数据库（`database/project.sqlite`）
-- 核心表：`projects`, `chapters`, `blueprint_steps`, `characters`, `world_rules`, `glossary_terms`, `plot_nodes`, `chapter_links`, `consistency_issues`, `character_relationships`, `snapshots`, `volumes`
-- 运行表：`ai_requests`
-- 兼容性保留表：`llm_providers`, `llm_models`, `llm_task_routes`, `llm_model_registry_state`, `llm_model_refresh_logs`
+- 核心表：
+  - `projects`, `chapters`, `blueprint_steps`, `characters`, `world_rules`, `glossary_terms`, `plot_nodes`, `chapter_links`
+  - `character_relationships`, `consistency_issues`, `narrative_obligations`, `snapshots`, `volumes`
+- AI/运行审计表：
+  - `ai_requests`
+  - `ai_pipeline_runs`
+  - `structured_draft_batches`
+  - `structured_draft_items`
+- 迁移现状：
+  - `project/0001_init.sql`
+  - `project/0002_task_route_unique.sql`（任务类型 canonical + 去重 + 唯一索引）
+  - `project/0003_pipeline_draft_pool.sql`（Pipeline run 审计 + 草案池）
+- 兼容补列：
+  - `database.rs::ensure_compatible_schema()` 在打开/初始化时补齐 `projects.writing_style` 等历史缺列。
 
 ### 5.3 应用级数据库（`~/.novelforge/novelforge.db`）
-- `llm_providers`, `llm_models`, `llm_model_refresh_logs`, `llm_task_routes`, `llm_model_registry_state`, `app_settings`
-- 用于跨项目 Provider/模型/路由配置
+- 表：`llm_providers`, `llm_models`, `llm_model_refresh_logs`, `llm_task_routes`, `llm_model_registry_state`, `app_settings`
+- 迁移现状：
+  - `app/0001_init.sql`
+  - `app/0002_skill_index.sql`
+  - `app/0003_task_route_unique.sql`（canonical + 去重 + `task_type` 唯一索引）
+- 编辑器设置通过 `app_settings` 的 `editor_settings` 键持久化。
 
 ### 5.4 应用级本地文件
-- `~/.novelforge/license.json`：授权离线缓存（掩码 + hash + 激活时间）
+- `~/.novelforge/license.json`：授权离线缓存。
 
 ## 6. AI 架构（当前）
-- Prompt 构建：`PromptBuilder`（章节草稿、续写、改写、去 AI 味、蓝图建议、角色生成、一致性扫描）
-- 上下文收集：`ContextService`（全局 + 章节关联 + 上一章摘要 + 资产抽取候选）
-- 任务路由：`AiService.generate_text()` 支持 `task_type -> llm_task_routes`
-- 流式路由：`AiService.stream_generate()` 同步支持 `task_type -> llm_task_routes`，并在运行时懒加载 Provider 适配器
-- 流式事件：`ai:stream-chunk:{id}`、`ai:stream-done:{id}`
-- 模型管理：`ModelRegistryService` 支持刷新模型、读取刷新日志、检查/应用远端 registry（含 URL 安全约束、Schema 与签名字段校验闸）
+### 6.1 任务路由与 canonical
+- 路由表：应用级 `llm_task_routes`。
+- canonical 函数：`task_routing::canonical_task_type()`。
+- 路由解析：`AiService::resolve_route()`。
+- 未命中核心任务时，可回退 `custom` 路由（若已配置）。
 
-## 7. 命令面（摘要）
-- Project：`validate_project`, `create_project`, `open_project`, `list_recent_projects`, `clear_recent_projects`, `init_project_repository`, `get_project_repository_status`, `commit_project_snapshot`, `list_project_history`
-- Chapter：`list_chapters`, `list_timeline_entries`, `create_chapter`, `save_chapter_content`, `autosave_draft`, `recover_draft`, `delete_chapter`
-- Search：`search_project`, `search_project_semantic`, `rebuild_search_index`, `rebuild_vector_index`
-- Context：`get_chapter_context`
-- Blueprint / Character / World / Glossary / Plot / Consistency / Dashboard：对应 CRUD 与统计命令
-- Export：`export_chapter`, `export_book`（`txt/md/docx/pdf/epub`）
-- Settings：授权、自动更新、Provider、模型刷新、任务路由、远端 registry、兼容命令
-- AI：`generate_ai_preview`, `stream_ai_generate`, `stream_ai_chapter_task`, `ai_scan_consistency`, `generate_blueprint_suggestion`, `ai_generate_character`, `register_ai_provider`, `test_ai_connection`, `list_skills`
+### 6.2 Pipeline 编排（`AiPipelineService`）
+- 阶段：`validate -> context -> route -> prompt -> generate -> postprocess -> persist -> done`
+- 命令入口：
+  - `run_ai_task_pipeline`（新协议）
+  - `stream_ai_chapter_task`（兼容入口，内部桥接到 pipeline）
+  - `cancel_ai_task_pipeline`
+- 事件协议：
+  - 主事件：`ai:pipeline:event`
+  - 事件类型：`start | progress | delta | done | error`
+  - 兼容桥接：`ai:stream-chunk:{requestId}` / `ai:stream-done:{requestId}`
+
+### 6.3 Prompt 解析策略
+- 优先读取技能 Markdown 模板（`SkillRegistry`）。
+- 未命中模板时回退 `PromptBuilder`。
+- `projects.writing_style` 会注入到 PromptBuilder 输出（适用章节/改写/检查等任务）。
+
+### 6.4 编辑器结构化抽取闭环
+- `ContextService.collect_editor_context()` 从章节内容抽取：
+  - 资产候选：`assetCandidates`
+  - 结构化草案：`relationshipDrafts`, `involvementDrafts`, `sceneDrafts`
+- 抽取结果先进入草案池（pending）。
+- 用户在 UI 手动确认后调用 `apply_structured_draft` 落库并回写状态。
+
+## 7. 命令面（按域摘要）
+- Project：项目创建/打开/最近项目 + 写作风格保存读取 + Git 仓库与快照。
+- Chapter：章节 CRUD、重排、自动保存/恢复、快照、卷管理。
+- AI：预览、legacy stream、pipeline run/cancel、章节流式任务、蓝图/角色/设定/剧情/一致性 AI 任务。
+- Context：上下文聚合、资产候选采纳、结构化草案确认。
+- Settings：Provider/模型/路由/registry、编辑器设置、授权、更新。
+- Skills：技能列表/详情/内容读取、创建、编辑、删除、导入、重置、重载。
+- Search/Integrity：关键字+语义检索、索引重建、项目完整性检查。
 
 ## 8. 当前过渡态与风险
-- 导出链路仍保留兼容 fallback，需在后续阶段收口。
-- 编辑器设置仍使用 localStorage，尚未迁移到应用级配置存储。
-- 向量索引会随章节规模增长，需通过分块上限控制磁盘占用。
-- Git 快照依赖本机 `git` 可执行文件；缺失时会返回明确错误码。
-- 自动更新依赖发布端点与签名配置，配置错误会导致更新失败。
-- 若前端 DTO 与 `get_chapter_context` 返回结构漂移，编辑器上下文面板会出现渲染异常。
-- `SkillRegistry` 在 `AppState::default()` 下为默认空集合；`list_skills` 当前可能返回空。
-- AI 流式路径依赖 Provider 注册与路由配置，未完成配置时可能无有效内容输出。
+- `generate_ai_preview` 与 `stream_ai_generate` 仍保留兼容路径（主链路已切到 pipeline）。
+- Pipeline 对模型可用性、API Key、路由配置依赖强，未配置时会在 `route/generate` 阶段显式失败。
+- 结构化抽取为启发式规则，存在误报；当前策略是“先草案、再人工确认入库”。
+- 向量索引与草案池都会随项目规模增长，需持续关注 DB 体积与索引策略。
+- 自动更新仍依赖发布端点与签名配置。
 
 ## 9. 文档维护规则
 以下变更必须同步更新本文档：
-- `AppState` service 组成变化
-- 新增/删除 command
-- 存储协议（目录/数据库/凭据）变化
-- AI 调用链或路由策略变化
+- `AppState` 服务组成变化。
+- Tauri command 注册增删。
+- 迁移文件新增/删除、索引策略变化、兼容补列策略变化。
+- AI Pipeline 阶段、事件协议、错误码语义变化。
+- 结构化草案池字段与“人工确认入库”行为变化。

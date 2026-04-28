@@ -156,6 +156,20 @@ pub async fn run_ai_task_pipeline(
     state: State<'_, AppState>,
 ) -> Result<String, AppErrorDto> {
     let request_id = Uuid::new_v4().to_string();
+    crate::infra::logger::log_user_action(
+        "pipeline.start",
+        &format!(
+            "requestId={}, taskType={}, chapterId={}",
+            request_id,
+            input.task_type,
+            input
+                .chapter_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+                .unwrap_or("n/a")
+        ),
+    );
     spawn_pipeline_run(&app_handle, &state, request_id.clone(), input, false, None);
     Ok(request_id)
 }
@@ -165,6 +179,10 @@ pub async fn cancel_ai_task_pipeline(
     request_id: String,
     state: State<'_, AppState>,
 ) -> Result<(), AppErrorDto> {
+    crate::infra::logger::log_user_action(
+        "pipeline.cancel",
+        &format!("requestId={}", request_id),
+    );
     state
         .ai_pipeline_service
         .cancel_ai_task_pipeline(&request_id)
@@ -314,12 +332,32 @@ fn spawn_pipeline_run(
                 input,
             )
             .await;
-        if run_result.is_err() {
-            crate::infra::logger::log_service(
-                "ai_commands",
-                "run_ai_task_pipeline",
-                "pipeline request failed",
-            );
+        match run_result {
+            Ok(result) => {
+                crate::infra::logger::log_user_action(
+                    "pipeline.done",
+                    &format!(
+                        "requestId={}, status={}, taskType={}",
+                        request_id, result.status, result.task_type
+                    ),
+                );
+            }
+            Err(err) => {
+                if err.code == "PIPELINE_CANCELLED" {
+                    crate::infra::logger::log_user_action(
+                        "pipeline.cancelled",
+                        &format!("requestId={}, reason=cancelled_by_client", request_id),
+                    );
+                } else {
+                    crate::infra::logger::log_command_error(
+                        "run_ai_task_pipeline",
+                        &format!(
+                            "requestId={}, code={}, message={}",
+                            request_id, err.code, err.message
+                        ),
+                    );
+                }
+            }
         }
         if with_legacy_bridge {
             if let Some(listener_id) = legacy_listener_id {
