@@ -1,12 +1,24 @@
 import { invokeCommand } from "./tauriClient.js";
 import type { AiPreviewRequest, AiPreviewResponse } from "../domain/types.js";
 import { listen } from "@tauri-apps/api/event";
+import {
+  streamTaskPipeline,
+  type AiPipelineEvent,
+  type RunTaskPipelineInput,
+  runTaskPipeline,
+  cancelTaskPipeline,
+} from "./pipelineApi.js";
 
 export interface AiStreamEvent {
   requestId: string;
-  type: "start" | "delta" | "done" | "error";
+  type: "start" | "delta" | "progress" | "done" | "error";
+  phase?: string;
   delta?: string;
   error?: string;
+  errorCode?: string;
+  message?: string;
+  recoverable?: boolean;
+  meta?: Record<string, unknown> | null;
   reasoning?: string;
 }
 
@@ -121,28 +133,21 @@ export interface ChapterTaskInput {
 export async function* streamAiChapterTask(
   input: ChapterTaskInput
 ): AsyncGenerator<AiStreamEvent> {
-  const requestId = await invokeCommand<string>("stream_ai_chapter_task", { input });
+  const pipelineInput: RunTaskPipelineInput = {
+    projectRoot: input.projectRoot,
+    taskType: input.taskType,
+    chapterId: input.chapterId,
+    uiAction: "stream_ai_chapter_task",
+    userInstruction: input.userInstruction,
+    selectedText: input.selectedText,
+  };
 
-  yield* createEventStream<{ content: string; finishReason: string | null; requestId: string; error?: string; reasoning?: string }>(
-    requestId,
-    `ai:stream-chunk:${requestId}`,
-    `ai:stream-done:${requestId}`,
-    (payload) => {
-      if (payload.error) {
-        return { requestId, type: "error", error: payload.error };
-      }
-      if (payload.reasoning) {
-        return { requestId, type: "delta", reasoning: payload.reasoning };
-      }
-      if (payload.content) {
-        return { requestId, type: "delta", delta: payload.content };
-      }
-      if (payload.finishReason) {
-        return { requestId, type: "done" };
-      }
-      return null;
+  for await (const event of streamTaskPipeline(pipelineInput)) {
+    const mapped = mapPipelineEventToAiStream(event);
+    if (mapped) {
+      yield mapped;
     }
-  );
+  }
 }
 
 // ── Legacy streaming generate (kept for backward compat) ──
@@ -182,3 +187,37 @@ export async function* streamAiGenerate(
     }
   );
 }
+
+function mapPipelineEventToAiStream(event: AiPipelineEvent): AiStreamEvent | null {
+  const base = {
+    requestId: event.requestId,
+    phase: event.phase,
+    errorCode: event.errorCode,
+    message: event.message,
+    recoverable: event.recoverable,
+    meta: event.meta,
+  };
+
+  if (event.type === "start") {
+    return { ...base, type: "start" };
+  }
+  if (event.type === "progress") {
+    return { ...base, type: "progress" };
+  }
+  if (event.type === "done") {
+    return { ...base, type: "done" };
+  }
+  if (event.type === "error") {
+    return {
+      ...base,
+      type: "error",
+      error: event.message || event.errorCode || "AI 生成异常",
+    };
+  }
+  if (event.type === "delta" && event.delta) {
+    return { ...base, type: "delta", delta: event.delta };
+  }
+  return null;
+}
+
+export { runTaskPipeline, cancelTaskPipeline };
