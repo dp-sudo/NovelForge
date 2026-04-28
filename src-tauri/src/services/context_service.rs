@@ -9,6 +9,7 @@ use uuid::Uuid;
 
 use crate::errors::AppErrorDto;
 use crate::infra::database::open_database;
+use crate::infra::path_utils::resolve_project_relative_path;
 use crate::infra::time::now_iso;
 use crate::services::import_service::{extract_asset_candidates, AssetExtractionCandidate};
 use crate::services::project_service::{get_project_id, WritingStyle};
@@ -274,18 +275,31 @@ impl ContextService {
             .ok_or_else(|| AppErrorDto::new("CHAPTER_NOT_FOUND", "章节不存在", true))?;
         let glossary = self.collect_glossary_context(&conn, &project_id)?;
         let blueprint = self.collect_blueprint_context(&conn, &project_id)?;
-        let chapter_content = conn
+        let chapter_content = match conn
             .query_row(
                 "SELECT content_path FROM chapters WHERE id = ?1 AND is_deleted = 0",
                 params![chapter_id],
                 |row| row.get::<_, String>(0),
             )
             .optional()
-            .ok()
-            .flatten()
-            .and_then(|content_path| fs::read_to_string(project_root_path.join(content_path)).ok())
-            .map(|content| strip_frontmatter(&content))
-            .unwrap_or_default();
+            .map_err(|err| {
+                AppErrorDto::new("CONTEXT_COLLECT_FAILED", "无法读取章节路径", true)
+                    .with_detail(err.to_string())
+            })? {
+            Some(content_path) => {
+                let chapter_file = resolve_project_relative_path(project_root_path, &content_path)
+                    .map_err(|detail| {
+                        AppErrorDto::new("CONTEXT_COLLECT_FAILED", "章节路径无效", true)
+                            .with_detail(detail)
+                    })?;
+                let content = fs::read_to_string(&chapter_file).map_err(|err| {
+                    AppErrorDto::new("CONTEXT_COLLECT_FAILED", "无法读取章节正文", true)
+                        .with_detail(err.to_string())
+                })?;
+                strip_frontmatter(&content)
+            }
+            None => String::new(),
+        };
         let mut existing_labels: Vec<String> = Vec::new();
         existing_labels.extend(related.characters.iter().map(|item| item.name.clone()));
         existing_labels.extend(related.world_rules.iter().map(|item| item.title.clone()));
@@ -605,10 +619,8 @@ impl ContextService {
             let payload: serde_json::Value =
                 serde_json::from_str(&item.4).unwrap_or_else(|_| serde_json::Value::Null);
             if relationship_type.is_none() {
-                relationship_type = payload_lookup_string(
-                    &payload,
-                    &["relationshipType", "relationship_type"],
-                );
+                relationship_type =
+                    payload_lookup_string(&payload, &["relationshipType", "relationship_type"]);
             }
             if involvement_type.is_none() {
                 involvement_type =
@@ -852,7 +864,11 @@ impl ContextService {
                      updated_at = ?2
                  WHERE id = ?3",
                 params![
-                    if pending_count == 0 { "applied" } else { "pending" },
+                    if pending_count == 0 {
+                        "applied"
+                    } else {
+                        "pending"
+                    },
                     &now,
                     &batch_id
                 ],
@@ -972,7 +988,8 @@ impl ContextService {
             })?;
 
         let now = now_iso();
-        let (run_id, batch_id) = if let Some((existing_batch_id, existing_run_id)) = existing_batch {
+        let (run_id, batch_id) = if let Some((existing_batch_id, existing_run_id)) = existing_batch
+        {
             (existing_run_id, existing_batch_id)
         } else {
             let run_id = Uuid::new_v4().to_string();
@@ -1044,10 +1061,15 @@ impl ContextService {
                         .with_detail(err.to_string())
                 })?;
 
-            if let Some((existing_id, existing_occurrences, existing_confidence, existing_evidence)) =
-                existing_pending
+            if let Some((
+                existing_id,
+                existing_occurrences,
+                existing_confidence,
+                existing_evidence,
+            )) = existing_pending
             {
-                let merged_evidence = merge_draft_evidence(existing_evidence.as_deref(), &row.evidence_text);
+                let merged_evidence =
+                    merge_draft_evidence(existing_evidence.as_deref(), &row.evidence_text);
                 tx.execute(
                     "UPDATE structured_draft_items
                      SET batch_id = ?1,
@@ -1065,7 +1087,9 @@ impl ContextService {
                         &run_id,
                         chapter_id,
                         row.target_label.as_deref(),
-                        (existing_confidence.unwrap_or(0.0_f64).max(row.confidence as f64)),
+                        (existing_confidence
+                            .unwrap_or(0.0_f64)
+                            .max(row.confidence as f64)),
                         existing_occurrences.max(row.occurrences),
                         merged_evidence,
                         &row.payload_json,
@@ -1129,7 +1153,14 @@ impl ContextService {
         conn: &rusqlite::Connection,
         project_id: &str,
         chapter_id: &str,
-    ) -> Result<(Vec<RelationshipDraft>, Vec<InvolvementDraft>, Vec<SceneDraft>), AppErrorDto> {
+    ) -> Result<
+        (
+            Vec<RelationshipDraft>,
+            Vec<InvolvementDraft>,
+            Vec<SceneDraft>,
+        ),
+        AppErrorDto,
+    > {
         let mut relationship_drafts: Vec<RelationshipDraft> = Vec::new();
         let mut involvement_drafts: Vec<InvolvementDraft> = Vec::new();
         let mut scene_drafts: Vec<SceneDraft> = Vec::new();
@@ -1161,7 +1192,8 @@ impl ContextService {
                 ))
             })
             .map_err(|err| {
-                AppErrorDto::new("DB_QUERY_FAILED", "查询草案池失败", true).with_detail(err.to_string())
+                AppErrorDto::new("DB_QUERY_FAILED", "查询草案池失败", true)
+                    .with_detail(err.to_string())
             })?;
 
         for row in rows {
@@ -1177,7 +1209,8 @@ impl ContextService {
                 payload_json,
                 status,
             ) = row.map_err(|err| {
-                AppErrorDto::new("DB_QUERY_FAILED", "解析草案池失败", true).with_detail(err.to_string())
+                AppErrorDto::new("DB_QUERY_FAILED", "解析草案池失败", true)
+                    .with_detail(err.to_string())
             })?;
             let payload: serde_json::Value =
                 serde_json::from_str(&payload_json).unwrap_or_else(|_| serde_json::Value::Null);
@@ -1773,7 +1806,11 @@ fn normalize_label_key(value: &str) -> String {
         .to_ascii_lowercase()
 }
 
-fn normalized_relationship_key(source_label: &str, target_label: &str, relationship_type: &str) -> String {
+fn normalized_relationship_key(
+    source_label: &str,
+    target_label: &str,
+    relationship_type: &str,
+) -> String {
     let mut pair = [
         normalize_label_key(source_label),
         normalize_label_key(target_label),
@@ -1787,7 +1824,11 @@ fn normalized_relationship_key(source_label: &str, target_label: &str, relations
     )
 }
 
-fn normalized_involvement_key(chapter_id: &str, character_label: &str, involvement_type: &str) -> String {
+fn normalized_involvement_key(
+    chapter_id: &str,
+    character_label: &str,
+    involvement_type: &str,
+) -> String {
     format!(
         "inv:{}|{}|{}",
         normalize_label_key(chapter_id),
@@ -2348,7 +2389,10 @@ mod tests {
             )
             .expect("apply structured item");
         assert_eq!(applied.action, "created");
-        assert_eq!(applied.draft_item_id.as_deref(), Some(relationship.id.as_str()));
+        assert_eq!(
+            applied.draft_item_id.as_deref(),
+            Some(relationship.id.as_str())
+        );
 
         let conn = open_database(std::path::Path::new(&project.project_root)).expect("open db");
         let (status, target_id): (String, Option<String>) = conn

@@ -36,7 +36,9 @@ impl SearchService {
             "DELETE FROM search_index WHERE entity_type = ?1 AND entity_id = ?2",
             params![entity_type, entity_id],
         )
-        .ok();
+        .map_err(|e| {
+            AppErrorDto::new("SEARCH_INDEX_FAILED", "索引写入失败", true).with_detail(e.to_string())
+        })?;
         conn.execute(
             "INSERT INTO search_index(entity_type, entity_id, title, body) VALUES (?1, ?2, ?3, ?4)",
             params![entity_type, entity_id, title, body],
@@ -113,8 +115,11 @@ impl SearchService {
                 AppErrorDto::new("SEARCH_QUERY_FAILED", "搜索查询失败", true)
                     .with_detail(e.to_string())
             })?
-            .filter_map(|r| r.ok())
-            .collect();
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| {
+                AppErrorDto::new("SEARCH_QUERY_FAILED", "搜索查询失败", true)
+                    .with_detail(e.to_string())
+            })?;
 
         Ok(results)
     }
@@ -124,7 +129,10 @@ impl SearchService {
         let conn = open_database(Path::new(project_root)).map_err(|e| {
             AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
         })?;
-        conn.execute("DELETE FROM search_index", []).ok();
+        conn.execute("DELETE FROM search_index", []).map_err(|e| {
+            AppErrorDto::new("SEARCH_REBUILD_FAILED", "重建索引失败", true)
+                .with_detail(e.to_string())
+        })?;
         let mut indexed = 0usize;
 
         for (stmt_sql, etype, title_col, body_col) in [
@@ -134,22 +142,35 @@ impl SearchService {
             ("SELECT id, term, COALESCE(description,'') FROM glossary_terms", "glossary", 1, 2),
             ("SELECT id, title, COALESCE(goal,'')||' '||COALESCE(conflict,'') FROM plot_nodes", "plot_node", 1, 2),
         ] {
-            if let Ok(mut stmt) = conn.prepare(stmt_sql) {
-                if let Ok(rows) = stmt.query_map([], |row| {
+            let mut stmt = conn.prepare(stmt_sql).map_err(|e| {
+                AppErrorDto::new("SEARCH_REBUILD_FAILED", "重建索引失败", true)
+                    .with_detail(e.to_string())
+            })?;
+            let rows = stmt
+                .query_map([], |row| {
                     Ok((
                         row.get::<_, String>(0)?,
                         row.get::<_, String>(title_col)?,
                         row.get::<_, String>(body_col)?,
                     ))
-                }) {
-                    for row in rows.flatten() {
-                        conn.execute(
-                            "INSERT INTO search_index(entity_type, entity_id, title, body) VALUES (?1, ?2, ?3, ?4)",
-                            params![etype, row.0, row.1, row.2],
-                        ).ok();
-                        indexed += 1;
-                    }
-                }
+                })
+                .map_err(|e| {
+                    AppErrorDto::new("SEARCH_REBUILD_FAILED", "重建索引失败", true)
+                        .with_detail(e.to_string())
+                })?;
+            for row in rows {
+                let row = row.map_err(|e| {
+                    AppErrorDto::new("SEARCH_REBUILD_FAILED", "重建索引失败", true)
+                        .with_detail(e.to_string())
+                })?;
+                conn.execute(
+                    "INSERT INTO search_index(entity_type, entity_id, title, body) VALUES (?1, ?2, ?3, ?4)",
+                    params![etype, row.0, row.1, row.2],
+                ).map_err(|e| {
+                    AppErrorDto::new("SEARCH_REBUILD_FAILED", "重建索引失败", true)
+                        .with_detail(e.to_string())
+                })?;
+                indexed += 1;
             }
         }
         Ok(indexed)

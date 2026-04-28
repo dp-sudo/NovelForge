@@ -10,6 +10,7 @@ use zip::{CompressionMethod, ZipWriter};
 
 use crate::errors::AppErrorDto;
 use crate::infra::database::open_database;
+use crate::infra::path_utils::resolve_project_relative_path;
 use crate::infra::time::now_iso;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -127,12 +128,12 @@ impl ExportService {
             })?
             .ok_or_else(|| AppErrorDto::new("CHAPTER_NOT_FOUND", "章节不存在", true))?;
 
-        let content =
-            fs::read_to_string(project_root_path.join(&chapter.content_path)).map_err(|err| {
-                AppErrorDto::new("EXPORT_FAILED", "导出失败", true)
-                    .with_detail(err.to_string())
-                    .with_suggested_action("请检查章节文件是否存在")
-            })?;
+        let chapter_file = resolve_export_path(project_root_path, &chapter.content_path)?;
+        let content = fs::read_to_string(chapter_file).map_err(|err| {
+            AppErrorDto::new("EXPORT_FAILED", "导出失败", true)
+                .with_detail(err.to_string())
+                .with_suggested_action("请检查章节文件是否存在")
+        })?;
         let chapter_payload = RenderedChapter {
             title: chapter.title,
             summary: chapter.summary,
@@ -216,12 +217,12 @@ impl ExportService {
                     .with_detail(err.to_string())
                     .with_suggested_action("请检查章节读取过程")
             })?;
-            let content = fs::read_to_string(project_root_path.join(&chapter.content_path))
-                .map_err(|err| {
-                    AppErrorDto::new("EXPORT_FAILED", "导出失败", true)
-                        .with_detail(err.to_string())
-                        .with_suggested_action("请检查章节文件是否存在")
-                })?;
+            let chapter_file = resolve_export_path(project_root_path, &chapter.content_path)?;
+            let content = fs::read_to_string(chapter_file).map_err(|err| {
+                AppErrorDto::new("EXPORT_FAILED", "导出失败", true)
+                    .with_detail(err.to_string())
+                    .with_suggested_action("请检查章节文件是否存在")
+            })?;
             chapters.push(RenderedChapter {
                 title: chapter.title,
                 summary: chapter.summary,
@@ -306,6 +307,14 @@ fn resolve_output_path(project_root: &Path, output_path: &str) -> PathBuf {
     } else {
         project_root.join(path)
     }
+}
+
+fn resolve_export_path(project_root: &Path, stored_path: &str) -> Result<PathBuf, AppErrorDto> {
+    resolve_project_relative_path(project_root, stored_path).map_err(|detail| {
+        AppErrorDto::new("EXPORT_FAILED", "导出失败", true)
+            .with_detail(detail)
+            .with_suggested_action("请检查项目数据库中的路径字段")
+    })
 }
 
 fn render_text_export(

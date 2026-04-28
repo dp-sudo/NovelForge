@@ -191,10 +191,14 @@ fn validate_provider_config(config: &mut ProviderConfig) -> Result<(), AppErrorD
         AppErrorDto::new("INVALID_BASE_URL", "Provider base URL is invalid", true)
             .with_detail(err.to_string())
     })?;
-    if parsed.scheme() != "http" && parsed.scheme() != "https" {
+    if parsed.scheme() == "https" {
+        // secure default
+    } else if parsed.scheme() == "http" && is_loopback_host(parsed.host_str()) {
+        // allow local development endpoints
+    } else {
         return Err(AppErrorDto::new(
             "INVALID_BASE_URL_SCHEME",
-            "Provider base URL must use http:// or https://",
+            "Provider base URL must use https:// (http:// is allowed only for localhost/loopback)",
             true,
         ));
     }
@@ -250,6 +254,13 @@ fn build_adapter(config: ProviderConfig) -> Box<dyn LlmService> {
     }
 }
 
+fn is_loopback_host(host: Option<&str>) -> bool {
+    matches!(
+        host.unwrap_or("").to_ascii_lowercase().as_str(),
+        "localhost" | "127.0.0.1" | "::1"
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -285,5 +296,20 @@ mod tests {
         cfg.endpoint_path = None;
         validate_provider_config(&mut cfg).expect("custom anthropic config should be valid");
         assert_eq!(cfg.endpoint_path.as_deref(), Some("/messages"));
+    }
+
+    #[test]
+    fn reject_non_loopback_http_provider_base_url() {
+        let mut cfg = base_custom_config();
+        cfg.base_url = "http://api.example.com/v1".to_string();
+        let err = validate_provider_config(&mut cfg).expect_err("public http should be rejected");
+        assert_eq!(err.code, "INVALID_BASE_URL_SCHEME");
+    }
+
+    #[test]
+    fn allow_loopback_http_provider_base_url() {
+        let mut cfg = base_custom_config();
+        cfg.base_url = "http://127.0.0.1:11434/v1".to_string();
+        validate_provider_config(&mut cfg).expect("loopback http should remain allowed");
     }
 }

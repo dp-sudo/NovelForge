@@ -1,4 +1,5 @@
 use base64::Engine as _;
+use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use uuid::Uuid;
 
 use crate::adapters::llm_types::*;
@@ -150,9 +151,9 @@ impl ModelRegistryService {
         let now = crate::infra::time::now_iso();
         let parsed_url = validate_registry_url(url)?;
         let payload = fetch_registry_payload(parsed_url.as_str()).await?;
-        let registry = parse_registry_document(&payload)?;
+        let (registry, registry_json) = parse_registry_payload(&payload)?;
         validate_registry_document(&registry)?;
-        verify_registry_signature(&registry, parsed_url.host_str())?;
+        verify_registry_signature(&registry, &registry_json, parsed_url.host_str())?;
 
         let registry_version = registry.registry_version.clone();
         let registry_updated_at = registry.updated_at.clone();
@@ -205,9 +206,9 @@ impl ModelRegistryService {
         let now = crate::infra::time::now_iso();
         let parsed_url = validate_registry_url(url)?;
         let payload = fetch_registry_payload(parsed_url.as_str()).await?;
-        let registry = parse_registry_document(&payload)?;
+        let (registry, registry_json) = parse_registry_payload(&payload)?;
         validate_registry_document(&registry)?;
-        verify_registry_signature(&registry, parsed_url.host_str())?;
+        verify_registry_signature(&registry, &registry_json, parsed_url.host_str())?;
 
         let mut conn = app_database::open_or_create()?;
         let tx = conn.transaction().map_err(|e| {
@@ -330,7 +331,7 @@ pub struct RegistryApplyResult {
     pub applied_at: String,
 }
 
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RegistryDocument {
     schema_version: String,
@@ -340,14 +341,14 @@ struct RegistryDocument {
     signing: RegistrySigning,
 }
 
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RegistryProviderEntry {
     vendor: String,
     models: Vec<RegistryModelEntry>,
 }
 
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RegistryModelEntry {
     model_name: String,
@@ -371,11 +372,13 @@ struct RegistryModelEntry {
     status: Option<String>,
 }
 
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RegistrySigning {
     algorithm: String,
     signature: String,
+    #[serde(default)]
+    public_key: Option<String>,
 }
 
 fn validate_registry_url(url: &str) -> Result<reqwest::Url, AppErrorDto> {
@@ -436,15 +439,26 @@ async fn fetch_registry_payload(url: &str) -> Result<String, AppErrorDto> {
     })
 }
 
-fn parse_registry_document(payload: &str) -> Result<RegistryDocument, AppErrorDto> {
-    serde_json::from_str::<RegistryDocument>(payload).map_err(|e| {
+fn parse_registry_payload(
+    payload: &str,
+) -> Result<(RegistryDocument, serde_json::Value), AppErrorDto> {
+    let json = serde_json::from_str::<serde_json::Value>(payload).map_err(|e| {
         AppErrorDto::new(
             "REGISTRY_PARSE_FAILED",
             "Invalid registry JSON schema",
             false,
         )
         .with_detail(e.to_string())
-    })
+    })?;
+    let registry = serde_json::from_value::<RegistryDocument>(json.clone()).map_err(|e| {
+        AppErrorDto::new(
+            "REGISTRY_PARSE_FAILED",
+            "Invalid registry JSON schema",
+            false,
+        )
+        .with_detail(e.to_string())
+    })?;
+    Ok((registry, json))
 }
 
 fn validate_registry_document(registry: &RegistryDocument) -> Result<(), AppErrorDto> {
@@ -493,6 +507,7 @@ fn validate_registry_document(registry: &RegistryDocument) -> Result<(), AppErro
 
 fn verify_registry_signature(
     registry: &RegistryDocument,
+    registry_json: &serde_json::Value,
     host: Option<&str>,
 ) -> Result<(), AppErrorDto> {
     let algorithm = registry.signing.algorithm.trim().to_lowercase();
@@ -507,7 +522,7 @@ fn verify_registry_signature(
 
     match algorithm.as_str() {
         "ed25519" => {
-            let bytes = base64::engine::general_purpose::STANDARD
+            let signature_bytes = base64::engine::general_purpose::STANDARD
                 .decode(signature)
                 .map_err(|e| {
                     AppErrorDto::new(
@@ -517,14 +532,74 @@ fn verify_registry_signature(
                     )
                     .with_detail(e.to_string())
                 })?;
-            if bytes.len() != 64 {
+            if signature_bytes.len() != 64 {
                 return Err(AppErrorDto::new(
                     "REGISTRY_SIGNATURE_INVALID",
                     "Registry signature length is invalid for ed25519",
                     false,
                 ));
             }
-            Ok(())
+            let signature = Signature::from_slice(&signature_bytes).map_err(|e| {
+                AppErrorDto::new(
+                    "REGISTRY_SIGNATURE_INVALID",
+                    "Registry signature cannot be parsed",
+                    false,
+                )
+                .with_detail(e.to_string())
+            })?;
+
+            let public_key_b64 = resolve_registry_public_key(registry, host).ok_or_else(|| {
+                AppErrorDto::new(
+                    "REGISTRY_SIGNATURE_INVALID",
+                    "Trusted registry public key is missing",
+                    false,
+                )
+            })?;
+            let public_key_bytes = base64::engine::general_purpose::STANDARD
+                .decode(public_key_b64.trim())
+                .map_err(|e| {
+                    AppErrorDto::new(
+                        "REGISTRY_SIGNATURE_INVALID",
+                        "Registry public key is not valid base64",
+                        false,
+                    )
+                    .with_detail(e.to_string())
+                })?;
+            if public_key_bytes.len() != 32 {
+                return Err(AppErrorDto::new(
+                    "REGISTRY_SIGNATURE_INVALID",
+                    "Registry public key length is invalid for ed25519",
+                    false,
+                ));
+            }
+
+            let key_array: [u8; 32] = public_key_bytes.as_slice().try_into().map_err(|_| {
+                AppErrorDto::new(
+                    "REGISTRY_SIGNATURE_INVALID",
+                    "Registry public key length is invalid for ed25519",
+                    false,
+                )
+            })?;
+            let verifying_key = VerifyingKey::from_bytes(&key_array).map_err(|e| {
+                AppErrorDto::new(
+                    "REGISTRY_SIGNATURE_INVALID",
+                    "Registry public key cannot be parsed",
+                    false,
+                )
+                .with_detail(e.to_string())
+            })?;
+
+            let signed_payload = canonical_unsigned_registry_payload(registry_json)?;
+            verifying_key
+                .verify(signed_payload.as_bytes(), &signature)
+                .map_err(|e| {
+                    AppErrorDto::new(
+                        "REGISTRY_SIGNATURE_INVALID",
+                        "Registry signature verification failed",
+                        false,
+                    )
+                    .with_detail(e.to_string())
+                })
         }
         "none" => {
             if is_loopback_host(host) {
@@ -545,6 +620,75 @@ fn verify_registry_signature(
     }
 }
 
+fn canonical_unsigned_registry_payload(
+    registry_json: &serde_json::Value,
+) -> Result<String, AppErrorDto> {
+    let mut unsigned = registry_json.clone();
+    let signing = unsigned
+        .as_object_mut()
+        .and_then(|root| root.get_mut("signing"))
+        .and_then(|value| value.as_object_mut())
+        .ok_or_else(|| {
+            AppErrorDto::new(
+                "REGISTRY_SIGNATURE_INVALID",
+                "Registry signing payload is missing",
+                false,
+            )
+        })?;
+    signing.insert(
+        "signature".to_string(),
+        serde_json::Value::String(String::new()),
+    );
+
+    unsigned.sort_all_objects();
+    serde_json::to_string(&unsigned).map_err(|e| {
+        AppErrorDto::new(
+            "REGISTRY_SIGNATURE_INVALID",
+            "Registry payload serialization failed",
+            false,
+        )
+        .with_detail(e.to_string())
+    })
+}
+
+fn resolve_registry_public_key(registry: &RegistryDocument, host: Option<&str>) -> Option<String> {
+    if let Some(host_str) = host {
+        let env_name = format!(
+            "NOVELFORGE_REGISTRY_ED25519_PUBLIC_KEY_{}",
+            host_str
+                .chars()
+                .map(|ch| {
+                    if ch.is_ascii_alphanumeric() {
+                        ch.to_ascii_uppercase()
+                    } else {
+                        '_'
+                    }
+                })
+                .collect::<String>()
+        );
+        if let Ok(value) = std::env::var(&env_name) {
+            if !value.trim().is_empty() {
+                return Some(value);
+            }
+        }
+    }
+
+    if let Ok(value) = std::env::var("NOVELFORGE_REGISTRY_ED25519_PUBLIC_KEY") {
+        if !value.trim().is_empty() {
+            return Some(value);
+        }
+    }
+
+    if is_loopback_host(host) {
+        if let Some(value) = registry.signing.public_key.clone() {
+            if !value.trim().is_empty() {
+                return Some(value);
+            }
+        }
+    }
+    None
+}
+
 fn is_loopback_host(host: Option<&str>) -> bool {
     match host.unwrap_or("").to_ascii_lowercase().as_str() {
         "localhost" | "127.0.0.1" | "::1" => true,
@@ -555,8 +699,13 @@ fn is_loopback_host(host: Option<&str>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ed25519_dalek::{Signer, SigningKey};
 
-    fn sample_registry(algorithm: &str, signature: &str) -> RegistryDocument {
+    fn sample_registry(
+        algorithm: &str,
+        signature: &str,
+        public_key: Option<String>,
+    ) -> RegistryDocument {
         RegistryDocument {
             schema_version: "1.0.0".to_string(),
             registry_version: "2026.04.27.001".to_string(),
@@ -581,8 +730,23 @@ mod tests {
             signing: RegistrySigning {
                 algorithm: algorithm.to_string(),
                 signature: signature.to_string(),
+                public_key,
             },
         }
+    }
+
+    fn signed_registry_for_tests() -> (RegistryDocument, serde_json::Value) {
+        let signing_key = SigningKey::from_bytes(&[7u8; 32]);
+        let public_key = base64::engine::general_purpose::STANDARD
+            .encode(signing_key.verifying_key().as_bytes());
+        let mut registry = sample_registry("ed25519", "", Some(public_key));
+        let base_json = serde_json::to_value(&registry).expect("serialize registry");
+        let canonical = canonical_unsigned_registry_payload(&base_json).expect("canonical payload");
+        let signature = signing_key.sign(canonical.as_bytes());
+        registry.signing.signature =
+            base64::engine::general_purpose::STANDARD.encode(signature.to_bytes());
+        let signed_json = serde_json::to_value(&registry).expect("serialize signed registry");
+        (registry, signed_json)
     }
 
     #[test]
@@ -600,20 +764,35 @@ mod tests {
     }
 
     #[test]
-    fn verify_ed25519_signature_requires_64_bytes() {
-        let good_sig = base64::engine::general_purpose::STANDARD.encode([0u8; 64]);
-        verify_registry_signature(
-            &sample_registry("ed25519", &good_sig),
-            Some("updates.novelforge.app"),
-        )
-        .expect("64-byte ed25519 signature should pass format validation");
+    fn verify_ed25519_signature_checks_cryptographic_validity() {
+        let (registry, registry_json) = signed_registry_for_tests();
+        verify_registry_signature(&registry, &registry_json, Some("localhost"))
+            .expect("valid signature should pass");
 
+        let mut tampered_json = registry_json.clone();
+        tampered_json["registryVersion"] = serde_json::Value::String("2026.04.27.002".to_string());
+        let err = verify_registry_signature(&registry, &tampered_json, Some("localhost"))
+            .expect_err("tampered payload should fail");
+        assert_eq!(err.code, "REGISTRY_SIGNATURE_INVALID");
+    }
+
+    #[test]
+    fn verify_ed25519_signature_rejects_wrong_length() {
         let bad_sig = base64::engine::general_purpose::STANDARD.encode([0u8; 16]);
-        let err = verify_registry_signature(
-            &sample_registry("ed25519", &bad_sig),
-            Some("updates.novelforge.app"),
-        )
-        .expect_err("short ed25519 signature should fail");
+        let registry = sample_registry("ed25519", &bad_sig, None);
+        let registry_json = serde_json::to_value(&registry).expect("serialize registry");
+        let err = verify_registry_signature(&registry, &registry_json, Some("localhost"))
+            .expect_err("short ed25519 signature should fail");
+        assert_eq!(err.code, "REGISTRY_SIGNATURE_INVALID");
+    }
+
+    #[test]
+    fn verify_ed25519_signature_requires_trusted_public_key_on_non_loopback() {
+        let (registry, registry_json) = signed_registry_for_tests();
+        std::env::remove_var("NOVELFORGE_REGISTRY_ED25519_PUBLIC_KEY");
+        let err =
+            verify_registry_signature(&registry, &registry_json, Some("updates.novelforge.app"))
+                .expect_err("public host should require trusted env key");
         assert_eq!(err.code, "REGISTRY_SIGNATURE_INVALID");
     }
 }

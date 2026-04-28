@@ -7,7 +7,8 @@ use uuid::Uuid;
 
 use crate::errors::AppErrorDto;
 use crate::infra::database::{initialize_database, open_database};
-use crate::infra::path_utils::sanitize_project_directory_name;
+use crate::infra::fs_utils::write_file_atomic;
+use crate::infra::path_utils::{resolve_project_relative_path, sanitize_project_directory_name};
 use crate::infra::recent_projects::{
     clear_recent_projects, list_recent_projects, mark_recent_project, RecentProjectItem,
 };
@@ -308,11 +309,12 @@ impl ProjectService {
             );
         }
 
-        open_database(project_root_path).map_err(|err| {
+        let conn = open_database(project_root_path).map_err(|err| {
             AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false)
                 .with_detail(err.to_string())
                 .with_suggested_action("请检查 database/project.sqlite 是否存在并可读写")
         })?;
+        validate_project_db_paths(project_root_path, &conn)?;
 
         let _ = mark_recent_project(project_root);
         Ok(ProjectOpenResult {
@@ -407,7 +409,7 @@ fn write_project_json(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let path = project_json_path(project_root);
     let payload = serde_json::to_string_pretty(project_json)?;
-    fs::write(path, payload)?;
+    write_file_atomic(&path, &payload)?;
     Ok(())
 }
 
@@ -427,6 +429,59 @@ pub fn get_project_id(conn: &rusqlite::Connection) -> Result<String, AppErrorDto
     })
 }
 
+fn validate_project_db_paths(
+    project_root: &Path,
+    conn: &rusqlite::Connection,
+) -> Result<(), AppErrorDto> {
+    validate_path_column(
+        project_root,
+        conn,
+        "SELECT content_path FROM chapters WHERE is_deleted = 0",
+        "chapters.content_path",
+    )?;
+    validate_path_column(
+        project_root,
+        conn,
+        "SELECT file_path FROM snapshots",
+        "snapshots.file_path",
+    )?;
+    Ok(())
+}
+
+fn validate_path_column(
+    project_root: &Path,
+    conn: &rusqlite::Connection,
+    sql: &str,
+    column_label: &str,
+) -> Result<(), AppErrorDto> {
+    let mut stmt = conn.prepare(sql).map_err(|err| {
+        AppErrorDto::new("PROJECT_PATH_SCAN_FAILED", "项目路径校验失败", false)
+            .with_detail(err.to_string())
+    })?;
+    let rows = stmt
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(|err| {
+            AppErrorDto::new("PROJECT_PATH_SCAN_FAILED", "项目路径校验失败", false)
+                .with_detail(err.to_string())
+        })?;
+    for row in rows {
+        let stored_path = row.map_err(|err| {
+            AppErrorDto::new("PROJECT_PATH_SCAN_FAILED", "项目路径校验失败", false)
+                .with_detail(err.to_string())
+        })?;
+        resolve_project_relative_path(project_root, &stored_path).map_err(|detail| {
+            AppErrorDto::new(
+                "PROJECT_PATH_INVALID_ENTRY",
+                "项目数据库包含非法路径记录",
+                false,
+            )
+            .with_detail(format!("{column_label}: {detail}"))
+            .with_suggested_action("请修复数据库中的路径字段后重试")
+        })?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -435,6 +490,8 @@ mod tests {
     use uuid::Uuid;
 
     use super::{CreateProjectInput, ProjectService, WritingStyle};
+    use crate::infra::database::open_database;
+    use crate::services::chapter_service::{ChapterInput, ChapterService};
 
     fn create_temp_workspace() -> PathBuf {
         let workspace =
@@ -554,6 +611,49 @@ mod tests {
             .get_writing_style(&create_result.project_root)
             .expect("get saved writing style should succeed");
         assert_eq!(loaded_style, custom_style);
+
+        remove_temp_workspace(&workspace);
+    }
+
+    #[test]
+    fn open_project_rejects_db_paths_that_escape_project_root() {
+        let workspace = create_temp_workspace();
+        let project_service = ProjectService;
+        let chapter_service = ChapterService;
+
+        let create_result = project_service
+            .create_project(CreateProjectInput {
+                name: "路径安全".to_string(),
+                author: None,
+                genre: "测试".to_string(),
+                target_words: None,
+                save_directory: workspace.to_string_lossy().to_string(),
+            })
+            .expect("create project should succeed");
+        let chapter = chapter_service
+            .create_chapter(
+                &create_result.project_root,
+                ChapterInput {
+                    title: "第一章".to_string(),
+                    summary: None,
+                    target_words: None,
+                    status: None,
+                },
+            )
+            .expect("chapter created");
+
+        let project_path = PathBuf::from(&create_result.project_root);
+        let conn = open_database(&project_path).expect("open database");
+        conn.execute(
+            "UPDATE chapters SET content_path = ?1 WHERE id = ?2",
+            rusqlite::params!["../outside.md", chapter.id],
+        )
+        .expect("inject invalid path");
+
+        let err = project_service
+            .open_project(&create_result.project_root)
+            .expect_err("open should fail for invalid db path");
+        assert_eq!(err.code, "PROJECT_PATH_INVALID_ENTRY");
 
         remove_temp_workspace(&workspace);
     }

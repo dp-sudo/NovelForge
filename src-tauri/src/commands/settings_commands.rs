@@ -502,11 +502,12 @@ pub async fn save_provider_config(
     input: serde_json::Value,
     state: State<'_, AppState>,
 ) -> Result<(), AppErrorDto> {
-    let config: ProviderConfig = serde_json::from_value(input).map_err(|e| {
+    let mut config: ProviderConfig = serde_json::from_value(input).map_err(|e| {
         AppErrorDto::new("INVALID_INPUT", "Invalid provider config format", true)
             .with_detail(e.to_string())
     })?;
-    let saved = state.settings_service.save_provider(config, None)?;
+    let api_key = config.api_key.take();
+    let saved = state.settings_service.save_provider(config, api_key)?;
     state.ai_service.reload_provider(&saved.id).await?;
     Ok(())
 }

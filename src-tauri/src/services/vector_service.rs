@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::errors::AppErrorDto;
 use crate::infra::database::open_database;
 use crate::infra::fs_utils::{read_text_if_exists, write_file_atomic};
+use crate::infra::path_utils::resolve_project_relative_path;
 use crate::services::project_service::get_project_id;
 
 const VECTOR_DIM: usize = 96;
@@ -109,7 +110,15 @@ impl VectorService {
                 )
                 .with_detail(err.to_string())
             })?;
-            let raw_content = fs::read_to_string(root.join(content_path)).unwrap_or_default();
+            let chapter_file = resolve_vector_path(root, &content_path)?;
+            let raw_content = fs::read_to_string(&chapter_file).map_err(|err| {
+                AppErrorDto::new(
+                    "VECTOR_INDEX_READ_FAILED",
+                    "Cannot read chapter content file",
+                    true,
+                )
+                .with_detail(err.to_string())
+            })?;
             let chapter_text = strip_chapter_markdown(&raw_content);
             let parts = split_chapter_chunks(&summary, &chapter_text);
             for part in parts.into_iter().take(MAX_CHUNKS_PER_CHAPTER) {
@@ -237,6 +246,17 @@ impl VectorService {
     fn index_file_path(&self, root: &Path) -> PathBuf {
         root.join(VECTOR_INDEX_RELATIVE_PATH)
     }
+}
+
+fn resolve_vector_path(project_root: &Path, stored_path: &str) -> Result<PathBuf, AppErrorDto> {
+    resolve_project_relative_path(project_root, stored_path).map_err(|detail| {
+        AppErrorDto::new(
+            "VECTOR_INDEX_READ_FAILED",
+            "Invalid chapter content path in database",
+            true,
+        )
+        .with_detail(detail)
+    })
 }
 
 fn dot_product(a: &[f32], b: &[f32]) -> f32 {

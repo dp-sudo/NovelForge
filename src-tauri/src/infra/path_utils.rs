@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 
 pub fn sanitize_project_directory_name(name: &str) -> String {
     let trimmed = name.trim();
@@ -37,4 +37,30 @@ pub fn to_posix_relative(from_dir: &Path, target: &Path) -> String {
         }
         Err(_) => target.to_string_lossy().replace('\\', "/"),
     }
+}
+
+pub fn resolve_project_relative_path(
+    project_root: &Path,
+    stored_path: &str,
+) -> Result<PathBuf, String> {
+    let normalized = stored_path.trim();
+    if normalized.is_empty() {
+        return Err("Path is empty".to_string());
+    }
+
+    let candidate = Path::new(normalized);
+    if candidate.is_absolute() {
+        return Err(format!("Path must be relative: {normalized}"));
+    }
+
+    for component in candidate.components() {
+        match component {
+            Component::CurDir | Component::Normal(_) => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                return Err(format!("Path escapes project root: {normalized}"));
+            }
+        }
+    }
+
+    Ok(project_root.join(candidate))
 }

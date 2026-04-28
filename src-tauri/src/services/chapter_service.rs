@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -8,7 +9,9 @@ use uuid::Uuid;
 use crate::errors::AppErrorDto;
 use crate::infra::database::open_database;
 use crate::infra::fs_utils::{read_text_if_exists, write_file_atomic};
-use crate::infra::path_utils::{chapter_file_name, to_posix_relative};
+use crate::infra::path_utils::{
+    chapter_file_name, resolve_project_relative_path, to_posix_relative,
+};
 use crate::infra::time::now_iso;
 use crate::services::project_service::get_project_id;
 
@@ -201,18 +204,72 @@ impl ChapterService {
         project_root: &str,
         ordered_ids: Vec<String>,
     ) -> Result<(), AppErrorDto> {
-        let conn = open_database(Path::new(project_root)).map_err(|e| {
+        let mut conn = open_database(Path::new(project_root)).map_err(|e| {
             AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
         })?;
         let project_id = get_project_id(&conn)?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT id FROM chapters WHERE project_id = ?1 AND is_deleted = 0 ORDER BY chapter_index",
+            )
+            .map_err(|e| AppErrorDto::new("REORDER_FAILED", "重新排序失败", true).with_detail(e.to_string()))?;
+        let existing_ids = stmt
+            .query_map(params![project_id.as_str()], |row| row.get::<_, String>(0))
+            .map_err(|e| {
+                AppErrorDto::new("REORDER_FAILED", "重新排序失败", true).with_detail(e.to_string())
+            })?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| {
+                AppErrorDto::new("REORDER_FAILED", "重新排序失败", true).with_detail(e.to_string())
+            })?;
+        drop(stmt);
+
+        if ordered_ids.len() != existing_ids.len() {
+            return Err(AppErrorDto::new(
+                "REORDER_INVALID_INPUT",
+                "排序列表与当前章节数量不一致",
+                true,
+            ));
+        }
+        let ordered_set: HashSet<&str> = ordered_ids.iter().map(|id| id.as_str()).collect();
+        if ordered_set.len() != ordered_ids.len()
+            || existing_ids
+                .iter()
+                .any(|existing_id| !ordered_set.contains(existing_id.as_str()))
+        {
+            return Err(AppErrorDto::new(
+                "REORDER_INVALID_INPUT",
+                "排序列表包含非法或重复章节 ID",
+                true,
+            ));
+        }
+
+        let tx = conn.transaction().map_err(|e| {
+            AppErrorDto::new("REORDER_FAILED", "重新排序失败", true).with_detail(e.to_string())
+        })?;
         let now = now_iso();
+
+        // Phase 1: write temporary negative indices to avoid UNIQUE(project_id, chapter_index) collisions.
         for (i, chapter_id) in ordered_ids.iter().enumerate() {
-            let new_index = (i + 1) as i64;
-            conn.execute(
+            let temp_index = -((i + 1) as i64);
+            tx.execute(
                 "UPDATE chapters SET chapter_index = ?1, updated_at = ?2 WHERE id = ?3 AND project_id = ?4",
-                params![new_index, now, chapter_id, project_id],
+                params![temp_index, now, chapter_id, project_id],
             ).map_err(|e| AppErrorDto::new("REORDER_FAILED", "重新排序失败", true).with_detail(e.to_string()))?;
         }
+
+        // Phase 2: write final chapter indices in the requested order.
+        for (i, chapter_id) in ordered_ids.iter().enumerate() {
+            let final_index = (i + 1) as i64;
+            tx.execute(
+                "UPDATE chapters SET chapter_index = ?1, updated_at = ?2 WHERE id = ?3 AND project_id = ?4",
+                params![final_index, now, chapter_id, project_id],
+            ).map_err(|e| AppErrorDto::new("REORDER_FAILED", "重新排序失败", true).with_detail(e.to_string()))?;
+        }
+
+        tx.commit().map_err(|e| {
+            AppErrorDto::new("REORDER_FAILED", "重新排序失败", true).with_detail(e.to_string())
+        })?;
         Ok(())
     }
 
@@ -279,7 +336,7 @@ impl ChapterService {
             content: "",
         });
 
-        fs::write(&absolute_chapter_path, markdown).map_err(|err| {
+        write_file_atomic(&absolute_chapter_path, &markdown).map_err(|err| {
             AppErrorDto::new("CHAPTER_CREATE_FAILED", "创建章节失败", true)
                 .with_detail(err.to_string())
                 .with_suggested_action("请检查 manuscript/chapters 写入权限")
@@ -388,7 +445,8 @@ impl ChapterService {
             })?
             .ok_or_else(|| AppErrorDto::new("CHAPTER_NOT_FOUND", "章节不存在", true))?;
 
-        let absolute_path = project_root_path.join(&chapter_row.content_path);
+        let absolute_path =
+            resolve_project_scoped_path(project_root_path, &chapter_row.content_path)?;
         let updated_at = now_iso();
         let current_words = content_word_count(content);
         let next_version = chapter_row.version + 1;
@@ -468,7 +526,7 @@ impl ChapterService {
             .ok_or_else(|| AppErrorDto::new("CHAPTER_NOT_FOUND", "章节不存在", true))?;
 
         let draft_path = draft_path_from_content(project_root_path, &content_path)?;
-        fs::write(&draft_path, content).map_err(|err| {
+        write_file_atomic(&draft_path, content).map_err(|err| {
             AppErrorDto::new("CHAPTER_AUTOSAVE_FAILED", "自动保存失败", true)
                 .with_detail(err.to_string())
                 .with_suggested_action("请检查 manuscript/drafts 写入权限")
@@ -502,7 +560,7 @@ impl ChapterService {
             })?
             .ok_or_else(|| AppErrorDto::new("CHAPTER_NOT_FOUND", "章节不存在", true))?;
 
-        let chapter_file = project_root_path.join(&content_path);
+        let chapter_file = resolve_project_scoped_path(project_root_path, &content_path)?;
         let draft_path = draft_path_from_content(project_root_path, &content_path)?;
         let draft_content = match read_text_if_exists(&draft_path).map_err(|err| {
             AppErrorDto::new("CHAPTER_RECOVER_FAILED", "恢复草稿失败", true)
@@ -654,7 +712,8 @@ fn draft_path_from_content(
     project_root: &Path,
     content_path: &str,
 ) -> Result<PathBuf, AppErrorDto> {
-    let base_name = Path::new(content_path)
+    let content_file = resolve_project_scoped_path(project_root, content_path)?;
+    let base_name = content_file
         .file_name()
         .and_then(|name| name.to_str())
         .ok_or_else(|| {
@@ -666,6 +725,17 @@ fn draft_path_from_content(
         .join("manuscript")
         .join("drafts")
         .join(format!("{base_name}.autosave.md")))
+}
+
+fn resolve_project_scoped_path(
+    project_root: &Path,
+    stored_path: &str,
+) -> Result<PathBuf, AppErrorDto> {
+    resolve_project_relative_path(project_root, stored_path).map_err(|detail| {
+        AppErrorDto::new("CHAPTER_PATH_INVALID", "章节路径无效", false)
+            .with_detail(detail)
+            .with_suggested_action("请检查数据库中的路径字段是否被篡改")
+    })
 }
 
 fn content_word_count(content: &str) -> i64 {
@@ -819,7 +889,8 @@ impl ChapterService {
             })?
             .ok_or_else(|| AppErrorDto::new("CHAPTER_NOT_FOUND", "章节不存在", true))?;
 
-        let content = read_text_if_exists(&project_root_path.join(&content_path))
+        let content_path = resolve_project_scoped_path(project_root_path, &content_path)?;
+        let content = read_text_if_exists(&content_path)
             .map_err(|e| {
                 AppErrorDto::new("SNAPSHOT_FAILED", "读取章节文件失败", true)
                     .with_detail(e.to_string())
@@ -945,7 +1016,8 @@ impl ChapterService {
                     .with_detail(e.to_string())
             })?;
 
-        read_text_if_exists(&project_root_path.join(&file_path))
+        let snapshot_path = resolve_project_scoped_path(project_root_path, &file_path)?;
+        read_text_if_exists(&snapshot_path)
             .map_err(|e| {
                 AppErrorDto::new("SNAPSHOT_READ_FAILED", "读取快照文件失败", true)
                     .with_detail(e.to_string())
@@ -1294,6 +1366,63 @@ mod tests {
         assert_eq!(entries[0].chapter_index, 1);
         assert_eq!(entries[1].chapter_id, second.id);
         assert_eq!(entries[1].chapter_index, 2);
+
+        remove_temp_workspace(&workspace);
+    }
+
+    #[test]
+    fn reorder_chapters_handles_swap_without_unique_conflict() {
+        let workspace = create_temp_workspace();
+        let project_service = ProjectService;
+        let chapter_service = ChapterService;
+        let project = project_service
+            .create_project(CreateProjectInput {
+                name: "章节重排".to_string(),
+                author: None,
+                genre: "测试".to_string(),
+                target_words: None,
+                save_directory: workspace.to_string_lossy().to_string(),
+            })
+            .expect("project created");
+
+        let first = chapter_service
+            .create_chapter(
+                &project.project_root,
+                ChapterInput {
+                    title: "第一章".to_string(),
+                    summary: None,
+                    target_words: None,
+                    status: None,
+                },
+            )
+            .expect("first chapter created");
+        let second = chapter_service
+            .create_chapter(
+                &project.project_root,
+                ChapterInput {
+                    title: "第二章".to_string(),
+                    summary: None,
+                    target_words: None,
+                    status: None,
+                },
+            )
+            .expect("second chapter created");
+
+        chapter_service
+            .reorder_chapters(
+                &project.project_root,
+                vec![second.id.clone(), first.id.clone()],
+            )
+            .expect("reorder chapters");
+
+        let chapters = chapter_service
+            .list_chapters(&project.project_root)
+            .expect("list chapters");
+        assert_eq!(chapters.len(), 2);
+        assert_eq!(chapters[0].id, second.id);
+        assert_eq!(chapters[0].chapter_index, 1);
+        assert_eq!(chapters[1].id, first.id);
+        assert_eq!(chapters[1].chapter_index, 2);
 
         remove_temp_workspace(&workspace);
     }

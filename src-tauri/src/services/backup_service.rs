@@ -10,7 +10,8 @@ use zip::CompressionMethod;
 use zip::ZipWriter;
 
 use crate::errors::AppErrorDto;
-use crate::infra::time::{now_iso, today_date_str};
+use crate::infra::path_utils::resolve_project_relative_path;
+use crate::infra::time::now_iso;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -227,9 +228,19 @@ impl BackupService {
                 continue;
             }
 
-            let target_path = root.join(&name);
+            let target_path = resolve_project_relative_path(root, &name).map_err(|detail| {
+                AppErrorDto::new(
+                    "RESTORE_INVALID_PATH",
+                    "备份条目路径非法，已拒绝恢复",
+                    false,
+                )
+                .with_detail(detail)
+            })?;
             if let Some(parent) = target_path.parent() {
-                fs::create_dir_all(parent).ok();
+                fs::create_dir_all(parent).map_err(|e| {
+                    AppErrorDto::new("RESTORE_FAILED", "创建恢复目录失败", true)
+                        .with_detail(e.to_string())
+                })?;
             }
 
             let mut content = Vec::new();
@@ -249,5 +260,65 @@ impl BackupService {
             project_root: project_root.to_string(),
             files_restored: restored,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    use std::io::Write;
+    use std::path::PathBuf;
+
+    use uuid::Uuid;
+    use zip::write::FileOptions;
+    use zip::CompressionMethod;
+    use zip::ZipWriter;
+
+    use super::BackupService;
+
+    fn create_temp_workspace() -> PathBuf {
+        let workspace =
+            std::env::temp_dir().join(format!("novelforge-backup-tests-{}", Uuid::new_v4()));
+        fs::create_dir_all(&workspace).expect("create temp workspace");
+        workspace
+    }
+
+    fn remove_temp_workspace(path: &PathBuf) {
+        let _ = fs::remove_dir_all(path);
+    }
+
+    #[test]
+    fn restore_rejects_zip_slip_entries() {
+        let workspace = create_temp_workspace();
+        let project_root = workspace.join("project");
+        fs::create_dir_all(&project_root).expect("create project root");
+
+        let backup_path = workspace.join("malicious.zip");
+        let file = fs::File::create(&backup_path).expect("create backup file");
+        let mut zip = ZipWriter::new(file);
+        let options = FileOptions::<()>::default().compression_method(CompressionMethod::Deflated);
+        zip.start_file("project.json", options)
+            .expect("start project.json");
+        zip.write_all(br#"{"schemaVersion":"1.0.0"}"#)
+            .expect("write project json");
+        zip.start_file("../outside.txt", options)
+            .expect("start malicious entry");
+        zip.write_all(b"should never be restored")
+            .expect("write malicious entry");
+        zip.finish().expect("finish zip");
+
+        let outside_path = workspace.join("outside.txt");
+        let service = BackupService;
+        let err = service
+            .restore_backup(
+                project_root.to_string_lossy().as_ref(),
+                backup_path.to_string_lossy().as_ref(),
+            )
+            .expect_err("zip slip should be rejected");
+
+        assert_eq!(err.code, "RESTORE_INVALID_PATH");
+        assert!(!outside_path.exists());
+
+        remove_temp_workspace(&workspace);
     }
 }
