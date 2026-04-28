@@ -35,9 +35,10 @@
 
 ## 4. 主流程时序（当前实现）
 ### 4.1 项目创建/打开
-- 代码可用路径：`projectApi` -> `create_project/open_project/list_recent_projects`
+- 代码可用路径：`projectApi` -> `create_project/open_project/list_recent_projects/clear_recent_projects`
 - 当前 UI 主路径：`ProjectCenterPage` 调用 `projectApi`，并要求输入有效 Windows 保存目录
 - Rust `ProjectService` 行为：创建目录、初始化项目库、写 `project.json`、记录最近项目
+- 最近项目列表读取时会自动剔除无效项目路径，并回写最近项目缓存文件
 
 ### 4.2 章节写作与草稿恢复
 1. `ChaptersPage` 创建章节（`create_chapter`）。
@@ -96,7 +97,7 @@
   - `install_app_update` 下载并安装更新包（安装后需重启应用）
 
 ## 5. 命令清单（按模块）
-- Project：`validate_project`, `create_project`, `open_project`, `list_recent_projects`, `init_project_repository`, `get_project_repository_status`, `commit_project_snapshot`, `list_project_history`
+- Project：`validate_project`, `create_project`, `open_project`, `list_recent_projects`, `clear_recent_projects`, `init_project_repository`, `get_project_repository_status`, `commit_project_snapshot`, `list_project_history`
 - Chapter：`list_chapters`, `list_timeline_entries`, `create_chapter`, `save_chapter_content`, `autosave_draft`, `recover_draft`, `delete_chapter`
 - Search：`search_project`, `search_project_semantic`, `rebuild_search_index`, `rebuild_vector_index`
 - Context：`get_chapter_context`

@@ -18,6 +18,8 @@ import {
   deleteTaskRoute,
   loadEditorSettings,
   saveEditorSettings,
+  saveWritingStyle,
+  getWritingStyle,
   initProjectRepository,
   getProjectRepositoryStatus,
   commitProjectSnapshot,
@@ -43,10 +45,17 @@ import {
   type IntegrityReport,
 } from "../../api/chapterApi";
 import { useProjectStore } from "../../stores/projectStore";
-import { VENDOR_PRESETS, type VendorInfo, type ModelRecord, type CapabilityReport } from "../../types/ai";
+import {
+  VENDOR_PRESETS,
+  defaultWritingStyle,
+  type WritingStyle,
+  type VendorInfo,
+  type ModelRecord,
+  type CapabilityReport,
+} from "../../types/ai";
 import { SkillsManager } from "../../components/skills/SkillsManager.js";
 
-type TabKey = "model" | "routing" | "skills" | "editor" | "backup" | "about";
+type TabKey = "model" | "routing" | "skills" | "editor" | "writing" | "backup" | "about";
 
 interface VendorFormState {
   config: LlmProviderConfig;
@@ -69,6 +78,54 @@ interface TaskRouteFormState {
   saving: boolean;
   deleting: boolean;
   error: string | null;
+}
+
+interface SliderControlProps {
+  label: string;
+  value: number;
+  minLabel: string;
+  maxLabel: string;
+  min?: number;
+  max?: number;
+  onChange: (val: number) => void;
+}
+
+function SliderControl({
+  label,
+  value,
+  minLabel,
+  maxLabel,
+  min = 1,
+  max = 7,
+  onChange,
+}: SliderControlProps) {
+  return (
+    <div>
+      <label className="text-sm text-surface-200 block mb-2">{label}</label>
+      <div className="flex items-center gap-3">
+        <span className="text-xs text-surface-400 w-16 text-right shrink-0">{minLabel}</span>
+        <div className="flex gap-1.5 flex-1 justify-center">
+          {Array.from({ length: max - min + 1 }, (_, i) => min + i).map((n) => (
+            <button
+              key={n}
+              type="button"
+              onClick={() => onChange(n)}
+              className={`w-8 h-8 rounded-full text-xs font-medium transition-colors ${
+                n === value
+                  ? "bg-primary text-white"
+                  : n < value
+                    ? "bg-primary/20 text-primary border border-primary/30"
+                    : "bg-surface-800 text-surface-500 border border-surface-600"
+              }`}
+            >
+              {n}
+            </button>
+          ))}
+        </div>
+        <span className="text-xs text-surface-400 w-16 shrink-0">{maxLabel}</span>
+      </div>
+    </div>
+  );
 }
 
 export function SettingsPage() {
@@ -167,6 +224,47 @@ export function SettingsPage() {
     }
   }, [projectRoot]);
 
+  useEffect(() => {
+    let canceled = false;
+    if (!projectRoot) {
+      setWritingStyle(defaultWritingStyle());
+      setWritingStyleLoaded(false);
+      setWritingStyleMessage(null);
+      return () => {
+        canceled = true;
+      };
+    }
+
+    setWritingStyleLoaded(false);
+    setWritingStyleMessage(null);
+    setWritingStyleSaved(false);
+
+    (async () => {
+      try {
+        const loaded = await getWritingStyle(projectRoot);
+        if (!canceled) {
+          setWritingStyle(loaded);
+        }
+      } catch (err: unknown) {
+        if (canceled) return;
+        setWritingStyle(defaultWritingStyle());
+        setWritingStyleMessage(
+          typeof err === "object" && err && "message" in err
+            ? `加载写作风格失败：${String((err as { message: string }).message)}`
+            : "加载写作风格失败"
+        );
+      } finally {
+        if (!canceled) {
+          setWritingStyleLoaded(true);
+        }
+      }
+    })();
+
+    return () => {
+      canceled = true;
+    };
+  }, [projectRoot]);
+
   async function refreshGitData() {
     if (!projectRoot) {
       setGitMessage("请先打开项目");
@@ -230,6 +328,36 @@ export function SettingsPage() {
       );
     } finally {
       setGitBusy(false);
+    }
+  }
+
+  function updateWritingStyle(patch: Partial<WritingStyle>) {
+    setWritingStyle((prev) => ({ ...prev, ...patch }));
+    setWritingStyleSaved(false);
+  }
+
+  async function handleSaveWritingStyle() {
+    if (!projectRoot) {
+      setWritingStyleMessage("请先打开项目以设置写作风格");
+      return;
+    }
+
+    setWritingStyleSaving(true);
+    setWritingStyleMessage(null);
+    try {
+      await saveWritingStyle(projectRoot, writingStyle);
+      setWritingStyleSaved(true);
+      setWritingStyleMessage("写作风格已保存");
+      setTimeout(() => setWritingStyleSaved(false), 2000);
+    } catch (err: unknown) {
+      setWritingStyleSaved(false);
+      setWritingStyleMessage(
+        typeof err === "object" && err && "message" in err
+          ? `保存写作风格失败：${String((err as { message: string }).message)}`
+          : "保存写作风格失败"
+      );
+    } finally {
+      setWritingStyleSaving(false);
     }
   }
 
@@ -305,18 +433,60 @@ export function SettingsPage() {
     fontSize: 16, lineHeight: 1.75, autosaveInterval: 5, narrativePov: "third_limited",
   });
   const [editorSaved, setEditorSaved] = useState(false);
+  const [writingStyle, setWritingStyle] = useState<WritingStyle>(defaultWritingStyle());
+  const [writingStyleLoaded, setWritingStyleLoaded] = useState(false);
+  const [writingStyleSaving, setWritingStyleSaving] = useState(false);
+  const [writingStyleSaved, setWritingStyleSaved] = useState(false);
+  const [writingStyleMessage, setWritingStyleMessage] = useState<string | null>(null);
 
   const TASK_ROUTE_OPTIONS = [
-    { value: "chapter_draft", label: "章节草稿" },
-    { value: "chapter_continue", label: "章节续写" },
-    { value: "chapter_rewrite", label: "局部改写" },
-    { value: "prose_naturalize", label: "去 AI 味" },
+    { value: "chapter.draft", label: "章节草稿" },
+    { value: "chapter.continue", label: "章节续写" },
+    { value: "chapter.rewrite", label: "局部改写" },
+    { value: "chapter.plan", label: "章节计划" },
+    { value: "prose.naturalize", label: "去 AI 味" },
     { value: "character.create", label: "角色生成" },
-    { value: "world.generate", label: "世界观生成" },
+    { value: "world.create_rule", label: "世界观生成" },
     { value: "consistency.scan", label: "一致性检查" },
     { value: "blueprint.generate_step", label: "蓝图生成" },
-    { value: "plot.generate", label: "剧情生成" },
+    { value: "plot.create_node", label: "剧情生成" },
   ] as const;
+
+  function canonicalTaskType(taskType: string): string {
+    switch (taskType) {
+      case "chapter_draft":
+      case "generate_chapter_draft":
+      case "draft":
+        return "chapter.draft";
+      case "chapter_continue":
+      case "continue_chapter":
+      case "continue_draft":
+        return "chapter.continue";
+      case "chapter_rewrite":
+      case "rewrite_selection":
+        return "chapter.rewrite";
+      case "chapter_plan":
+      case "plan_chapter":
+        return "chapter.plan";
+      case "prose_naturalize":
+      case "deai_text":
+        return "prose.naturalize";
+      case "character_create":
+        return "character.create";
+      case "world.generate":
+      case "world_create_rule":
+        return "world.create_rule";
+      case "plot.generate":
+      case "plot_create_node":
+        return "plot.create_node";
+      case "consistency_scan":
+        return "consistency.scan";
+      case "blueprint_generate":
+        return "blueprint.generate_step";
+      default:
+        return taskType;
+    }
+  }
 
   function mapToInput(value?: Record<string, string>): string {
     if (!value) return "";
@@ -424,10 +594,12 @@ export function SettingsPage() {
 
         const routeMap: Record<string, TaskRouteFormState> = {};
         for (const task of TASK_ROUTE_OPTIONS) {
-          const existingRoute = routes.find((route) => route.taskType === task.value);
+          const existingRoute = routes.find(
+            (route) => canonicalTaskType(route.taskType) === task.value
+          );
           routeMap[task.value] = {
             route: existingRoute
-              ? normalizeRoute(existingRoute)
+              ? normalizeRoute({ ...existingRoute, taskType: task.value })
               : {
                   id: "",
                   taskType: task.value,
@@ -760,6 +932,7 @@ export function SettingsPage() {
     { key: "routing", label: "任务路由" },
     { key: "skills", label: "技能管理" },
     { key: "editor", label: "编辑器" },
+    { key: "writing", label: "写作风格" },
     { key: "backup", label: "数据与备份" },
     { key: "about", label: "关于" },
   ];
@@ -1075,6 +1248,133 @@ export function SettingsPage() {
             <Button variant="primary" onClick={async () => { await saveEditorSettings(editor); setEditorSaved(true); setTimeout(() => setEditorSaved(false), 2000); }}>
               {editorSaved ? "已保存 ✓" : "保存"}
             </Button>
+          </div>
+        </Card>
+      )}
+
+      {activeTab === "writing" && (
+        <Card padding="lg" className="space-y-6">
+          <h2 className="text-base font-semibold text-surface-100">写作风格</h2>
+          <p className="text-sm text-surface-400">
+            设定作品的默认写作风格参数。AI 生成时将遵循这些参数输出相应风格文本。
+          </p>
+
+          {projectRoot && !writingStyleLoaded && (
+            <p className="text-xs text-surface-500">写作风格加载中...</p>
+          )}
+
+          <div>
+            <label className="text-sm text-surface-200 block mb-2">语言风格</label>
+            <div className="flex flex-wrap gap-2">
+              {(["plain", "balanced", "ornate", "colloquial"] as const).map((opt) => (
+                <button
+                  key={opt}
+                  type="button"
+                  onClick={() => updateWritingStyle({ languageStyle: opt })}
+                  className={`px-4 py-2 text-sm rounded-lg border transition-colors ${
+                    writingStyle.languageStyle === opt
+                      ? "bg-primary text-white border-primary"
+                      : "bg-surface-800 text-surface-300 border-surface-600 hover:border-surface-500"
+                  }`}
+                >
+                  {{ plain: "平实", balanced: "适中", ornate: "华丽", colloquial: "口语化" }[opt]}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <SliderControl
+            label="描写密度"
+            value={writingStyle.descriptionDensity}
+            minLabel="点到为止"
+            maxLabel="详细刻画"
+            onChange={(val) => updateWritingStyle({ descriptionDensity: val })}
+          />
+
+          <SliderControl
+            label="对话比例"
+            value={writingStyle.dialogueRatio}
+            minLabel="偏叙述"
+            maxLabel="偏对话"
+            onChange={(val) => updateWritingStyle({ dialogueRatio: val })}
+          />
+
+          <div>
+            <label className="text-sm text-surface-200 block mb-2">句子节奏</label>
+            <div className="flex flex-wrap gap-2">
+              {(["short", "mixed", "long"] as const).map((opt) => (
+                <button
+                  key={opt}
+                  type="button"
+                  onClick={() => updateWritingStyle({ sentenceRhythm: opt })}
+                  className={`px-4 py-2 text-sm rounded-lg border transition-colors ${
+                    writingStyle.sentenceRhythm === opt
+                      ? "bg-primary text-white border-primary"
+                      : "bg-surface-800 text-surface-300 border-surface-600 hover:border-surface-500"
+                  }`}
+                >
+                  {{ short: "短句为主", mixed: "混合", long: "长句为主" }[opt]}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label className="text-sm text-surface-200 block mb-2">氛围基调</label>
+            <div className="flex flex-wrap gap-2">
+              {(["warm", "cold", "humorous", "serious", "suspenseful", "neutral"] as const).map((opt) => (
+                <button
+                  key={opt}
+                  type="button"
+                  onClick={() => updateWritingStyle({ atmosphere: opt })}
+                  className={`px-4 py-2 text-sm rounded-lg border transition-colors ${
+                    writingStyle.atmosphere === opt
+                      ? "bg-primary text-white border-primary"
+                      : "bg-surface-800 text-surface-300 border-surface-600 hover:border-surface-500"
+                  }`}
+                >
+                  {{
+                    warm: "温暖",
+                    cold: "冷峻",
+                    humorous: "幽默",
+                    serious: "严肃",
+                    suspenseful: "悬疑",
+                    neutral: "中性",
+                  }[opt]}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <SliderControl
+            label="心理描写深度"
+            value={writingStyle.psychologicalDepth}
+            minLabel="仅外部行为"
+            maxLabel="深入内心"
+            onChange={(val) => updateWritingStyle({ psychologicalDepth: val })}
+          />
+
+          {writingStyleMessage && (
+            <div className={`px-3 py-2 rounded-lg text-sm ${
+              writingStyleSaved
+                ? "bg-success/10 text-success border border-success/20"
+                : "bg-info/10 text-info border border-info/20"
+            }`}>
+              {writingStyleMessage}
+            </div>
+          )}
+
+          <div className="flex items-center gap-3 pt-3 border-t border-surface-700">
+            <Button
+              variant="primary"
+              onClick={() => void handleSaveWritingStyle()}
+              disabled={writingStyleSaving || !projectRoot || !writingStyleLoaded}
+            >
+              {writingStyleSaving ? "保存中..." : writingStyleSaved ? "已保存 ✓" : "保存风格设置"}
+            </Button>
+            {!projectRoot && (
+              <span className="text-xs text-warning">请先打开项目以设置写作风格</span>
+            )}
           </div>
         </Card>
       )}

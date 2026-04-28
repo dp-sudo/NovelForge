@@ -28,6 +28,22 @@ impl Default for AiService {
 }
 
 impl AiService {
+    fn canonical_task_type(task_type: &str) -> &str {
+        match task_type {
+            "chapter_draft" | "generate_chapter_draft" | "draft" => "chapter.draft",
+            "chapter_continue" | "continue_chapter" | "continue_draft" => "chapter.continue",
+            "chapter_rewrite" | "rewrite_selection" => "chapter.rewrite",
+            "chapter_plan" | "plan_chapter" => "chapter.plan",
+            "prose_naturalize" | "deai_text" => "prose.naturalize",
+            "character_create" => "character.create",
+            "world.generate" | "world_create_rule" => "world.create_rule",
+            "plot.generate" | "plot_create_node" => "plot.create_node",
+            "consistency_scan" => "consistency.scan",
+            "blueprint_generate" => "blueprint.generate_step",
+            _ => task_type,
+        }
+    }
+
     /// Register a provider adapter at runtime.
     pub async fn register_provider(&self, config: ProviderConfig) {
         let id = config.id.clone();
@@ -106,9 +122,18 @@ impl AiService {
     fn resolve_route(task_type: &str) -> Result<(String, String, Option<TaskRoute>), AppErrorDto> {
         let conn = app_database::open_or_create()?;
         let routes = app_database::load_task_routes(&conn)?;
+        let canonical_task = Self::canonical_task_type(task_type);
 
         // First try exact match
         if let Some(r) = routes.iter().find(|r| r.task_type == task_type) {
+            return Ok((r.provider_id.clone(), r.model_id.clone(), Some(r.clone())));
+        }
+
+        // Then try alias match (legacy task type names)
+        if let Some(r) = routes
+            .iter()
+            .find(|r| Self::canonical_task_type(&r.task_type) == canonical_task)
+        {
             return Ok((r.provider_id.clone(), r.model_id.clone(), Some(r.clone())));
         }
 
@@ -119,9 +144,24 @@ impl AiService {
             }
         }
 
+        // Safety fallback: if at least one route exists, reuse the first route
+        // so unconfigured task types can still run instead of hard-failing.
+        if let Some(first) = routes.first() {
+            let mut inferred = first.clone();
+            inferred.task_type = task_type.to_string();
+            return Ok((
+                first.provider_id.clone(),
+                first.model_id.clone(),
+                Some(inferred),
+            ));
+        }
+
         Err(AppErrorDto::new(
             "TASK_ROUTE_NOT_FOUND",
-            &format!("No route configured for task type '{}'. 请先在「任务路由」中配置至少一个 Provider。", task_type),
+            &format!(
+                "No route configured for task type '{}'. 请先在「任务路由」中配置至少一个 Provider。",
+                task_type
+            ),
             true,
         ))
     }

@@ -108,6 +108,26 @@ export interface TaskRoute {
   updatedAt?: string;
 }
 
+export interface WritingStyle {
+  languageStyle: "plain" | "balanced" | "ornate" | "colloquial";
+  descriptionDensity: number;
+  dialogueRatio: number;
+  sentenceRhythm: "short" | "long" | "mixed";
+  atmosphere: "warm" | "cold" | "humorous" | "serious" | "suspenseful" | "neutral";
+  psychologicalDepth: number;
+}
+
+export function defaultWritingStyle(): WritingStyle {
+  return {
+    languageStyle: "balanced",
+    descriptionDensity: 4,
+    dialogueRatio: 4,
+    sentenceRhythm: "mixed",
+    atmosphere: "neutral",
+    psychologicalDepth: 4,
+  };
+}
+
 // ── CapabilityReport ──
 
 export interface CapabilityReport {

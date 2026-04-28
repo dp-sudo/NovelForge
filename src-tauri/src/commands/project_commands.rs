@@ -3,7 +3,7 @@ use tauri::State;
 
 use crate::errors::AppErrorDto;
 use crate::infra::recent_projects::RecentProjectItem;
-use crate::services::project_service::{CreateProjectInput, ProjectOpenResult};
+use crate::services::project_service::{CreateProjectInput, ProjectOpenResult, WritingStyle};
 use crate::state::AppState;
 
 #[derive(Debug, Deserialize)]
@@ -31,6 +31,19 @@ pub struct OpenProjectInput {
 pub struct GitSnapshotInput {
     pub project_root: String,
     pub message: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveWritingStyleInput {
+    pub project_root: String,
+    pub writing_style: WritingStyle,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetWritingStyleInput {
+    pub project_root: String,
 }
 
 #[tauri::command]
@@ -82,6 +95,29 @@ pub async fn list_recent_projects(
     state: State<'_, AppState>,
 ) -> Result<Vec<RecentProjectItem>, AppErrorDto> {
     state.project_service.list_recent_projects()
+}
+
+#[tauri::command]
+pub async fn clear_recent_projects(state: State<'_, AppState>) -> Result<(), AppErrorDto> {
+    state.project_service.clear_recent_projects()
+}
+
+#[tauri::command]
+pub async fn save_writing_style(
+    input: SaveWritingStyleInput,
+    state: State<'_, AppState>,
+) -> Result<(), AppErrorDto> {
+    state
+        .project_service
+        .save_writing_style(&input.project_root, &input.writing_style)
+}
+
+#[tauri::command]
+pub async fn get_writing_style(
+    input: GetWritingStyleInput,
+    state: State<'_, AppState>,
+) -> Result<WritingStyle, AppErrorDto> {
+    state.project_service.get_writing_style(&input.project_root)
 }
 
 #[tauri::command]

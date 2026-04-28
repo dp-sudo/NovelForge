@@ -7,7 +7,7 @@ use serde::Serialize;
 use crate::errors::AppErrorDto;
 use crate::infra::database::open_database;
 use crate::services::import_service::{extract_asset_candidates, AssetExtractionCandidate};
-use crate::services::project_service::get_project_id;
+use crate::services::project_service::{get_project_id, WritingStyle};
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -15,6 +15,7 @@ pub struct GlobalContext {
     pub project_name: String,
     pub genre: String,
     pub narrative_pov: Option<String>,
+    pub writing_style: Option<WritingStyle>,
     pub locked_terms: Vec<String>,
     pub banned_terms: Vec<String>,
     pub blueprint_summary: Vec<BlueprintStepSummary>,
@@ -252,13 +253,14 @@ impl ContextService {
         // Project info
         let project = conn
             .query_row(
-                "SELECT name, genre, narrative_pov FROM projects WHERE id = ?1",
+                "SELECT name, genre, narrative_pov, writing_style FROM projects WHERE id = ?1",
                 params![project_id],
                 |row| {
                     Ok((
                         row.get::<_, String>(0)?,
                         row.get::<_, String>(1)?,
                         row.get::<_, Option<String>>(2)?,
+                        row.get::<_, Option<String>>(3)?,
                     ))
                 },
             )
@@ -266,6 +268,9 @@ impl ContextService {
                 AppErrorDto::new("PROJECT_NOT_FOUND", "项目不存在", false)
                     .with_detail(err.to_string())
             })?;
+        let writing_style = project
+            .3
+            .and_then(|json| serde_json::from_str::<WritingStyle>(&json).ok());
 
         // Locked & banned terms from glossary
         let locked_terms: Vec<String> = conn
@@ -310,6 +315,7 @@ impl ContextService {
             project_name: project.0,
             genre: project.1,
             narrative_pov: project.2,
+            writing_style,
             locked_terms,
             banned_terms,
             blueprint_summary,

@@ -3,7 +3,7 @@
 ## 1. 文档信息
 - 版本：v0.5
 - 状态：S17 发布能力已接入（主闭环 + Beta 发布能力默认走 Tauri command）
-- 最后更新：2026-04-27
+- 最后更新：2026-04-28
 - 代码基线：`src/api/*`、`src-tauri/src/commands/*`
 
 ## 2. 集成原则（当前）
@@ -33,16 +33,19 @@
 4. `list_recent_projects`
 - input: 无
 - output: `RecentProjectItem[]`
-5. `init_project_repository`
+5. `clear_recent_projects`
+- input: 无
+- output: `void`
+6. `init_project_repository`
 - input: `{ projectRoot }`
 - output: `GitRepositoryStatus { initialized, branch, hasChanges }`
-6. `get_project_repository_status`
+7. `get_project_repository_status`
 - input: `{ projectRoot }`
 - output: `GitRepositoryStatus`
-7. `commit_project_snapshot`
+8. `commit_project_snapshot`
 - input: `{ projectRoot, message? }`
 - output: `GitSnapshotResult { noChanges, commit? }`
-8. `list_project_history`
+9. `list_project_history`
 - input: `{ projectRoot, limit? }`
 - output: `GitCommitRecord[]`
 

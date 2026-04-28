@@ -1,6 +1,6 @@
 use std::fs;
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -36,10 +36,25 @@ fn ensure_recent_projects_file() -> io::Result<PathBuf> {
 pub fn list_recent_projects() -> io::Result<Vec<RecentProjectItem>> {
     let file_path = ensure_recent_projects_file()?;
     let raw = fs::read_to_string(file_path)?;
-    match serde_json::from_str::<Vec<RecentProjectItem>>(&raw) {
-        Ok(items) => Ok(items),
-        Err(_) => Ok(Vec::new()),
+    let items = match serde_json::from_str::<Vec<RecentProjectItem>>(&raw) {
+        Ok(items) => items,
+        Err(_) => {
+            write_recent_projects(&[])?;
+            return Ok(Vec::new());
+        }
+    };
+
+    let total = items.len();
+    let filtered: Vec<RecentProjectItem> = items
+        .into_iter()
+        .filter(|item| is_valid_recent_project_path(&item.project_path))
+        .collect();
+
+    if filtered.len() != total {
+        write_recent_projects(&filtered)?;
     }
+
+    Ok(filtered)
 }
 
 fn write_recent_projects(items: &[RecentProjectItem]) -> io::Result<()> {
@@ -69,4 +84,13 @@ pub fn mark_recent_project(project_path: &str) -> io::Result<()> {
     );
     items.truncate(MAX_RECENT_ITEMS);
     write_recent_projects(&items)
+}
+
+pub fn clear_recent_projects() -> io::Result<()> {
+    write_recent_projects(&[])
+}
+
+fn is_valid_recent_project_path(project_path: &str) -> bool {
+    let root = Path::new(project_path);
+    root.join("project.json").exists() && root.join("database").join("project.sqlite").exists()
 }

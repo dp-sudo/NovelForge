@@ -26,6 +26,50 @@ const nodeTypeColors: Record<string, BadgeVariant> = {
 
 type BadgeVariant = "default" | "success" | "warning" | "error" | "info";
 
+function parseAiJson(raw: string): Record<string, unknown> {
+  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const base = (fenced ? fenced[1] : raw).trim();
+  const start = base.indexOf("{");
+  const end = base.lastIndexOf("}");
+  if (start < 0 || end <= start) {
+    throw new Error("AI 返回内容中未找到 JSON 对象");
+  }
+  const parsed = JSON.parse(base.slice(start, end + 1)) as unknown;
+  if (!parsed || typeof parsed !== "object") {
+    throw new Error("AI 返回 JSON 结构无效");
+  }
+  return parsed as Record<string, unknown>;
+}
+
+function pickText(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function normalizeNodeType(value: unknown): PlotNodeInput["nodeType"] {
+  const raw = pickText(value);
+  if (!raw) return "开端";
+  if ((NODE_TYPES as readonly string[]).includes(raw)) {
+    return raw as PlotNodeInput["nodeType"];
+  }
+  if (raw.includes("高潮")) return "高潮";
+  if (raw.includes("结局")) return "结局";
+  if (raw.includes("冲突")) return "冲突";
+  if (raw.includes("转折")) return "转折";
+  if (raw.includes("胜")) return "胜利";
+  if (raw.includes("败")) return "失败";
+  if (raw.includes("支线")) return "支线";
+  return "开端";
+}
+
+function normalizeStatus(value: unknown): PlotNodeInput["status"] {
+  const raw = pickText(value);
+  if (!raw) return "规划中";
+  if (raw === "未使用" || raw === "规划中" || raw === "已写入" || raw === "需调整") {
+    return raw;
+  }
+  return "规划中";
+}
+
 export function PlotPage() {
   const [nodes, setNodes] = useState<PlotRow[]>([]);
   const [selected, setSelected] = useState<PlotRow | null>(null);
@@ -79,6 +123,46 @@ export function PlotPage() {
     [ids[index], ids[index + 1]] = [ids[index + 1], ids[index]];
     await reorderPlotNodes(ids, projectRoot);
     await load();
+  }
+
+  async function handleCreateFromAi() {
+    if (!projectRoot || !aiResult) return;
+    try {
+      const parsed = parseAiJson(aiResult);
+      const candidate = (parsed.plotNode && typeof parsed.plotNode === "object")
+        ? (parsed.plotNode as Record<string, unknown>)
+        : parsed;
+      const conflict = candidate.conflict;
+      const conflictText = typeof conflict === "string"
+        ? conflict
+        : conflict && typeof conflict === "object"
+          ? pickText((conflict as Record<string, unknown>).description)
+            ?? pickText((conflict as Record<string, unknown>).primaryType)
+          : undefined;
+      const goal =
+        pickText(candidate.goal) ??
+        pickText(candidate.objective) ??
+        pickText(candidate.summary) ??
+        undefined;
+
+      await createPlotNode(
+        {
+          title: pickText(candidate.title) ?? "未命名剧情节点",
+          nodeType: normalizeNodeType(candidate.nodeType ?? candidate.node_type ?? candidate.type),
+          sortOrder: (nodes.length > 0 ? Math.max(...nodes.map((n) => n.sort_order)) + 1 : 1),
+          goal,
+          conflict: conflictText,
+          status: normalizeStatus(candidate.status),
+        },
+        projectRoot
+      );
+      setAiResult(null);
+      setAiDescription("");
+      setShowAiCreate(false);
+      await load();
+    } catch {
+      setAiResult("AI 返回结果不是可解析的剧情节点 JSON，请重试或补充更明确的指令。");
+    }
   }
 
   return (
@@ -201,6 +285,7 @@ export function PlotPage() {
             <div className="p-4 bg-primary/5 border border-primary/20 rounded-xl">
               <pre className="text-sm text-surface-200 whitespace-pre-wrap font-sans leading-relaxed max-h-64 overflow-y-auto">{aiResult}</pre>
               <div className="flex gap-2 mt-3">
+                <Button variant="primary" size="sm" onClick={() => void handleCreateFromAi()}>保存节点</Button>
                 <Button variant="primary" size="sm" onClick={() => { setAiResult(null); setShowAiCreate(false); }}>关闭</Button>
               </div>
             </div>

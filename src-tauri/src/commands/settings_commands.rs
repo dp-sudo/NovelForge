@@ -9,6 +9,22 @@ use crate::infra::app_database;
 use crate::services::settings_service::EditorSettings;
 use crate::state::AppState;
 
+fn canonical_task_type(task_type: &str) -> &str {
+    match task_type {
+        "chapter_draft" | "generate_chapter_draft" | "draft" => "chapter.draft",
+        "chapter_continue" | "continue_chapter" | "continue_draft" => "chapter.continue",
+        "chapter_rewrite" | "rewrite_selection" => "chapter.rewrite",
+        "chapter_plan" | "plan_chapter" => "chapter.plan",
+        "prose_naturalize" | "deai_text" => "prose.naturalize",
+        "character_create" => "character.create",
+        "world.generate" | "world_create_rule" => "world.create_rule",
+        "plot.generate" | "plot_create_node" => "plot.create_node",
+        "consistency_scan" => "consistency.scan",
+        "blueprint_generate" => "blueprint.generate_step",
+        _ => task_type,
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppUpdateInfo {
@@ -138,18 +154,22 @@ pub async fn save_provider(
             let existing_routes = app_database::load_task_routes(&conn)?;
             let now = crate::infra::time::now_iso();
             let task_types = [
-                "chapter_draft",
-                "chapter_continue",
-                "chapter_rewrite",
-                "prose_naturalize",
+                "chapter.draft",
+                "chapter.continue",
+                "chapter.rewrite",
+                "chapter.plan",
+                "prose.naturalize",
                 "character.create",
-                "world.generate",
+                "world.create_rule",
                 "consistency.scan",
                 "blueprint.generate_step",
-                "plot.generate",
+                "plot.create_node",
             ];
             for tt in &task_types {
-                if !existing_routes.iter().any(|r| r.task_type == *tt) {
+                if !existing_routes
+                    .iter()
+                    .any(|r| canonical_task_type(&r.task_type) == *tt)
+                {
                     let route = TaskRoute {
                         id: Uuid::new_v4().to_string(),
                         task_type: tt.to_string(),

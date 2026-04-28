@@ -8,7 +8,9 @@ use uuid::Uuid;
 use crate::errors::AppErrorDto;
 use crate::infra::database::{initialize_database, open_database};
 use crate::infra::path_utils::sanitize_project_directory_name;
-use crate::infra::recent_projects::{list_recent_projects, mark_recent_project, RecentProjectItem};
+use crate::infra::recent_projects::{
+    clear_recent_projects, list_recent_projects, mark_recent_project, RecentProjectItem,
+};
 use crate::infra::time::now_iso;
 
 const PROJECT_SCHEMA_VERSION: &str = "1.0.0";
@@ -46,8 +48,34 @@ pub struct CreateProjectInput {
 #[serde(rename_all = "camelCase")]
 pub struct ProjectSettings {
     pub default_narrative_pov: String,
+    #[serde(default)]
+    pub writing_style: WritingStyle,
     pub language: String,
     pub autosave_interval_ms: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WritingStyle {
+    pub language_style: String,
+    pub description_density: i64,
+    pub dialogue_ratio: i64,
+    pub sentence_rhythm: String,
+    pub atmosphere: String,
+    pub psychological_depth: i64,
+}
+
+impl Default for WritingStyle {
+    fn default() -> Self {
+        Self {
+            language_style: "balanced".to_string(),
+            description_density: 4,
+            dialogue_ratio: 4,
+            sentence_rhythm: "mixed".to_string(),
+            atmosphere: "neutral".to_string(),
+            psychological_depth: 4,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -179,6 +207,7 @@ impl ProjectService {
             manuscript_root: "manuscript/chapters".to_string(),
             settings: ProjectSettings {
                 default_narrative_pov: "third_limited".to_string(),
+                writing_style: WritingStyle::default(),
                 language: "zh-CN".to_string(),
                 autosave_interval_ms: 5_000,
             },
@@ -190,6 +219,13 @@ impl ProjectService {
                 .with_suggested_action("请检查 project.json 写入权限")
         })?;
 
+        let writing_style_json =
+            serde_json::to_string(&project_json.settings.writing_style).map_err(|err| {
+                AppErrorDto::new("PROJECT_CREATE_FAILED", "创建项目失败", true)
+                    .with_detail(err.to_string())
+                    .with_suggested_action("请检查默认写作风格配置")
+            })?;
+
         let conn = open_database(project_root_path).map_err(|err| {
             AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false)
                 .with_detail(err.to_string())
@@ -198,8 +234,8 @@ impl ProjectService {
         conn
       .execute(
         "
-        INSERT INTO projects(id, name, author, genre, narrative_pov, target_words, current_words, project_path, schema_version, created_at, updated_at)
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+        INSERT INTO projects(id, name, author, genre, narrative_pov, writing_style, target_words, current_words, project_path, schema_version, created_at, updated_at)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
         ",
         params![
           project_json.project_id,
@@ -207,6 +243,7 @@ impl ProjectService {
           project_json.author,
           project_json.genre,
           project_json.settings.default_narrative_pov.clone(),
+          writing_style_json,
           project_json.target_words,
           0_i64,
           project_root_path.to_string_lossy().to_string(),
@@ -275,6 +312,67 @@ impl ProjectService {
                 .with_detail(err.to_string())
         })
     }
+
+    pub fn clear_recent_projects(&self) -> Result<(), AppErrorDto> {
+        clear_recent_projects().map_err(|err| {
+            AppErrorDto::new("RECENT_PROJECTS_CLEAR_FAILED", "清除最近项目失败", true)
+                .with_detail(err.to_string())
+        })
+    }
+
+    pub fn save_writing_style(
+        &self,
+        project_root: &str,
+        style: &WritingStyle,
+    ) -> Result<(), AppErrorDto> {
+        let project_root_path = Path::new(project_root);
+        let conn = open_database(project_root_path).map_err(|err| {
+            AppErrorDto::new("DB_OPEN_FAILED", "无法打开项目数据库", false)
+                .with_detail(err.to_string())
+        })?;
+        let project_id = get_project_id(&conn)?;
+        let style_json = serde_json::to_string(style).map_err(|err| {
+            AppErrorDto::new("STYLE_SERIALIZE_FAILED", "无法序列化写作风格配置", true)
+                .with_detail(err.to_string())
+        })?;
+        let now = now_iso();
+        conn.execute(
+            "UPDATE projects SET writing_style = ?1, updated_at = ?2 WHERE id = ?3",
+            params![style_json, now, project_id],
+        )
+        .map_err(|err| {
+            AppErrorDto::new("DB_WRITE_FAILED", "保存写作风格失败", true)
+                .with_detail(err.to_string())
+        })?;
+        Ok(())
+    }
+
+    pub fn get_writing_style(&self, project_root: &str) -> Result<WritingStyle, AppErrorDto> {
+        let project_root_path = Path::new(project_root);
+        let conn = open_database(project_root_path).map_err(|err| {
+            AppErrorDto::new("DB_OPEN_FAILED", "无法打开项目数据库", false)
+                .with_detail(err.to_string())
+        })?;
+        let project_id = get_project_id(&conn)?;
+        let style_json: Option<String> = conn
+            .query_row(
+                "SELECT writing_style FROM projects WHERE id = ?1",
+                params![project_id],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .map_err(|err| {
+                AppErrorDto::new("DB_QUERY_FAILED", "读取写作风格失败", true)
+                    .with_detail(err.to_string())
+            })?;
+
+        match style_json {
+            Some(raw) => serde_json::from_str::<WritingStyle>(&raw).map_err(|err| {
+                AppErrorDto::new("STYLE_PARSE_FAILED", "写作风格配置损坏", true)
+                    .with_detail(err.to_string())
+            }),
+            None => Ok(WritingStyle::default()),
+        }
+    }
 }
 
 fn initialize_project_directories(project_root: &Path) -> Result<(), std::io::Error> {
@@ -321,7 +419,7 @@ mod tests {
 
     use uuid::Uuid;
 
-    use super::{CreateProjectInput, ProjectService};
+    use super::{CreateProjectInput, ProjectService, WritingStyle};
 
     fn create_temp_workspace() -> PathBuf {
         let workspace =
@@ -401,6 +499,46 @@ mod tests {
             .expect_err("expected directory exists error");
         assert_eq!(err.code, "PROJECT_PATH_EXISTS");
         assert!(marker.exists());
+
+        remove_temp_workspace(&workspace);
+    }
+
+    #[test]
+    fn writing_style_save_and_get_roundtrip_succeeds() {
+        let workspace = create_temp_workspace();
+        let service = ProjectService;
+
+        let create_result = service
+            .create_project(CreateProjectInput {
+                name: "风格测试".to_string(),
+                author: Some("测试作者".to_string()),
+                genre: "都市".to_string(),
+                target_words: Some(60_000),
+                save_directory: workspace.to_string_lossy().to_string(),
+            })
+            .expect("create project should succeed");
+
+        let default_style = service
+            .get_writing_style(&create_result.project_root)
+            .expect("get default writing style should succeed");
+        assert_eq!(default_style, WritingStyle::default());
+
+        let custom_style = WritingStyle {
+            language_style: "ornate".to_string(),
+            description_density: 6,
+            dialogue_ratio: 3,
+            sentence_rhythm: "long".to_string(),
+            atmosphere: "suspenseful".to_string(),
+            psychological_depth: 7,
+        };
+        service
+            .save_writing_style(&create_result.project_root, &custom_style)
+            .expect("save writing style should succeed");
+
+        let loaded_style = service
+            .get_writing_style(&create_result.project_root)
+            .expect("get saved writing style should succeed");
+        assert_eq!(loaded_style, custom_style);
 
         remove_temp_workspace(&workspace);
     }

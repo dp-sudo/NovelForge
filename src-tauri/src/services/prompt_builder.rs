@@ -1,9 +1,48 @@
 use crate::services::context_service::CollectedContext;
+use crate::services::project_service::WritingStyle;
 
 /// Structured prompt builder following the spec Document 4 §8 template format.
 pub struct PromptBuilder;
 
 impl PromptBuilder {
+    /// Format writing style into a human-readable block for prompt injection.
+    fn format_writing_style(style: &WritingStyle) -> String {
+        let lang_label = match style.language_style.as_str() {
+            "plain" => "平实",
+            "balanced" => "适中",
+            "ornate" => "华丽",
+            "colloquial" => "口语化",
+            _ => "适中",
+        };
+
+        let rhythm_label = match style.sentence_rhythm.as_str() {
+            "short" => "短句为主",
+            "long" => "长句为主",
+            "mixed" => "混合",
+            _ => "混合",
+        };
+
+        let atmosphere_label = match style.atmosphere.as_str() {
+            "warm" => "温暖",
+            "cold" => "冷峻",
+            "humorous" => "幽默",
+            "serious" => "严肃",
+            "suspenseful" => "悬疑",
+            "neutral" => "中性",
+            _ => "中性",
+        };
+
+        format!(
+            "写作风格：\n- 语言风格：{}\n- 描写密度：{}（1=点到为止，7=详细刻画）\n- 对话比例：{}（1=偏叙述，7=偏对话）\n- 句子节奏：{}\n- 氛围基调：{}\n- 心理描写深度：{}（1=仅外部行为，7=深入内心）",
+            lang_label,
+            style.description_density,
+            style.dialogue_ratio,
+            rhythm_label,
+            atmosphere_label,
+            style.psychological_depth,
+        )
+    }
+
     /// Build a chapter draft generation prompt.
     pub fn build_chapter_draft(
         context: &CollectedContext,
@@ -44,6 +83,9 @@ impl PromptBuilder {
                     parts.push(format!("[蓝图表] {}: {}", step.title, preview));
                 }
             }
+        }
+        if let Some(ref writing_style) = global.writing_style {
+            parts.push(Self::format_writing_style(writing_style));
         }
         parts.push(String::new());
 
@@ -172,6 +214,9 @@ impl PromptBuilder {
         parts.push(format!("题材：{}", global.genre));
         if let Some(ref pov) = global.narrative_pov {
             parts.push(format!("叙事视角：{}", pov));
+        }
+        if let Some(ref writing_style) = global.writing_style {
+            parts.push(Self::format_writing_style(writing_style));
         }
         parts.push(String::new());
 
@@ -364,6 +409,13 @@ impl PromptBuilder {
             parts.push(String::new());
         }
 
+        if let Some(ref writing_style) = global.writing_style {
+            parts.push("## 写作风格约束".to_string());
+            parts.push(Self::format_writing_style(writing_style));
+            parts.push("一致性扫描应检查文本是否偏离设定的写作风格。".to_string());
+            parts.push(String::new());
+        }
+
         // Characters
         if !related.characters.is_empty() {
             parts.push("# 角色卡".to_string());
@@ -438,6 +490,9 @@ impl PromptBuilder {
         parts.push(format!("题材：{}", global.genre));
         if let Some(ref pov) = global.narrative_pov {
             parts.push(format!("叙事视角：{}", pov));
+        }
+        if let Some(ref writing_style) = global.writing_style {
+            parts.push(Self::format_writing_style(writing_style));
         }
         parts.push(String::new());
 
@@ -603,5 +658,67 @@ impl PromptBuilder {
 }"#.to_string());
 
         parts.join("\n")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::PromptBuilder;
+    use crate::services::context_service::{
+        BlueprintStepSummary, CollectedContext, GlobalContext, RelatedContext,
+    };
+    use crate::services::project_service::WritingStyle;
+
+    fn sample_context(writing_style: Option<WritingStyle>) -> CollectedContext {
+        CollectedContext {
+            global_context: GlobalContext {
+                project_name: "测试作品".to_string(),
+                genre: "奇幻".to_string(),
+                narrative_pov: Some("third_limited".to_string()),
+                writing_style,
+                locked_terms: vec![],
+                banned_terms: vec![],
+                blueprint_summary: vec![BlueprintStepSummary {
+                    step_key: "step-03-premise".to_string(),
+                    title: "故事核心".to_string(),
+                    content: Some("主角背负诅咒踏上旅程".to_string()),
+                    status: "completed".to_string(),
+                }],
+            },
+            related_context: RelatedContext {
+                chapter: None,
+                characters: vec![],
+                world_rules: vec![],
+                plot_nodes: vec![],
+                previous_chapter_summary: None,
+            },
+        }
+    }
+
+    #[test]
+    fn chapter_draft_includes_writing_style_block_when_present() {
+        let context = sample_context(Some(WritingStyle {
+            language_style: "ornate".to_string(),
+            description_density: 6,
+            dialogue_ratio: 3,
+            sentence_rhythm: "long".to_string(),
+            atmosphere: "suspenseful".to_string(),
+            psychological_depth: 7,
+        }));
+
+        let prompt = PromptBuilder::build_chapter_draft(&context, "推进主线冲突");
+
+        assert!(prompt.contains("写作风格："));
+        assert!(prompt.contains("语言风格：华丽"));
+        assert!(prompt.contains("句子节奏：长句为主"));
+        assert!(prompt.contains("氛围基调：悬疑"));
+    }
+
+    #[test]
+    fn consistency_scan_omits_writing_style_block_when_absent() {
+        let context = sample_context(None);
+        let prompt = PromptBuilder::build_consistency_scan(&context, "测试章节正文");
+        assert!(!prompt.contains("写作风格约束"));
+        assert!(!prompt.contains("写作风格："));
     }
 }

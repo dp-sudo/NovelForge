@@ -6,7 +6,7 @@ import { Button } from "../../components/ui/Button.js";
 import { Input } from "../../components/forms/Input.js";
 import { Select } from "../../components/forms/Select.js";
 import { Modal } from "../../components/dialogs/Modal.js";
-import { createProject, listRecentProjects, openProject, validateProjectName } from "../../api/projectApi.js";
+import { clearRecentProjects, createProject, listRecentProjects, openProject, validateProjectName } from "../../api/projectApi.js";
 import { checkProjectIntegrity, type IntegrityReport } from "../../api/chapterApi.js";
 
 const GENRES = ["玄幻", "都市", "科幻", "悬疑", "言情", "历史", "奇幻", "轻小说", "剧本", "其他"];
@@ -144,9 +144,15 @@ export function ProjectCenterPage() {
     });
   }
 
-  function handleClearProject() {
-    setRecentProjects([]);
-    setActionError(null);
+  async function handleClearProject() {
+    try {
+      await clearRecentProjects();
+      setRecentProjects([]);
+      setIntegrityReports({});
+      setActionError(null);
+    } catch (err) {
+      setActionError(getErrorMessage(err, "清除最近项目失败"));
+    }
   }
 
   async function handleCheckIntegrity(projectPath: string) {
@@ -194,7 +200,7 @@ export function ProjectCenterPage() {
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-semibold text-surface-100">最近项目</h2>
               {recentProjects.length > 0 && (
-                <button onClick={handleClearProject} className="text-xs text-surface-400 hover:text-error transition-colors">
+                <button onClick={() => void handleClearProject()} className="text-xs text-surface-400 hover:text-error transition-colors">
                   清除
                 </button>
               )}

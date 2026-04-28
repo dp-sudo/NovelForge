@@ -87,7 +87,7 @@
 - 模型管理：`ModelRegistryService` 支持刷新模型、读取刷新日志、检查/应用远端 registry（含 URL 安全约束、Schema 与签名字段校验闸）
 
 ## 7. 命令面（摘要）
-- Project：`validate_project`, `create_project`, `open_project`, `list_recent_projects`, `init_project_repository`, `get_project_repository_status`, `commit_project_snapshot`, `list_project_history`
+- Project：`validate_project`, `create_project`, `open_project`, `list_recent_projects`, `clear_recent_projects`, `init_project_repository`, `get_project_repository_status`, `commit_project_snapshot`, `list_project_history`
 - Chapter：`list_chapters`, `list_timeline_entries`, `create_chapter`, `save_chapter_content`, `autosave_draft`, `recover_draft`, `delete_chapter`
 - Search：`search_project`, `search_project_semantic`, `rebuild_search_index`, `rebuild_vector_index`
 - Context：`get_chapter_context`

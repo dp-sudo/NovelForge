@@ -43,6 +43,7 @@ pub fn open_database(project_root: &Path) -> SqlResult<Connection> {
 
 fn ensure_compatible_schema(conn: &Connection) -> SqlResult<()> {
     ensure_column(conn, "projects", "narrative_pov", "TEXT")?;
+    ensure_column(conn, "projects", "writing_style", "TEXT")?;
     ensure_column(conn, "chapters", "target_words", "INTEGER DEFAULT 0")?;
     ensure_column(conn, "chapters", "current_words", "INTEGER DEFAULT 0")?;
     ensure_column(conn, "chapters", "version", "INTEGER NOT NULL DEFAULT 1")?;
@@ -152,6 +153,7 @@ mod tests {
 
         let upgraded = open_database(&workspace).expect("open upgraded db");
         assert!(column_exists(&upgraded, "projects", "narrative_pov"));
+        assert!(column_exists(&upgraded, "projects", "writing_style"));
         assert!(column_exists(&upgraded, "chapters", "target_words"));
         assert!(column_exists(&upgraded, "chapters", "current_words"));
         assert!(column_exists(&upgraded, "chapters", "version"));

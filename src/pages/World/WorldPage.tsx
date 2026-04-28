@@ -28,6 +28,35 @@ const CONSTRAINTS = [
 
 const emptyForm = { title: "", category: "世界规则" as const, description: "", constraintLevel: "normal" as const, examples: "" };
 
+function parseAiJson(raw: string): Record<string, unknown> {
+  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const base = (fenced ? fenced[1] : raw).trim();
+  const start = base.indexOf("{");
+  const end = base.lastIndexOf("}");
+  if (start < 0 || end <= start) {
+    throw new Error("AI 返回内容中未找到 JSON 对象");
+  }
+  const jsonText = base.slice(start, end + 1);
+  const parsed = JSON.parse(jsonText) as unknown;
+  if (!parsed || typeof parsed !== "object") {
+    throw new Error("AI 返回 JSON 结构无效");
+  }
+  return parsed as Record<string, unknown>;
+}
+
+function pickText(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function normalizeConstraintLevel(value: unknown): "weak" | "normal" | "strong" | "absolute" {
+  const raw = pickText(value)?.toLowerCase();
+  if (!raw) return "normal";
+  if (["weak", "low", "soft", "弱", "弱设定"].some((x) => raw.includes(x))) return "weak";
+  if (["strong", "high", "严格", "强"].some((x) => raw.includes(x))) return "strong";
+  if (["absolute", "must", "forbid", "绝对", "不可"].some((x) => raw.includes(x))) return "absolute";
+  return "normal";
+}
+
 export function WorldPage() {
   const [rules, setRules] = useState<WorldRow[]>([]);
   const [filter, setFilter] = useState("全部");
@@ -71,6 +100,45 @@ export function WorldPage() {
     setForm(emptyForm);
     setShowNew(false);
     await load();
+  }
+
+  async function handleCreateFromAi() {
+    if (!projectRoot || !aiResult) return;
+    try {
+      const parsed = parseAiJson(aiResult);
+      const candidate = (parsed.worldRule && typeof parsed.worldRule === "object")
+        ? (parsed.worldRule as Record<string, unknown>)
+        : parsed;
+      const title = pickText(candidate.title) ?? pickText(candidate.name) ?? "未命名设定";
+      const category = pickText(candidate.category) ?? pickText(candidate.type) ?? "世界规则";
+      const description = pickText(candidate.description) ?? pickText(candidate.summary) ?? "（AI 未返回描述）";
+      const examplesSource = candidate.examples;
+      const examples = typeof examplesSource === "string"
+        ? examplesSource.trim()
+        : Array.isArray(examplesSource)
+          ? examplesSource.filter((x): x is string => typeof x === "string" && x.trim().length > 0).join("；")
+          : undefined;
+      const constraintLevel = normalizeConstraintLevel(
+        candidate.constraintLevel ?? candidate.constraint_level ?? candidate.level ?? candidate.strictness
+      );
+
+      await createWorldRule(
+        {
+          title,
+          category,
+          description,
+          constraintLevel,
+          examples: examples || undefined,
+        },
+        projectRoot
+      );
+      setAiResult(null);
+      setAiDescription("");
+      setShowAiCreate(false);
+      await load();
+    } catch {
+      setAiResult("AI 返回结果不是可解析的设定 JSON，请重试或补充更明确的指令。");
+    }
   }
 
   return (
@@ -201,6 +269,7 @@ export function WorldPage() {
             <div className="p-4 bg-primary/5 border border-primary/20 rounded-xl">
               <pre className="text-sm text-surface-200 whitespace-pre-wrap font-sans leading-relaxed max-h-64 overflow-y-auto">{aiResult}</pre>
               <div className="flex gap-2 mt-3">
+                <Button variant="primary" size="sm" onClick={() => void handleCreateFromAi()}>保存设定</Button>
                 <Button variant="primary" size="sm" onClick={() => { setAiResult(null); setShowAiCreate(false); }}>关闭</Button>
               </div>
             </div>

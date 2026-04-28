@@ -1,7 +1,21 @@
 import { invokeCommand } from "./tauriClient.js";
-import type { LlmProviderConfig, RefreshResult, ModelRecord, RefreshLog, TaskRoute } from "../types/ai.js";
+import type {
+  LlmProviderConfig,
+  RefreshResult,
+  ModelRecord,
+  RefreshLog,
+  TaskRoute,
+  WritingStyle,
+} from "../types/ai.js";
 
-export type { LlmProviderConfig, RefreshResult, ModelRecord, RefreshLog, TaskRoute } from "../types/ai.js";
+export type {
+  LlmProviderConfig,
+  RefreshResult,
+  ModelRecord,
+  RefreshLog,
+  TaskRoute,
+  WritingStyle,
+} from "../types/ai.js";
 
 export interface EditorSettingsData {
   fontSize: number;
@@ -114,6 +128,21 @@ export async function loadEditorSettings(): Promise<EditorSettingsData> {
 
 export async function saveEditorSettings(input: EditorSettingsData): Promise<void> {
   await invokeCommand<void>("save_editor_settings", { settings: input });
+}
+
+export async function saveWritingStyle(
+  projectRoot: string,
+  writingStyle: WritingStyle,
+): Promise<void> {
+  await invokeCommand<void>("save_writing_style", {
+    input: { projectRoot, writingStyle },
+  });
+}
+
+export async function getWritingStyle(projectRoot: string): Promise<WritingStyle> {
+  return invokeCommand<WritingStyle>("get_writing_style", {
+    input: { projectRoot },
+  });
 }
 
 // —— Git integration ——

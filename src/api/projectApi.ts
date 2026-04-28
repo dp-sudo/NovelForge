@@ -38,3 +38,7 @@ export async function openProject(projectRoot: string): Promise<ProjectOpenResul
 export async function listRecentProjects(): Promise<RecentProjectItem[]> {
   return invokeCommand<RecentProjectItem[]>("list_recent_projects");
 }
+
+export async function clearRecentProjects(): Promise<void> {
+  return invokeCommand<void>("clear_recent_projects");
+}
