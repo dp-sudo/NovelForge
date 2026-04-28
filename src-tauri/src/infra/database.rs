@@ -1,8 +1,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use rusqlite::{Connection, Result as SqlResult};
 use log::info;
+use rusqlite::{Connection, Result as SqlResult};
 
 use crate::errors::AppErrorDto;
 
@@ -19,11 +19,10 @@ pub fn initialize_database(project_root: &Path, now: &str) -> SqlResult<()> {
     let conn = Connection::open(db_path)?;
     // Run migrations (will create tables and track versions)
     let result = crate::infra::migrator::run_project_pending(&conn).map_err(|e| {
-        let detail = e.detail.unwrap_or_else(|| "unknown migration error".to_string());
-        rusqlite::Error::InvalidParameterName(format!(
-            "Migration failed: {} ({detail})",
-            e.message
-        ))
+        let detail = e
+            .detail
+            .unwrap_or_else(|| "unknown migration error".to_string());
+        rusqlite::Error::InvalidParameterName(format!("Migration failed: {} ({detail})", e.message))
     })?;
     for v in &result.applied {
         info!("[DB] Applied project migration: {}", v);
@@ -36,11 +35,10 @@ pub fn open_database(project_root: &Path) -> SqlResult<Connection> {
     let conn = Connection::open(get_database_path(project_root))?;
     // Run pending migrations on open (idempotent)
     let result = crate::infra::migrator::run_project_pending(&conn).map_err(|e| {
-        let detail = e.detail.unwrap_or_else(|| "unknown migration error".to_string());
-        rusqlite::Error::InvalidParameterName(format!(
-            "Migration failed: {} ({detail})",
-            e.message
-        ))
+        let detail = e
+            .detail
+            .unwrap_or_else(|| "unknown migration error".to_string());
+        rusqlite::Error::InvalidParameterName(format!("Migration failed: {} ({detail})", e.message))
     })?;
     for v in &result.applied {
         info!("[DB] Applied project migration on open: {}", v);
@@ -60,12 +58,7 @@ fn ensure_compatible_schema(conn: &Connection) -> SqlResult<()> {
     Ok(())
 }
 
-fn ensure_column(
-    conn: &Connection,
-    table: &str,
-    column: &str,
-    definition: &str,
-) -> SqlResult<()> {
+fn ensure_column(conn: &Connection, table: &str, column: &str, definition: &str) -> SqlResult<()> {
     if table_has_column(conn, table, column)? {
         return Ok(());
     }
@@ -153,6 +146,26 @@ mod tests {
               created_at TEXT NOT NULL,
               updated_at TEXT NOT NULL,
               UNIQUE(project_id, chapter_index)
+            );
+            CREATE TABLE llm_providers (
+              id TEXT PRIMARY KEY,
+              display_name TEXT NOT NULL,
+              vendor TEXT NOT NULL,
+              protocol TEXT NOT NULL,
+              base_url TEXT NOT NULL,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            );
+            CREATE TABLE llm_task_routes (
+              id TEXT PRIMARY KEY,
+              project_id TEXT NOT NULL,
+              task_type TEXT NOT NULL,
+              provider_id TEXT NOT NULL,
+              model_id TEXT NOT NULL,
+              priority INTEGER NOT NULL DEFAULT 0,
+              max_retries INTEGER NOT NULL DEFAULT 1,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
             );
             "#,
         )

@@ -67,9 +67,15 @@ impl PlotService {
                     updated_at: row.get(11)?,
                 })
             })
-            .map_err(|e| AppErrorDto::new("QUERY_FAILED", "查询剧情节点失败", true).with_detail(e.to_string()))?
+            .map_err(|e| {
+                AppErrorDto::new("QUERY_FAILED", "查询剧情节点失败", true)
+                    .with_detail(e.to_string())
+            })?
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| AppErrorDto::new("QUERY_FAILED", "查询剧情节点失败", true).with_detail(e.to_string()))?;
+            .map_err(|e| {
+                AppErrorDto::new("QUERY_FAILED", "查询剧情节点失败", true)
+                    .with_detail(e.to_string())
+            })?;
         Ok(nodes)
     }
 
@@ -84,7 +90,8 @@ impl PlotService {
         let project_id = get_project_id(&conn)?;
         let id = Uuid::new_v4().to_string();
         let now = now_iso();
-        let rc = serde_json::to_string(&input.related_characters.unwrap_or_default()).unwrap_or_default();
+        let rc = serde_json::to_string(&input.related_characters.unwrap_or_default())
+            .unwrap_or_default();
         let status = input.status.unwrap_or_else(|| "planning".to_string());
         conn.execute(
             "INSERT INTO plot_nodes(id, project_id, title, node_type, sort_order, goal, conflict, emotional_curve, status, related_characters, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
@@ -94,11 +101,7 @@ impl PlotService {
         Ok(id)
     }
 
-    pub fn reorder(
-        &self,
-        project_root: &str,
-        ordered_ids: Vec<String>,
-    ) -> Result<(), AppErrorDto> {
+    pub fn reorder(&self, project_root: &str, ordered_ids: Vec<String>) -> Result<(), AppErrorDto> {
         let conn = open_database(Path::new(project_root)).map_err(|e| {
             AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
         })?;
@@ -109,7 +112,9 @@ impl PlotService {
                 "UPDATE plot_nodes SET sort_order = ?1, updated_at = ?2 WHERE id = ?3",
                 params![order, now, node_id],
             )
-            .map_err(|e| AppErrorDto::new("REORDER_FAILED", "重排序失败", true).with_detail(e.to_string()))?;
+            .map_err(|e| {
+                AppErrorDto::new("REORDER_FAILED", "重排序失败", true).with_detail(e.to_string())
+            })?;
         }
         Ok(())
     }
@@ -121,8 +126,8 @@ mod tests {
     use std::path::PathBuf;
     use uuid::Uuid;
 
+    use super::{CreatePlotNodeInput, PlotService};
     use crate::services::project_service::{CreateProjectInput, ProjectService};
-    use super::{PlotService, CreatePlotNodeInput};
 
     fn create_temp_workspace() -> PathBuf {
         let w = std::env::temp_dir().join(format!("novelforge-rust-tests-{}", Uuid::new_v4()));
@@ -139,24 +144,44 @@ mod tests {
         let ws = create_temp_workspace();
         let ps = ProjectService;
         let pl = PlotService;
-        let project = ps.create_project(CreateProjectInput {
-            name: "剧情测试".into(), author: None, genre: "悬疑".into(),
-            target_words: None, save_directory: ws.to_string_lossy().into(),
-        }).expect("project created");
+        let project = ps
+            .create_project(CreateProjectInput {
+                name: "剧情测试".into(),
+                author: None,
+                genre: "悬疑".into(),
+                target_words: None,
+                save_directory: ws.to_string_lossy().into(),
+            })
+            .expect("project created");
 
-        let id1 = pl.create(&project.project_root, CreatePlotNodeInput {
-            title: "开端".into(), node_type: "开端".into(), sort_order: 1,
-            ..Default::default()
-        }).expect("create node 1");
-        let id2 = pl.create(&project.project_root, CreatePlotNodeInput {
-            title: "高潮".into(), node_type: "高潮".into(), sort_order: 2,
-            ..Default::default()
-        }).expect("create node 2");
+        let id1 = pl
+            .create(
+                &project.project_root,
+                CreatePlotNodeInput {
+                    title: "开端".into(),
+                    node_type: "开端".into(),
+                    sort_order: 1,
+                    ..Default::default()
+                },
+            )
+            .expect("create node 1");
+        let id2 = pl
+            .create(
+                &project.project_root,
+                CreatePlotNodeInput {
+                    title: "高潮".into(),
+                    node_type: "高潮".into(),
+                    sort_order: 2,
+                    ..Default::default()
+                },
+            )
+            .expect("create node 2");
 
         let nodes = pl.list(&project.project_root).expect("list nodes");
         assert_eq!(nodes.len(), 2);
 
-        pl.reorder(&project.project_root, vec![id2, id1]).expect("reorder");
+        pl.reorder(&project.project_root, vec![id2, id1])
+            .expect("reorder");
         let nodes = pl.list(&project.project_root).expect("list nodes");
         assert_eq!(nodes[0].sort_order, 1);
         assert_eq!(nodes[0].title, "高潮");
@@ -168,9 +193,13 @@ mod tests {
 impl Default for CreatePlotNodeInput {
     fn default() -> Self {
         Self {
-            title: String::new(), node_type: String::new(),
-            sort_order: 0, goal: None, conflict: None,
-            emotional_curve: None, status: None,
+            title: String::new(),
+            node_type: String::new(),
+            sort_order: 0,
+            goal: None,
+            conflict: None,
+            emotional_curve: None,
+            status: None,
             related_characters: None,
         }
     }

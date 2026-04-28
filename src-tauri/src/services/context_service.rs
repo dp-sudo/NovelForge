@@ -1,6 +1,6 @@
+use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
-use std::collections::HashSet;
 
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -262,8 +262,10 @@ impl ContextService {
         );
         dedupe_labels(&mut character_labels);
         let world_titles = self.collect_project_world_rule_titles(&conn, &project_id)?;
-        let relationship_drafts = extract_relationship_drafts(&chapter_content, &character_labels, 10);
-        let involvement_drafts = extract_involvement_drafts(&chapter_content, &character_labels, 10);
+        let relationship_drafts =
+            extract_relationship_drafts(&chapter_content, &character_labels, 10);
+        let involvement_drafts =
+            extract_involvement_drafts(&chapter_content, &character_labels, 10);
         let scene_drafts = extract_scene_drafts(&asset_candidates, &world_titles, 10);
 
         Ok(EditorContextPanel {
@@ -370,7 +372,8 @@ impl ContextService {
             )
             .optional()
             .map_err(|err| {
-                AppErrorDto::new("DB_QUERY_FAILED", "查询章节失败", true).with_detail(err.to_string())
+                AppErrorDto::new("DB_QUERY_FAILED", "查询章节失败", true)
+                    .with_detail(err.to_string())
             })?
             .is_some();
         if !chapter_exists {
@@ -378,7 +381,8 @@ impl ContextService {
         }
 
         let tx = conn.transaction().map_err(|err| {
-            AppErrorDto::new("DB_WRITE_FAILED", "无法写入项目数据库", true).with_detail(err.to_string())
+            AppErrorDto::new("DB_WRITE_FAILED", "无法写入项目数据库", true)
+                .with_detail(err.to_string())
         })?;
         let (target_id, action) = match target_type.as_str() {
             "character" => self.find_or_create_character(&tx, &project_id, &label, &evidence)?,
@@ -443,7 +447,8 @@ impl ContextService {
             )
             .optional()
             .map_err(|err| {
-                AppErrorDto::new("DB_QUERY_FAILED", "查询章节失败", true).with_detail(err.to_string())
+                AppErrorDto::new("DB_QUERY_FAILED", "查询章节失败", true)
+                    .with_detail(err.to_string())
             })?
             .is_some();
         if !chapter_exists {
@@ -458,7 +463,8 @@ impl ContextService {
         let evidence = input.evidence.unwrap_or_default().trim().to_string();
 
         let tx = conn.transaction().map_err(|err| {
-            AppErrorDto::new("DB_WRITE_FAILED", "无法写入项目数据库", true).with_detail(err.to_string())
+            AppErrorDto::new("DB_WRITE_FAILED", "无法写入项目数据库", true)
+                .with_detail(err.to_string())
         })?;
 
         let result = match draft_kind.as_str() {
@@ -470,10 +476,18 @@ impl ContextService {
                     .trim()
                     .to_string();
                 if target_label.is_empty() {
-                    return Err(AppErrorDto::new("DRAFT_INVALID", "关系草案缺少目标角色", true));
+                    return Err(AppErrorDto::new(
+                        "DRAFT_INVALID",
+                        "关系草案缺少目标角色",
+                        true,
+                    ));
                 }
                 if source_label == target_label {
-                    return Err(AppErrorDto::new("DRAFT_INVALID", "关系草案角色不能相同", true));
+                    return Err(AppErrorDto::new(
+                        "DRAFT_INVALID",
+                        "关系草案角色不能相同",
+                        true,
+                    ));
                 }
                 let relationship_type = input
                     .relationship_type
@@ -777,7 +791,8 @@ impl ContextService {
             )
             .optional()
             .map_err(|err| {
-                AppErrorDto::new("DB_QUERY_FAILED", "查询名词失败", true).with_detail(err.to_string())
+                AppErrorDto::new("DB_QUERY_FAILED", "查询名词失败", true)
+                    .with_detail(err.to_string())
             })?
         {
             return Ok((existing_id, "reused".to_string()));

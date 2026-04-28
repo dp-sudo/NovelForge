@@ -89,8 +89,12 @@ impl SkillRegistry {
         if self.builtin_dir.exists() {
             let builtin_ids = self.list_builtin_ids();
             for entry in fs::read_dir(&self.builtin_dir).map_err(|e| {
-                AppErrorDto::new("SKILLS_READ_BUILTIN_FAILED", "Cannot read builtin skills", true)
-                    .with_detail(e.to_string())
+                AppErrorDto::new(
+                    "SKILLS_READ_BUILTIN_FAILED",
+                    "Cannot read builtin skills",
+                    true,
+                )
+                .with_detail(e.to_string())
             })? {
                 let entry = entry.map_err(|e| {
                     AppErrorDto::new("SKILLS_ENTRY_FAILED", "Cannot read builtin entry", true)
@@ -141,8 +145,12 @@ impl SkillRegistry {
         }
 
         for entry in fs::read_dir(&self.skills_dir).map_err(|e| {
-            AppErrorDto::new("SKILLS_READ_DIR_FAILED", "Cannot read skills directory", true)
-                .with_detail(e.to_string())
+            AppErrorDto::new(
+                "SKILLS_READ_DIR_FAILED",
+                "Cannot read skills directory",
+                true,
+            )
+            .with_detail(e.to_string())
         })? {
             let entry = entry.map_err(|e| {
                 AppErrorDto::new("SKILLS_ENTRY_FAILED", "Cannot read skill entry", true)
@@ -192,12 +200,10 @@ impl SkillRegistry {
         if !path.exists() {
             return Ok(None);
         }
-        fs::read_to_string(&path)
-            .map(Some)
-            .map_err(|e| {
-                AppErrorDto::new("SKILLS_READ_FAILED", "Cannot read skill file", true)
-                    .with_detail(e.to_string())
-            })
+        fs::read_to_string(&path).map(Some).map_err(|e| {
+            AppErrorDto::new("SKILLS_READ_FAILED", "Cannot read skill file", true)
+                .with_detail(e.to_string())
+        })
     }
 
     /// Create a new skill from manifest + body content.
@@ -258,7 +264,11 @@ impl SkillRegistry {
         })?;
 
         let skill = guard.iter().find(|s| s.id == id).ok_or_else(|| {
-            AppErrorDto::new("SKILLS_NOT_FOUND", &format!("Skill '{}' not found", id), true)
+            AppErrorDto::new(
+                "SKILLS_NOT_FOUND",
+                &format!("Skill '{}' not found", id),
+                true,
+            )
         })?;
 
         if skill.source == "builtin" {
@@ -360,8 +370,12 @@ impl SkillRegistry {
         let (frontmatter_str, body) = split_frontmatter(&content)?;
 
         let mut manifest: SkillManifest = serde_yaml::from_str(frontmatter_str).map_err(|e| {
-            AppErrorDto::new("SKILLS_PARSE_FAILED", "Cannot parse skill frontmatter", true)
-                .with_detail(e.to_string())
+            AppErrorDto::new(
+                "SKILLS_PARSE_FAILED",
+                "Cannot parse skill frontmatter",
+                true,
+            )
+            .with_detail(e.to_string())
         })?;
 
         // Auto-set source if missing
@@ -372,7 +386,10 @@ impl SkillRegistry {
             manifest.category = "utility".to_string();
         }
 
-        Ok(SkillFile { manifest, body: body.to_string() })
+        Ok(SkillFile {
+            manifest,
+            body: body.to_string(),
+        })
     }
 
     /// Render manifest + body back into .md file content.
@@ -423,7 +440,7 @@ fn split_frontmatter(content: &str) -> Result<(&str, &str), AppErrorDto> {
     if let Some(end) = after_newline.find("\n---") {
         let yaml = &after_newline[..end];
         let body = &after_newline[end + 4..]; // skip \n---
-        // Skip potential \r\n after closing ---
+                                              // Skip potential \r\n after closing ---
         let body = body
             .strip_prefix('\n')
             .or_else(|| body.strip_prefix("\r\n"))
@@ -466,4 +483,3 @@ fn validate_id(id: &str) -> Result<(), AppErrorDto> {
     }
     Ok(())
 }
-

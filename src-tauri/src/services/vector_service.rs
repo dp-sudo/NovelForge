@@ -73,8 +73,12 @@ impl VectorService {
                 ",
             )
             .map_err(|err| {
-                AppErrorDto::new("VECTOR_INDEX_QUERY_FAILED", "Cannot query chapter data", true)
-                    .with_detail(err.to_string())
+                AppErrorDto::new(
+                    "VECTOR_INDEX_QUERY_FAILED",
+                    "Cannot query chapter data",
+                    true,
+                )
+                .with_detail(err.to_string())
             })?;
 
         let rows = stmt
@@ -87,15 +91,23 @@ impl VectorService {
                 ))
             })
             .map_err(|err| {
-                AppErrorDto::new("VECTOR_INDEX_QUERY_FAILED", "Cannot query chapter data", true)
-                    .with_detail(err.to_string())
+                AppErrorDto::new(
+                    "VECTOR_INDEX_QUERY_FAILED",
+                    "Cannot query chapter data",
+                    true,
+                )
+                .with_detail(err.to_string())
             })?;
 
         let mut chunks = Vec::new();
         for row in rows {
             let (chapter_id, title, summary, content_path) = row.map_err(|err| {
-                AppErrorDto::new("VECTOR_INDEX_QUERY_FAILED", "Cannot parse chapter data", true)
-                    .with_detail(err.to_string())
+                AppErrorDto::new(
+                    "VECTOR_INDEX_QUERY_FAILED",
+                    "Cannot parse chapter data",
+                    true,
+                )
+                .with_detail(err.to_string())
             })?;
             let raw_content = fs::read_to_string(root.join(content_path)).unwrap_or_default();
             let chapter_text = strip_chapter_markdown(&raw_content);
@@ -125,12 +137,20 @@ impl VectorService {
             chunks,
         };
         let payload = serde_json::to_string(&index).map_err(|err| {
-            AppErrorDto::new("VECTOR_INDEX_WRITE_FAILED", "Cannot serialize vector index", true)
-                .with_detail(err.to_string())
+            AppErrorDto::new(
+                "VECTOR_INDEX_WRITE_FAILED",
+                "Cannot serialize vector index",
+                true,
+            )
+            .with_detail(err.to_string())
         })?;
         write_file_atomic(&self.index_file_path(root), &payload).map_err(|err| {
-            AppErrorDto::new("VECTOR_INDEX_WRITE_FAILED", "Cannot write vector index file", true)
-                .with_detail(err.to_string())
+            AppErrorDto::new(
+                "VECTOR_INDEX_WRITE_FAILED",
+                "Cannot write vector index file",
+                true,
+            )
+            .with_detail(err.to_string())
         })?;
 
         Ok(index.chunks.len())
@@ -194,15 +214,23 @@ impl VectorService {
     fn load_index(&self, root: &Path) -> Result<VectorIndexFile, AppErrorDto> {
         let index_path = self.index_file_path(root);
         let raw = read_text_if_exists(&index_path).map_err(|err| {
-            AppErrorDto::new("VECTOR_INDEX_READ_FAILED", "Cannot read vector index file", true)
-                .with_detail(err.to_string())
+            AppErrorDto::new(
+                "VECTOR_INDEX_READ_FAILED",
+                "Cannot read vector index file",
+                true,
+            )
+            .with_detail(err.to_string())
         })?;
         let Some(raw) = raw else {
             return Ok(VectorIndexFile::default());
         };
         serde_json::from_str::<VectorIndexFile>(&raw).map_err(|err| {
-            AppErrorDto::new("VECTOR_INDEX_READ_FAILED", "Cannot parse vector index file", true)
-                .with_detail(err.to_string())
+            AppErrorDto::new(
+                "VECTOR_INDEX_READ_FAILED",
+                "Cannot parse vector index file",
+                true,
+            )
+            .with_detail(err.to_string())
         })
     }
 
@@ -265,7 +293,11 @@ fn split_long_piece(text: &str) -> Vec<String> {
     let mut start = 0usize;
     while start < chars.len() {
         let end = (start + MAX_SNIPPET_CHARS).min(chars.len());
-        let piece = chars[start..end].iter().collect::<String>().trim().to_string();
+        let piece = chars[start..end]
+            .iter()
+            .collect::<String>()
+            .trim()
+            .to_string();
         if !piece.is_empty() {
             out.push(piece);
         }

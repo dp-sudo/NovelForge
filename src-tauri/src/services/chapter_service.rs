@@ -690,7 +690,11 @@ fn fmt_yaml_list(items: &[String]) -> String {
     if items.is_empty() {
         "[]".to_string()
     } else {
-        items.iter().map(|v| format!("  - {}", v)).collect::<Vec<_>>().join("\n")
+        items
+            .iter()
+            .map(|v| format!("  - {}", v))
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 }
 
@@ -698,13 +702,21 @@ fn load_chapter_links_for_frontmatter(
     conn: &rusqlite::Connection,
     chapter_id: &str,
 ) -> Result<(Vec<String>, Vec<String>, Vec<String>), AppErrorDto> {
-    let mut stmt = conn.prepare(
-        "SELECT target_type, target_id FROM chapter_links WHERE chapter_id = ?1"
-    ).map_err(|e| AppErrorDto::new("DB_READ_FAILED", "Cannot read chapter links", true).with_detail(e.to_string()))?;
+    let mut stmt = conn
+        .prepare("SELECT target_type, target_id FROM chapter_links WHERE chapter_id = ?1")
+        .map_err(|e| {
+            AppErrorDto::new("DB_READ_FAILED", "Cannot read chapter links", true)
+                .with_detail(e.to_string())
+        })?;
 
-    let rows = stmt.query_map(rusqlite::params![chapter_id], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-    }).map_err(|e| AppErrorDto::new("DB_READ_FAILED", "Cannot read chapter links", true).with_detail(e.to_string()))?;
+    let rows = stmt
+        .query_map(rusqlite::params![chapter_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(|e| {
+            AppErrorDto::new("DB_READ_FAILED", "Cannot read chapter links", true)
+                .with_detail(e.to_string())
+        })?;
 
     let mut plot_nodes = Vec::new();
     let mut characters = Vec::new();
@@ -712,7 +724,8 @@ fn load_chapter_links_for_frontmatter(
 
     for row in rows {
         let (ty, id) = row.map_err(|e| {
-            AppErrorDto::new("DB_READ_FAILED", "Cannot read chapter link row", true).with_detail(e.to_string())
+            AppErrorDto::new("DB_READ_FAILED", "Cannot read chapter link row", true)
+                .with_detail(e.to_string())
         })?;
         match ty.as_str() {
             "plot_node" => plot_nodes.push(id),
@@ -742,9 +755,18 @@ fn build_chapter_markdown(input: ChapterMarkdownInput<'_>) -> String {
         format!("wordCount: {}", input.word_count),
         format!("createdAt: {}", input.created_at),
         format!("updatedAt: {}", input.updated_at),
-        format!("linkedPlotNodes:\n{}", fmt_yaml_list(&input.linked_plot_nodes)),
-        format!("appearingCharacters:\n{}", fmt_yaml_list(&input.appearing_characters)),
-        format!("linkedWorldRules:\n{}", fmt_yaml_list(&input.linked_world_rules)),
+        format!(
+            "linkedPlotNodes:\n{}",
+            fmt_yaml_list(&input.linked_plot_nodes)
+        ),
+        format!(
+            "appearingCharacters:\n{}",
+            fmt_yaml_list(&input.appearing_characters)
+        ),
+        format!(
+            "linkedWorldRules:\n{}",
+            fmt_yaml_list(&input.linked_world_rules)
+        ),
         "---".to_string(),
         "".to_string(),
         format!("# {}", input.title),
@@ -790,11 +812,17 @@ impl ChapterService {
                 |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
             )
             .optional()
-            .map_err(|e| AppErrorDto::new("CHAPTER_QUERY_FAILED", "查询章节失败", true).with_detail(e.to_string()))?
+            .map_err(|e| {
+                AppErrorDto::new("CHAPTER_QUERY_FAILED", "查询章节失败", true)
+                    .with_detail(e.to_string())
+            })?
             .ok_or_else(|| AppErrorDto::new("CHAPTER_NOT_FOUND", "章节不存在", true))?;
 
         let content = read_text_if_exists(&project_root_path.join(&content_path))
-            .map_err(|e| AppErrorDto::new("SNAPSHOT_FAILED", "读取章节文件失败", true).with_detail(e.to_string()))?
+            .map_err(|e| {
+                AppErrorDto::new("SNAPSHOT_FAILED", "读取章节文件失败", true)
+                    .with_detail(e.to_string())
+            })?
             .unwrap_or_default();
 
         let snapshot_id = Uuid::new_v4().to_string();
@@ -867,7 +895,9 @@ impl ChapterService {
                     created_at: row.get(6)?,
                 })
             })
-            .map_err(|e| AppErrorDto::new("QUERY_FAILED", "查询快照失败", true).with_detail(e.to_string()))?
+            .map_err(|e| {
+                AppErrorDto::new("QUERY_FAILED", "查询快照失败", true).with_detail(e.to_string())
+            })?
             .filter_map(|r| r.ok())
             .collect()
         } else {
@@ -882,7 +912,9 @@ impl ChapterService {
                     created_at: row.get(6)?,
                 })
             })
-            .map_err(|e| AppErrorDto::new("QUERY_FAILED", "查询快照失败", true).with_detail(e.to_string()))?
+            .map_err(|e| {
+                AppErrorDto::new("QUERY_FAILED", "查询快照失败", true).with_detail(e.to_string())
+            })?
             .filter_map(|r| r.ok())
             .collect()
         };
@@ -907,10 +939,16 @@ impl ChapterService {
                 params![snapshot_id],
                 |row| row.get(0),
             )
-            .map_err(|e| AppErrorDto::new("SNAPSHOT_NOT_FOUND", "快照不存在", true).with_detail(e.to_string()))?;
+            .map_err(|e| {
+                AppErrorDto::new("SNAPSHOT_NOT_FOUND", "快照不存在", true)
+                    .with_detail(e.to_string())
+            })?;
 
         read_text_if_exists(&project_root_path.join(&file_path))
-            .map_err(|e| AppErrorDto::new("SNAPSHOT_READ_FAILED", "读取快照文件失败", true).with_detail(e.to_string()))?
+            .map_err(|e| {
+                AppErrorDto::new("SNAPSHOT_READ_FAILED", "读取快照文件失败", true)
+                    .with_detail(e.to_string())
+            })?
             .ok_or_else(|| AppErrorDto::new("SNAPSHOT_FILE_MISSING", "快照文件已不存在", false))
     }
 }
@@ -964,16 +1002,26 @@ impl VolumeService {
                     updated_at: row.get(6)?,
                 })
             })
-            .map_err(|e| AppErrorDto::new("QUERY_FAILED", "查询卷失败", true).with_detail(e.to_string()))?
+            .map_err(|e| {
+                AppErrorDto::new("QUERY_FAILED", "查询卷失败", true).with_detail(e.to_string())
+            })?
             .filter_map(|r| r.ok())
             .collect();
 
         Ok(volumes)
     }
 
-    pub fn create(&self, project_root: &str, input: CreateVolumeInput) -> Result<String, AppErrorDto> {
+    pub fn create(
+        &self,
+        project_root: &str,
+        input: CreateVolumeInput,
+    ) -> Result<String, AppErrorDto> {
         if input.title.trim().is_empty() {
-            return Err(AppErrorDto::new("VOLUME_TITLE_REQUIRED", "卷标题不能为空", true));
+            return Err(AppErrorDto::new(
+                "VOLUME_TITLE_REQUIRED",
+                "卷标题不能为空",
+                true,
+            ));
         }
         let conn = open_database(Path::new(project_root)).map_err(|e| {
             AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
@@ -982,7 +1030,11 @@ impl VolumeService {
         let id = Uuid::new_v4().to_string();
         let now = crate::infra::time::now_iso();
         let next_order: i64 = conn
-            .query_row("SELECT COALESCE(MAX(sort_order),0)+1 FROM volumes WHERE project_id = ?1", params![project_id], |row| row.get(0))
+            .query_row(
+                "SELECT COALESCE(MAX(sort_order),0)+1 FROM volumes WHERE project_id = ?1",
+                params![project_id],
+                |row| row.get(0),
+            )
             .unwrap_or(1);
         conn.execute(
             "INSERT INTO volumes(id, project_id, title, sort_order, description, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7)",
@@ -995,18 +1047,34 @@ impl VolumeService {
         let conn = open_database(Path::new(project_root)).map_err(|e| {
             AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
         })?;
-        conn.execute("UPDATE chapters SET volume_id = NULL WHERE volume_id = ?1", params![id]).ok();
+        conn.execute(
+            "UPDATE chapters SET volume_id = NULL WHERE volume_id = ?1",
+            params![id],
+        )
+        .ok();
         conn.execute("DELETE FROM volumes WHERE id = ?1", params![id])
-            .map_err(|e| AppErrorDto::new("DELETE_FAILED", "删除卷失败", true).with_detail(e.to_string()))?;
+            .map_err(|e| {
+                AppErrorDto::new("DELETE_FAILED", "删除卷失败", true).with_detail(e.to_string())
+            })?;
         Ok(())
     }
 
-    pub fn assign_chapter(&self, project_root: &str, chapter_id: &str, volume_id: Option<&str>) -> Result<(), AppErrorDto> {
+    pub fn assign_chapter(
+        &self,
+        project_root: &str,
+        chapter_id: &str,
+        volume_id: Option<&str>,
+    ) -> Result<(), AppErrorDto> {
         let conn = open_database(Path::new(project_root)).map_err(|e| {
             AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
         })?;
-        conn.execute("UPDATE chapters SET volume_id = ?1 WHERE id = ?2", params![volume_id, chapter_id])
-            .map_err(|e| AppErrorDto::new("UPDATE_FAILED", "分配卷失败", true).with_detail(e.to_string()))?;
+        conn.execute(
+            "UPDATE chapters SET volume_id = ?1 WHERE id = ?2",
+            params![volume_id, chapter_id],
+        )
+        .map_err(|e| {
+            AppErrorDto::new("UPDATE_FAILED", "分配卷失败", true).with_detail(e.to_string())
+        })?;
         Ok(())
     }
 }

@@ -120,16 +120,10 @@ impl SettingsService {
     pub fn load_editor_settings(&self) -> Result<EditorSettings, AppErrorDto> {
         let conn = app_database::open_or_create()?;
         match app_database::load_app_setting(&conn, EDITOR_SETTINGS_KEY)? {
-            Some(json) => {
-                serde_json::from_str(&json).map_err(|e| {
-                    AppErrorDto::new(
-                        "DESERIALIZE_FAILED",
-                        "Cannot parse editor settings",
-                        true,
-                    )
+            Some(json) => serde_json::from_str(&json).map_err(|e| {
+                AppErrorDto::new("DESERIALIZE_FAILED", "Cannot parse editor settings", true)
                     .with_detail(e.to_string())
-                })
-            }
+            }),
             None => Ok(EditorSettings::default()),
         }
     }
@@ -173,20 +167,36 @@ fn validate_provider_config(config: &mut ProviderConfig) -> Result<(), AppErrorD
     config.auth_mode = config.auth_mode.trim().to_string();
 
     if config.id.is_empty() {
-        return Err(AppErrorDto::new("INVALID_PROVIDER_ID", "Provider id cannot be empty", true));
+        return Err(AppErrorDto::new(
+            "INVALID_PROVIDER_ID",
+            "Provider id cannot be empty",
+            true,
+        ));
     }
     if config.display_name.is_empty() {
-        return Err(AppErrorDto::new("INVALID_PROVIDER_NAME", "Provider display name cannot be empty", true));
+        return Err(AppErrorDto::new(
+            "INVALID_PROVIDER_NAME",
+            "Provider display name cannot be empty",
+            true,
+        ));
     }
     if config.base_url.is_empty() {
-        return Err(AppErrorDto::new("INVALID_BASE_URL", "Provider base URL cannot be empty", true));
+        return Err(AppErrorDto::new(
+            "INVALID_BASE_URL",
+            "Provider base URL cannot be empty",
+            true,
+        ));
     }
     let parsed = reqwest::Url::parse(&config.base_url).map_err(|err| {
         AppErrorDto::new("INVALID_BASE_URL", "Provider base URL is invalid", true)
             .with_detail(err.to_string())
     })?;
     if parsed.scheme() != "http" && parsed.scheme() != "https" {
-        return Err(AppErrorDto::new("INVALID_BASE_URL_SCHEME", "Provider base URL must use http:// or https://", true));
+        return Err(AppErrorDto::new(
+            "INVALID_BASE_URL_SCHEME",
+            "Provider base URL must use http:// or https://",
+            true,
+        ));
     }
 
     if config.timeout_ms == 0 {
@@ -196,10 +206,24 @@ fn validate_provider_config(config: &mut ProviderConfig) -> Result<(), AppErrorD
         config.connect_timeout_ms = 15_000;
     }
 
-    if config.protocol == "custom_anthropic_compatible" && config.endpoint_path.as_deref().map(str::trim).unwrap_or("").is_empty() {
+    if config.protocol == "custom_anthropic_compatible"
+        && config
+            .endpoint_path
+            .as_deref()
+            .map(str::trim)
+            .unwrap_or("")
+            .is_empty()
+    {
         config.endpoint_path = Some("/messages".to_string());
     }
-    if config.protocol == "custom_openai_compatible" && config.endpoint_path.as_deref().map(str::trim).unwrap_or("").is_empty() {
+    if config.protocol == "custom_openai_compatible"
+        && config
+            .endpoint_path
+            .as_deref()
+            .map(str::trim)
+            .unwrap_or("")
+            .is_empty()
+    {
         config.endpoint_path = Some("/chat/completions".to_string());
     }
 

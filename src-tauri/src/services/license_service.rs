@@ -73,16 +73,24 @@ impl LicenseService {
     fn load_store(&self) -> Result<Option<LicenseStore>, AppErrorDto> {
         let path = license_file_path()?;
         let raw = read_text_if_exists(&path).map_err(|err| {
-            AppErrorDto::new("LICENSE_READ_FAILED", "Cannot read local license cache", true)
-                .with_detail(err.to_string())
+            AppErrorDto::new(
+                "LICENSE_READ_FAILED",
+                "Cannot read local license cache",
+                true,
+            )
+            .with_detail(err.to_string())
         })?;
         let Some(raw) = raw else {
             return Ok(None);
         };
         let parsed = serde_json::from_str::<LicenseStore>(&raw).map_err(|err| {
-            AppErrorDto::new("LICENSE_READ_FAILED", "Local license cache is corrupted", true)
-                .with_detail(err.to_string())
-                .with_suggested_action("Please re-activate your license")
+            AppErrorDto::new(
+                "LICENSE_READ_FAILED",
+                "Local license cache is corrupted",
+                true,
+            )
+            .with_detail(err.to_string())
+            .with_suggested_action("Please re-activate your license")
         })?;
         Ok(Some(parsed))
     }
@@ -91,18 +99,30 @@ impl LicenseService {
         let path = license_file_path()?;
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).map_err(|err| {
-                AppErrorDto::new("LICENSE_WRITE_FAILED", "Cannot create license cache directory", true)
-                    .with_detail(err.to_string())
+                AppErrorDto::new(
+                    "LICENSE_WRITE_FAILED",
+                    "Cannot create license cache directory",
+                    true,
+                )
+                .with_detail(err.to_string())
             })?;
         }
 
         let payload = serde_json::to_string(store).map_err(|err| {
-            AppErrorDto::new("LICENSE_WRITE_FAILED", "Cannot serialize license cache", true)
-                .with_detail(err.to_string())
+            AppErrorDto::new(
+                "LICENSE_WRITE_FAILED",
+                "Cannot serialize license cache",
+                true,
+            )
+            .with_detail(err.to_string())
         })?;
         write_file_atomic(&path, &payload).map_err(|err| {
-            AppErrorDto::new("LICENSE_WRITE_FAILED", "Cannot write local license cache", true)
-                .with_detail(err.to_string())
+            AppErrorDto::new(
+                "LICENSE_WRITE_FAILED",
+                "Cannot write local license cache",
+                true,
+            )
+            .with_detail(err.to_string())
         })
     }
 }
@@ -115,7 +135,11 @@ fn license_file_path() -> Result<PathBuf, AppErrorDto> {
         }
     }
     let home = dirs::home_dir().ok_or_else(|| {
-        AppErrorDto::new("LICENSE_PATH_UNAVAILABLE", "Cannot resolve user home directory", false)
+        AppErrorDto::new(
+            "LICENSE_PATH_UNAVAILABLE",
+            "Cannot resolve user home directory",
+            false,
+        )
     })?;
     Ok(home.join(".novelforge").join("license.json"))
 }
@@ -196,7 +220,10 @@ mod tests {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).expect("create temp dir");
         }
-        std::env::set_var("NOVELFORGE_LICENSE_FILE", path.to_string_lossy().to_string());
+        std::env::set_var(
+            "NOVELFORGE_LICENSE_FILE",
+            path.to_string_lossy().to_string(),
+        );
 
         let service = LicenseService;
         let activated = service

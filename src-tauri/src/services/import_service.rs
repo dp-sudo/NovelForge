@@ -86,35 +86,9 @@ fn is_token_char(ch: char) -> bool {
 
 fn is_stopword(token: &str) -> bool {
     const STOPWORDS: &[&str] = &[
-        "我们",
-        "你们",
-        "他们",
-        "自己",
-        "时候",
-        "已经",
-        "因为",
-        "所以",
-        "如果",
-        "但是",
-        "不是",
-        "一个",
-        "这个",
-        "那个",
-        "然后",
-        "什么",
-        "怎么",
-        "可以",
-        "没有",
-        "就是",
-        "还是",
-        "今天",
-        "昨天",
-        "刚才",
-        "这里",
-        "那里",
-        "事情",
-        "问题",
-        "可能",
+        "我们", "你们", "他们", "自己", "时候", "已经", "因为", "所以", "如果", "但是", "不是",
+        "一个", "这个", "那个", "然后", "什么", "怎么", "可以", "没有", "就是", "还是", "今天",
+        "昨天", "刚才", "这里", "那里", "事情", "问题", "可能",
     ];
     STOPWORDS.contains(&token)
 }
@@ -131,7 +105,10 @@ fn push_candidate_token(raw: &str, target: &mut Vec<String>) {
     if is_stopword(token) {
         return;
     }
-    if !token.chars().any(|ch| is_cjk(ch) || ch.is_ascii_alphabetic()) {
+    if !token
+        .chars()
+        .any(|ch| is_cjk(ch) || ch.is_ascii_alphabetic())
+    {
         return;
     }
     target.push(token.to_string());
@@ -256,7 +233,10 @@ pub fn extract_asset_candidates(
         return Vec::new();
     }
 
-    let existing: HashSet<String> = existing_labels.iter().map(|item| normalize_key(item)).collect();
+    let existing: HashSet<String> = existing_labels
+        .iter()
+        .map(|item| normalize_key(item))
+        .collect();
     let mut counts: HashMap<String, i64> = HashMap::new();
     for token in tokens {
         *counts.entry(token).or_insert(0) += 1;
@@ -305,7 +285,11 @@ impl ImportService {
 
         for file_entry in &input.files {
             if !is_supported_file(&file_entry.file_name) {
-                rollback_created_chapters(&chapter_service, &input.project_root, &created_chapter_ids);
+                rollback_created_chapters(
+                    &chapter_service,
+                    &input.project_root,
+                    &created_chapter_ids,
+                );
                 return Err(AppErrorDto::new(
                     "IMPORT_FILE_TYPE_UNSUPPORTED",
                     "仅支持导入 TXT 或 MD 文件",
@@ -369,7 +353,8 @@ mod tests {
 
     #[test]
     fn extract_asset_candidates_filters_existing_labels() {
-        let content = "林夜走进玄霄城。玄霄城的夜风里，林夜听见天衡司的钟声。天衡司的执事在城门等他。";
+        let content =
+            "林夜走进玄霄城。玄霄城的夜风里，林夜听见天衡司的钟声。天衡司的执事在城门等他。";
         let candidates = extract_asset_candidates(content, &[String::from("林夜")], 10);
         assert!(candidates.iter().any(|item| item.label == "玄霄城"));
         assert!(candidates.iter().any(|item| item.label == "天衡司"));

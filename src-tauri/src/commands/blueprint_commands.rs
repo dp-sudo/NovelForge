@@ -27,7 +27,9 @@ pub async fn mark_blueprint_completed(
     step_key: String,
     state: State<'_, AppState>,
 ) -> Result<(), AppErrorDto> {
-    state.blueprint_service.mark_completed(&project_root, &step_key)
+    state
+        .blueprint_service
+        .mark_completed(&project_root, &step_key)
 }
 
 #[tauri::command]

@@ -36,7 +36,10 @@ pub async fn export_chapter(
         &input.output_path,
         input.options,
     )?;
-    crate::infra::logger::log_user_action("export_chapter", &format!("format={}, path={}", input.format, input.output_path));
+    crate::infra::logger::log_user_action(
+        "export_chapter",
+        &format!("format={}, path={}", input.format, input.output_path),
+    );
     Ok(result)
 }
 

@@ -66,9 +66,15 @@ impl WorldService {
                     updated_at: row.get(11)?,
                 })
             })
-            .map_err(|e| AppErrorDto::new("QUERY_FAILED", "查询世界规则失败", true).with_detail(e.to_string()))?
+            .map_err(|e| {
+                AppErrorDto::new("QUERY_FAILED", "查询世界规则失败", true)
+                    .with_detail(e.to_string())
+            })?
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| AppErrorDto::new("QUERY_FAILED", "查询世界规则失败", true).with_detail(e.to_string()))?;
+            .map_err(|e| {
+                AppErrorDto::new("QUERY_FAILED", "查询世界规则失败", true)
+                    .with_detail(e.to_string())
+            })?;
         Ok(rules)
     }
 
@@ -83,7 +89,8 @@ impl WorldService {
         let project_id = get_project_id(&conn)?;
         let id = Uuid::new_v4().to_string();
         let now = now_iso();
-        let related = serde_json::to_string(&input.related_entities.unwrap_or_default()).unwrap_or_default();
+        let related =
+            serde_json::to_string(&input.related_entities.unwrap_or_default()).unwrap_or_default();
         conn.execute(
             "INSERT INTO world_rules(id, project_id, title, category, description, constraint_level, related_entities, examples, contradiction_policy, is_deleted, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,0,?10,?11)",
             params![id, project_id, input.title, input.category, input.description, input.constraint_level, related, input.examples, input.contradiction_policy, now, now],
@@ -101,7 +108,9 @@ impl WorldService {
             "UPDATE world_rules SET is_deleted = 1, updated_at = ?1 WHERE id = ?2",
             params![now, id],
         )
-        .map_err(|e| AppErrorDto::new("DELETE_FAILED", "删除世界规则失败", true).with_detail(e.to_string()))?;
+        .map_err(|e| {
+            AppErrorDto::new("DELETE_FAILED", "删除世界规则失败", true).with_detail(e.to_string())
+        })?;
         Ok(())
     }
 }

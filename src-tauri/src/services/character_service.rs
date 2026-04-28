@@ -104,9 +104,13 @@ impl CharacterService {
                     updated_at: row.get(18)?,
                 })
             })
-            .map_err(|e| AppErrorDto::new("QUERY_FAILED", "查询角色失败", true).with_detail(e.to_string()))?
+            .map_err(|e| {
+                AppErrorDto::new("QUERY_FAILED", "查询角色失败", true).with_detail(e.to_string())
+            })?
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| AppErrorDto::new("QUERY_FAILED", "查询角色失败", true).with_detail(e.to_string()))?;
+            .map_err(|e| {
+                AppErrorDto::new("QUERY_FAILED", "查询角色失败", true).with_detail(e.to_string())
+            })?;
         Ok(chars)
     }
 
@@ -122,7 +126,8 @@ impl CharacterService {
         let id = Uuid::new_v4().to_string();
         let now = now_iso();
         let aliases = serde_json::to_string(&input.aliases.unwrap_or_default()).unwrap_or_default();
-        let locked = serde_json::to_string(&input.locked_fields.unwrap_or_default()).unwrap_or_default();
+        let locked =
+            serde_json::to_string(&input.locked_fields.unwrap_or_default()).unwrap_or_default();
         conn.execute(
             "INSERT INTO characters(id, project_id, name, aliases, role_type, age, gender, identity_text, appearance, motivation, desire, fear, flaw, arc_stage, locked_fields, notes, is_deleted, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,0,?17,?18)",
             params![id, project_id, input.name, aliases, input.role_type, input.age, input.gender, input.identity_text, input.appearance, input.motivation, input.desire, input.fear, input.flaw, input.arc_stage, locked, input.notes, now, now],
@@ -141,13 +146,31 @@ impl CharacterService {
         })?;
         let now = now_iso();
         if let Some(name) = &input.name {
-            conn.execute("UPDATE characters SET name = ?1, updated_at = ?2 WHERE id = ?3", params![name, now, input.id]).map_err(|e| AppErrorDto::new("UPDATE_FAILED", "更新角色失败", true).with_detail(e.to_string()))?;
+            conn.execute(
+                "UPDATE characters SET name = ?1, updated_at = ?2 WHERE id = ?3",
+                params![name, now, input.id],
+            )
+            .map_err(|e| {
+                AppErrorDto::new("UPDATE_FAILED", "更新角色失败", true).with_detail(e.to_string())
+            })?;
         }
         if let Some(role) = &input.role_type {
-            conn.execute("UPDATE characters SET role_type = ?1, updated_at = ?2 WHERE id = ?3", params![role, now, input.id]).map_err(|e| AppErrorDto::new("UPDATE_FAILED", "更新角色失败", true).with_detail(e.to_string()))?;
+            conn.execute(
+                "UPDATE characters SET role_type = ?1, updated_at = ?2 WHERE id = ?3",
+                params![role, now, input.id],
+            )
+            .map_err(|e| {
+                AppErrorDto::new("UPDATE_FAILED", "更新角色失败", true).with_detail(e.to_string())
+            })?;
         }
         if let Some(age) = &input.age {
-            conn.execute("UPDATE characters SET age = ?1, updated_at = ?2 WHERE id = ?3", params![age, now, input.id]).map_err(|e| AppErrorDto::new("UPDATE_FAILED", "更新角色失败", true).with_detail(e.to_string()))?;
+            conn.execute(
+                "UPDATE characters SET age = ?1, updated_at = ?2 WHERE id = ?3",
+                params![age, now, input.id],
+            )
+            .map_err(|e| {
+                AppErrorDto::new("UPDATE_FAILED", "更新角色失败", true).with_detail(e.to_string())
+            })?;
         }
         Ok(())
     }
@@ -161,7 +184,9 @@ impl CharacterService {
             "UPDATE characters SET is_deleted = 1, updated_at = ?1 WHERE id = ?2",
             params![now, id],
         )
-        .map_err(|e| AppErrorDto::new("DELETE_FAILED", "删除角色失败", true).with_detail(e.to_string()))?;
+        .map_err(|e| {
+            AppErrorDto::new("DELETE_FAILED", "删除角色失败", true).with_detail(e.to_string())
+        })?;
         Ok(())
     }
 }
@@ -172,8 +197,8 @@ mod tests {
     use std::path::PathBuf;
     use uuid::Uuid;
 
-    use crate::services::project_service::{CreateProjectInput, ProjectService};
     use super::{CharacterService, CreateCharacterInput};
+    use crate::services::project_service::{CreateProjectInput, ProjectService};
 
     fn create_temp_workspace() -> PathBuf {
         let w = std::env::temp_dir().join(format!("novelforge-rust-tests-{}", Uuid::new_v4()));
@@ -190,17 +215,28 @@ mod tests {
         let ws = create_temp_workspace();
         let ps = ProjectService;
         let cs = CharacterService;
-        let project = ps.create_project(CreateProjectInput {
-            name: "角色测试".into(), author: None, genre: "玄幻".into(),
-            target_words: None, save_directory: ws.to_string_lossy().into(),
-        }).expect("project created");
+        let project = ps
+            .create_project(CreateProjectInput {
+                name: "角色测试".into(),
+                author: None,
+                genre: "玄幻".into(),
+                target_words: None,
+                save_directory: ws.to_string_lossy().into(),
+            })
+            .expect("project created");
 
-        let id = cs.create(&project.project_root, CreateCharacterInput {
-            name: "沈烬".into(), role_type: "主角".into(),
-            aliases: Some(vec!["阿烬".into()]),
-            motivation: Some("查清真相".into()),
-            ..Default::default()
-        }).expect("create character");
+        let id = cs
+            .create(
+                &project.project_root,
+                CreateCharacterInput {
+                    name: "沈烬".into(),
+                    role_type: "主角".into(),
+                    aliases: Some(vec!["阿烬".into()]),
+                    motivation: Some("查清真相".into()),
+                    ..Default::default()
+                },
+            )
+            .expect("create character");
         assert!(!id.is_empty());
 
         let chars = cs.list(&project.project_root).expect("list characters");
@@ -214,11 +250,19 @@ mod tests {
 impl Default for CreateCharacterInput {
     fn default() -> Self {
         Self {
-            name: String::new(), role_type: String::new(),
-            aliases: None, age: None, gender: None,
-            identity_text: None, appearance: None,
-            motivation: None, desire: None, fear: None,
-            flaw: None, arc_stage: None, locked_fields: None,
+            name: String::new(),
+            role_type: String::new(),
+            aliases: None,
+            age: None,
+            gender: None,
+            identity_text: None,
+            appearance: None,
+            motivation: None,
+            desire: None,
+            fear: None,
+            flaw: None,
+            arc_stage: None,
+            locked_fields: None,
             notes: None,
         }
     }
@@ -282,9 +326,15 @@ impl RelationshipService {
                     updated_at: row.get(6)?,
                 })
             })
-            .map_err(|e| AppErrorDto::new("QUERY_FAILED", "查询角色关系失败", true).with_detail(e.to_string()))?
+            .map_err(|e| {
+                AppErrorDto::new("QUERY_FAILED", "查询角色关系失败", true)
+                    .with_detail(e.to_string())
+            })?
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| AppErrorDto::new("QUERY_FAILED", "查询角色关系失败", true).with_detail(e.to_string()))?
+            .map_err(|e| {
+                AppErrorDto::new("QUERY_FAILED", "查询角色关系失败", true)
+                    .with_detail(e.to_string())
+            })?
         } else {
             stmt.query_map([], |row| {
                 Ok(CharacterRelationship {
@@ -297,9 +347,15 @@ impl RelationshipService {
                     updated_at: row.get(6)?,
                 })
             })
-            .map_err(|e| AppErrorDto::new("QUERY_FAILED", "查询角色关系失败", true).with_detail(e.to_string()))?
+            .map_err(|e| {
+                AppErrorDto::new("QUERY_FAILED", "查询角色关系失败", true)
+                    .with_detail(e.to_string())
+            })?
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| AppErrorDto::new("QUERY_FAILED", "查询角色关系失败", true).with_detail(e.to_string()))?
+            .map_err(|e| {
+                AppErrorDto::new("QUERY_FAILED", "查询角色关系失败", true)
+                    .with_detail(e.to_string())
+            })?
         };
 
         Ok(rows)
@@ -311,7 +367,11 @@ impl RelationshipService {
         input: CreateRelationshipInput,
     ) -> Result<String, AppErrorDto> {
         if input.source_character_id == input.target_character_id {
-            return Err(AppErrorDto::new("INVALID_RELATIONSHIP", "角色不能与自己建立关系", true));
+            return Err(AppErrorDto::new(
+                "INVALID_RELATIONSHIP",
+                "角色不能与自己建立关系",
+                true,
+            ));
         }
         let conn = open_database(Path::new(project_root)).map_err(|e| {
             AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
@@ -330,8 +390,13 @@ impl RelationshipService {
         let conn = open_database(Path::new(project_root)).map_err(|e| {
             AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
         })?;
-        conn.execute("DELETE FROM character_relationships WHERE id = ?1", params![id])
-            .map_err(|e| AppErrorDto::new("DELETE_FAILED", "删除角色关系失败", true).with_detail(e.to_string()))?;
+        conn.execute(
+            "DELETE FROM character_relationships WHERE id = ?1",
+            params![id],
+        )
+        .map_err(|e| {
+            AppErrorDto::new("DELETE_FAILED", "删除角色关系失败", true).with_detail(e.to_string())
+        })?;
         Ok(())
     }
 }

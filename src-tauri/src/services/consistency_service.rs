@@ -45,10 +45,14 @@ impl ConsistencyService {
         // Check for banned glossary terms
         let mut stmt = conn
             .prepare("SELECT term FROM glossary_terms WHERE project_id = ?1 AND banned = 1")
-            .map_err(|e| AppErrorDto::new("QUERY_FAILED", "查询禁用词失败", true).with_detail(e.to_string()))?;
+            .map_err(|e| {
+                AppErrorDto::new("QUERY_FAILED", "查询禁用词失败", true).with_detail(e.to_string())
+            })?;
         let banned: Vec<String> = stmt
             .query_map(params![project_id], |row| row.get(0))
-            .map_err(|e| AppErrorDto::new("QUERY_FAILED", "查询禁用词失败", true).with_detail(e.to_string()))?
+            .map_err(|e| {
+                AppErrorDto::new("QUERY_FAILED", "查询禁用词失败", true).with_detail(e.to_string())
+            })?
             .filter_map(|r| r.ok())
             .collect();
 
@@ -92,10 +96,7 @@ impl ConsistencyService {
         Ok(issues)
     }
 
-    pub fn list_issues(
-        &self,
-        project_root: &str,
-    ) -> Result<Vec<ConsistencyIssue>, AppErrorDto> {
+    pub fn list_issues(&self, project_root: &str) -> Result<Vec<ConsistencyIssue>, AppErrorDto> {
         let conn = open_database(Path::new(project_root)).map_err(|e| {
             AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
         })?;
@@ -116,9 +117,15 @@ impl ConsistencyService {
                     status: row.get(7)?,
                 })
             })
-            .map_err(|e| AppErrorDto::new("QUERY_FAILED", "查询问题列表失败", true).with_detail(e.to_string()))?
+            .map_err(|e| {
+                AppErrorDto::new("QUERY_FAILED", "查询问题列表失败", true)
+                    .with_detail(e.to_string())
+            })?
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| AppErrorDto::new("QUERY_FAILED", "查询问题列表失败", true).with_detail(e.to_string()))?;
+            .map_err(|e| {
+                AppErrorDto::new("QUERY_FAILED", "查询问题列表失败", true)
+                    .with_detail(e.to_string())
+            })?;
         Ok(issues)
     }
 
@@ -136,7 +143,9 @@ impl ConsistencyService {
             "UPDATE consistency_issues SET status = ?1, updated_at = ?2 WHERE id = ?3",
             params![status, now, issue_id],
         )
-        .map_err(|e| AppErrorDto::new("UPDATE_FAILED", "更新问题状态失败", true).with_detail(e.to_string()))?;
+        .map_err(|e| {
+            AppErrorDto::new("UPDATE_FAILED", "更新问题状态失败", true).with_detail(e.to_string())
+        })?;
         Ok(())
     }
 }

@@ -590,13 +590,20 @@ pub fn load_app_setting(conn: &Connection, key: &str) -> Result<Option<String>, 
     match result {
         Ok(value) => Ok(Some(value)),
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-        Err(e) => Err(AppErrorDto::new("DB_READ_FAILED", "Cannot read app setting", true)
-            .with_detail(e.to_string())),
+        Err(e) => Err(
+            AppErrorDto::new("DB_READ_FAILED", "Cannot read app setting", true)
+                .with_detail(e.to_string()),
+        ),
     }
 }
 
 /// Save (upsert) an app setting.
-pub fn save_app_setting(conn: &Connection, key: &str, value: &str, now: &str) -> Result<(), AppErrorDto> {
+pub fn save_app_setting(
+    conn: &Connection,
+    key: &str,
+    value: &str,
+    now: &str,
+) -> Result<(), AppErrorDto> {
     conn.execute(
         "INSERT INTO app_settings (key, value, updated_at) VALUES (?1, ?2, ?3)
          ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",

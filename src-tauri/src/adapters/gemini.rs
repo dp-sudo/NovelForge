@@ -161,7 +161,7 @@ impl GeminiAdapter {
                 finish_reason: Some("stop".to_string()),
                 request_id,
                 error: None,
-            reasoning: None,
+                reasoning: None,
             });
         }
         let value: serde_json::Value = serde_json::from_str(data).ok()?;

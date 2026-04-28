@@ -6,6 +6,7 @@
 //! File layout:
 //!   migrations/project/0001_init.sql
 //!   migrations/project/0002_task_route_unique.sql
+//!   migrations/project/0003_pipeline_draft_pool.sql
 //!   migrations/app/0001_init.sql
 //!   migrations/app/0002_skill_index.sql
 //!   migrations/app/0003_task_route_unique.sql
@@ -39,6 +40,10 @@ fn project_migrations() -> Vec<Migration> {
         Migration {
             version: "0002_task_route_unique",
             sql: include_str!("../../migrations/project/0002_task_route_unique.sql"),
+        },
+        Migration {
+            version: "0003_pipeline_draft_pool",
+            sql: include_str!("../../migrations/project/0003_pipeline_draft_pool.sql"),
         },
     ]
 }
@@ -94,7 +99,10 @@ fn run_pending(
     // Read already-applied versions
     let mut applied_versions: Vec<String> = {
         let mut stmt = conn
-            .prepare(&format!("SELECT version FROM {} ORDER BY version", MIGRATIONS_TABLE))
+            .prepare(&format!(
+                "SELECT version FROM {} ORDER BY version",
+                MIGRATIONS_TABLE
+            ))
             .map_err(|e| {
                 AppErrorDto::new(
                     "MIGRATION_READ_FAILED",
@@ -174,7 +182,10 @@ fn run_pending(
         );
     }
 
-    Ok(MigrationResult { applied, skipped: applied_versions })
+    Ok(MigrationResult {
+        applied,
+        skipped: applied_versions,
+    })
 }
 
 /// Record a migration version as applied.
@@ -228,6 +239,17 @@ mod tests {
             .collect::<Result<Vec<_>, _>>()
             .expect("collect index names");
         rows.iter().any(|name| name == index_name)
+    }
+
+    fn has_table(conn: &Connection, table: &str) -> bool {
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                params![table],
+                |row| row.get(0),
+            )
+            .expect("query table existence");
+        count > 0
     }
 
     fn insert_provider(conn: &Connection, provider_id: &str) {
@@ -376,5 +398,179 @@ mod tests {
             "llm_task_routes",
             "ux_llm_task_routes_project_task_type"
         ));
+    }
+
+    #[test]
+    fn project_pipeline_draft_pool_migration_creates_schema_and_enforces_pending_dedupe() {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        conn.execute_batch(include_str!("../../migrations/project/0001_init.sql"))
+            .expect("apply project 0001");
+        conn.execute_batch(include_str!(
+            "../../migrations/project/0002_task_route_unique.sql"
+        ))
+        .expect("apply project 0002");
+        insert_migration_marker(&conn, "0001_init");
+        insert_migration_marker(&conn, "0002_task_route_unique");
+
+        conn.execute(
+            "INSERT INTO projects(
+                id, name, project_path, schema_version, created_at, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                "project-1",
+                "Project 1",
+                "F:/NovelForge/tests/project-1",
+                "1.0.0",
+                "2026-04-28T00:00:00Z",
+                "2026-04-28T00:00:00Z"
+            ],
+        )
+        .expect("insert project");
+        conn.execute(
+            "INSERT INTO chapters(
+                id, project_id, chapter_index, title, content_path, created_at, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                "chapter-1",
+                "project-1",
+                1_i64,
+                "Chapter 1",
+                "chapters/chapter-1.md",
+                "2026-04-28T00:00:00Z",
+                "2026-04-28T00:00:00Z"
+            ],
+        )
+        .expect("insert chapter");
+
+        run_project_pending(&conn).expect("apply project pending migrations");
+
+        assert!(has_table(&conn, "ai_pipeline_runs"));
+        assert!(has_table(&conn, "structured_draft_batches"));
+        assert!(has_table(&conn, "structured_draft_items"));
+        assert!(has_index(
+            &conn,
+            "structured_draft_items",
+            "idx_sdi_project_chapter_kind"
+        ));
+        assert!(has_index(
+            &conn,
+            "structured_draft_items",
+            "idx_sdi_status_created"
+        ));
+        assert!(has_index(
+            &conn,
+            "structured_draft_items",
+            "ux_sdi_project_kind_key_pending"
+        ));
+
+        conn.execute(
+            "INSERT INTO ai_pipeline_runs(
+                id, project_id, chapter_id, task_type, ui_action, status, created_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                "run-1",
+                "project-1",
+                "chapter-1",
+                "chapter.continue",
+                "continue_chapter",
+                "done",
+                "2026-04-28T11:00:00Z"
+            ],
+        )
+        .expect("insert run");
+        conn.execute(
+            "INSERT INTO structured_draft_batches(
+                id, run_id, project_id, chapter_id, source_task_type, content_hash, status, created_at, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                "batch-1",
+                "run-1",
+                "project-1",
+                "chapter-1",
+                "chapter.continue",
+                "hash-1",
+                "pending",
+                "2026-04-28T11:00:00Z",
+                "2026-04-28T11:00:00Z"
+            ],
+        )
+        .expect("insert batch");
+        conn.execute(
+            "INSERT INTO structured_draft_items(
+                id, batch_id, run_id, project_id, chapter_id, draft_kind, source_label, target_label,
+                normalized_key, confidence, occurrences, evidence_text, payload_json, status, created_at, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+            params![
+                "item-1",
+                "batch-1",
+                "run-1",
+                "project-1",
+                "chapter-1",
+                "relationship",
+                "Alice",
+                "Bob",
+                "rel:alice|bob|ally",
+                0.91_f64,
+                1_i64,
+                "Alice and Bob form an alliance.",
+                "{\"relationship_type\":\"ally\"}",
+                "pending",
+                "2026-04-28T11:00:00Z",
+                "2026-04-28T11:00:00Z"
+            ],
+        )
+        .expect("insert first pending item");
+
+        let duplicate_pending = conn.execute(
+            "INSERT INTO structured_draft_items(
+                id, batch_id, run_id, project_id, chapter_id, draft_kind, source_label, target_label,
+                normalized_key, confidence, occurrences, evidence_text, payload_json, status, created_at, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+            params![
+                "item-2",
+                "batch-1",
+                "run-1",
+                "project-1",
+                "chapter-1",
+                "relationship",
+                "Alice",
+                "Bob",
+                "rel:alice|bob|ally",
+                0.86_f64,
+                1_i64,
+                "Duplicate extraction for the same relationship.",
+                "{\"relationship_type\":\"ally\"}",
+                "pending",
+                "2026-04-28T11:01:00Z",
+                "2026-04-28T11:01:00Z"
+            ],
+        );
+        assert!(duplicate_pending.is_err());
+
+        conn.execute(
+            "INSERT INTO structured_draft_items(
+                id, batch_id, run_id, project_id, chapter_id, draft_kind, source_label, target_label,
+                normalized_key, confidence, occurrences, evidence_text, payload_json, status, created_at, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+            params![
+                "item-3",
+                "batch-1",
+                "run-1",
+                "project-1",
+                "chapter-1",
+                "relationship",
+                "Alice",
+                "Bob",
+                "rel:alice|bob|ally",
+                0.86_f64,
+                1_i64,
+                "Approved version retained for history.",
+                "{\"relationship_type\":\"ally\"}",
+                "applied",
+                "2026-04-28T11:02:00Z",
+                "2026-04-28T11:02:00Z"
+            ],
+        )
+        .expect("insert applied item with same key");
     }
 }

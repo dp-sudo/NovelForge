@@ -122,8 +122,7 @@ impl IntegrityService {
             .unwrap_or_else(|_| "unknown".into());
 
         // (e) Check schema_migrations up to date
-        if let Ok(mut stmt) =
-            conn.prepare("SELECT version FROM schema_migrations ORDER BY version")
+        if let Ok(mut stmt) = conn.prepare("SELECT version FROM schema_migrations ORDER BY version")
         {
             if let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(0)) {
                 let versions: Vec<String> = rows.flatten().collect();
@@ -236,8 +235,8 @@ mod tests {
     use std::path::PathBuf;
     use uuid::Uuid;
 
-    use crate::services::project_service::{CreateProjectInput, ProjectService};
     use super::IntegrityService;
+    use crate::services::project_service::{CreateProjectInput, ProjectService};
 
     fn create_temp_workspace() -> PathBuf {
         let w = std::env::temp_dir().join(format!("novelforge-rust-tests-{}", Uuid::new_v4()));
@@ -264,10 +263,12 @@ mod tests {
             })
             .expect("project created");
 
-        let report = isvc.check_project(&project.project_root).expect("check_project failed");
+        let report = isvc
+            .check_project(&project.project_root)
+            .expect("check_project failed");
         assert_eq!(report.status, "healthy");
         assert!(report.issues.is_empty());
-        assert_eq!(report.summary.schema_version, "0002_task_route_unique");
+        assert_eq!(report.summary.schema_version, "0003_pipeline_draft_pool");
 
         remove_temp_workspace(&ws);
     }
@@ -280,7 +281,9 @@ mod tests {
         let bad_root = ws.join("bad-project");
         fs::create_dir_all(&bad_root).expect("create bad root");
 
-        let report = isvc.check_project(&bad_root.to_string_lossy()).expect("check_project failed");
+        let report = isvc
+            .check_project(&bad_root.to_string_lossy())
+            .expect("check_project failed");
         assert_eq!(report.status, "corrupted");
         assert!(report.issues.iter().any(|i| i.category == "project_file"));
 

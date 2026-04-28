@@ -20,6 +20,22 @@ pub struct AiService {
     adapters: Arc<RwLock<HashMap<String, Box<dyn LlmService>>>>,
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskRouteAttempt {
+    pub provider_id: String,
+    pub model_id: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskRouteResolution {
+    pub canonical_task_type: String,
+    pub provider_id: String,
+    pub model_id: String,
+    pub attempts: Vec<TaskRouteAttempt>,
+}
+
 impl Default for AiService {
     fn default() -> Self {
         Self {
@@ -220,6 +236,25 @@ impl AiService {
         let provider_id = provider_hint.to_string();
         let model = Self::resolve_request_model(&provider_id, &req.model)?;
         Ok((provider_id, model, None))
+    }
+
+    /// Inspect task route resolution and computed retry/fallback chain for diagnostics.
+    pub fn inspect_task_route(task_type: &str) -> Result<TaskRouteResolution, AppErrorDto> {
+        let canonical_task_type = task_routing::canonical_task_type(task_type).into_owned();
+        let (provider_id, model_id, route) = Self::resolve_route(&canonical_task_type)?;
+        let attempts = Self::build_attempt_chain(&provider_id, &model_id, route.as_ref())
+            .into_iter()
+            .map(|(provider_id, model_id)| TaskRouteAttempt {
+                provider_id,
+                model_id,
+            })
+            .collect::<Vec<_>>();
+        Ok(TaskRouteResolution {
+            canonical_task_type,
+            provider_id,
+            model_id,
+            attempts,
+        })
     }
 
     /// Resolve target with skill taskRoute override support.

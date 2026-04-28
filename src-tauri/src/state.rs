@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::sync::RwLock;
 
+use crate::services::ai_pipeline_service::AiPipelineService;
 use crate::services::ai_service::AiService;
 use crate::services::backup_service::BackupService;
 use crate::services::blueprint_service::BlueprintService;
@@ -26,6 +27,7 @@ use crate::services::vector_service::VectorService;
 use crate::services::world_service::WorldService;
 
 pub struct AppState {
+    pub ai_pipeline_service: AiPipelineService,
     pub ai_service: AiService,
     pub backup_service: BackupService,
     pub blueprint_service: BlueprintService,
@@ -57,6 +59,7 @@ impl AppState {
     pub fn new(skill_registry: SkillRegistry) -> Self {
         Self {
             skill_registry: Arc::new(RwLock::new(skill_registry)),
+            ai_pipeline_service: AiPipelineService::default(),
             ai_service: AiService::default(),
             backup_service: BackupService::default(),
             blueprint_service: BlueprintService::default(),

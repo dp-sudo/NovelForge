@@ -36,10 +36,7 @@ pub fn log_ai_call(provider: &str, model: &str, task: &str, tokens_estimate: Opt
     let tokens = tokens_estimate
         .map(|t| format!(", ~{}toks", t))
         .unwrap_or_default();
-    info!(
-        "[AI] {} / {} | {}{}",
-        provider, model, task, tokens
-    );
+    info!("[AI] {} / {} | {}{}", provider, model, task, tokens);
 }
 
 /// Log a database operation.
@@ -54,8 +51,15 @@ pub fn log_security(event: &str, detail: &str) {
 
 /// Log a filesystem operation.
 pub fn log_fs(operation: &str, path: &str, detail: &str) {
-    debug!("[FS] {} | {}{}", operation, path,
-        if detail.is_empty() { String::new() } else { format!(" | {}", detail) }
+    debug!(
+        "[FS] {} | {}{}",
+        operation,
+        path,
+        if detail.is_empty() {
+            String::new()
+        } else {
+            format!(" | {}", detail)
+        }
     );
 }
 

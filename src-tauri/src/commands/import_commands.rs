@@ -34,5 +34,7 @@ pub async fn restore_backup(
     backup_path: String,
     state: State<'_, AppState>,
 ) -> Result<crate::services::backup_service::RestoreResult, AppErrorDto> {
-    state.backup_service.restore_backup(&project_root, &backup_path)
+    state
+        .backup_service
+        .restore_backup(&project_root, &backup_path)
 }

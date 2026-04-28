@@ -9,13 +9,15 @@ use crate::state::AppState;
 // ── List all skills ──
 
 #[tauri::command]
-pub async fn list_skills(
-    state: State<'_, AppState>,
-) -> Result<Vec<SkillManifest>, AppErrorDto> {
-    state.skill_registry.read().map_err(|e| {
-        AppErrorDto::new("SKILLS_LOCK_FAILED", "Skill registry lock failed", false)
-            .with_detail(e.to_string())
-    })?.list_skills()
+pub async fn list_skills(state: State<'_, AppState>) -> Result<Vec<SkillManifest>, AppErrorDto> {
+    state
+        .skill_registry
+        .read()
+        .map_err(|e| {
+            AppErrorDto::new("SKILLS_LOCK_FAILED", "Skill registry lock failed", false)
+                .with_detail(e.to_string())
+        })?
+        .list_skills()
 }
 
 // ── Get a single skill manifest ──
@@ -25,13 +27,21 @@ pub async fn get_skill(
     id: String,
     state: State<'_, AppState>,
 ) -> Result<SkillManifest, AppErrorDto> {
-    state.skill_registry.read().map_err(|e| {
-        AppErrorDto::new("SKILLS_LOCK_FAILED", "Skill registry lock failed", false)
-            .with_detail(e.to_string())
-    })?.get_skill(&id)?
-    .ok_or_else(|| {
-        AppErrorDto::new("SKILLS_NOT_FOUND", &format!("Skill '{}' not found", id), true)
-    })
+    state
+        .skill_registry
+        .read()
+        .map_err(|e| {
+            AppErrorDto::new("SKILLS_LOCK_FAILED", "Skill registry lock failed", false)
+                .with_detail(e.to_string())
+        })?
+        .get_skill(&id)?
+        .ok_or_else(|| {
+            AppErrorDto::new(
+                "SKILLS_NOT_FOUND",
+                &format!("Skill '{}' not found", id),
+                true,
+            )
+        })
 }
 
 // ── Get full .md content of a skill (for editing) ──
@@ -41,13 +51,21 @@ pub async fn get_skill_content(
     id: String,
     state: State<'_, AppState>,
 ) -> Result<String, AppErrorDto> {
-    state.skill_registry.read().map_err(|e| {
-        AppErrorDto::new("SKILLS_LOCK_FAILED", "Skill registry lock failed", false)
-            .with_detail(e.to_string())
-    })?.read_skill_content(&id)?
-    .ok_or_else(|| {
-        AppErrorDto::new("SKILLS_NOT_FOUND", &format!("Skill '{}' not found", id), true)
-    })
+    state
+        .skill_registry
+        .read()
+        .map_err(|e| {
+            AppErrorDto::new("SKILLS_LOCK_FAILED", "Skill registry lock failed", false)
+                .with_detail(e.to_string())
+        })?
+        .read_skill_content(&id)?
+        .ok_or_else(|| {
+            AppErrorDto::new(
+                "SKILLS_NOT_FOUND",
+                &format!("Skill '{}' not found", id),
+                true,
+            )
+        })
 }
 
 // ── Create a new skill ──
@@ -116,10 +134,7 @@ pub async fn update_skill(
 // ── Delete a skill (user/imported only) ──
 
 #[tauri::command]
-pub async fn delete_skill(
-    id: String,
-    state: State<'_, AppState>,
-) -> Result<(), AppErrorDto> {
+pub async fn delete_skill(id: String, state: State<'_, AppState>) -> Result<(), AppErrorDto> {
     let reg = state.skill_registry.write().map_err(|e| {
         AppErrorDto::new("SKILLS_LOCK_FAILED", "Skill registry lock failed", false)
             .with_detail(e.to_string())
@@ -158,9 +173,7 @@ pub async fn reset_builtin_skill(
 // ── Refresh/re-scan skills directory ──
 
 #[tauri::command]
-pub async fn refresh_skills(
-    state: State<'_, AppState>,
-) -> Result<Vec<SkillManifest>, AppErrorDto> {
+pub async fn refresh_skills(state: State<'_, AppState>) -> Result<Vec<SkillManifest>, AppErrorDto> {
     let reg = state.skill_registry.write().map_err(|e| {
         AppErrorDto::new("SKILLS_LOCK_FAILED", "Skill registry lock failed", false)
             .with_detail(e.to_string())

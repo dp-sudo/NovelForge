@@ -58,7 +58,9 @@ pub async fn reorder_chapters(
     ordered_ids: Vec<String>,
     state: State<'_, AppState>,
 ) -> Result<(), AppErrorDto> {
-    state.chapter_service.reorder_chapters(&project_root, ordered_ids)
+    state
+        .chapter_service
+        .reorder_chapters(&project_root, ordered_ids)
 }
 
 #[tauri::command]
@@ -83,7 +85,13 @@ pub async fn save_chapter_content(
         &input.chapter_id,
         &input.content,
     )?;
-    crate::infra::logger::log_user_action("save_chapter", &format!("chapter={}, words={}", input.chapter_id, result.current_words));
+    crate::infra::logger::log_user_action(
+        "save_chapter",
+        &format!(
+            "chapter={}, words={}",
+            input.chapter_id, result.current_words
+        ),
+    );
     Ok(result)
 }
 
@@ -113,7 +121,9 @@ pub async fn delete_chapter(
     input: DeleteChapterRequest,
     state: State<'_, AppState>,
 ) -> Result<(), AppErrorDto> {
-    state.chapter_service.delete_chapter(&project_root, &input.id)
+    state
+        .chapter_service
+        .delete_chapter(&project_root, &input.id)
 }
 
 // ── Snapshot Commands ──
@@ -126,7 +136,12 @@ pub async fn create_snapshot(
     note: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<crate::services::chapter_service::SnapshotRecord, AppErrorDto> {
-    state.chapter_service.create_snapshot(&project_root, &chapter_id, title.as_deref(), note.as_deref())
+    state.chapter_service.create_snapshot(
+        &project_root,
+        &chapter_id,
+        title.as_deref(),
+        note.as_deref(),
+    )
 }
 
 #[tauri::command]
@@ -135,7 +150,9 @@ pub async fn list_snapshots(
     chapter_id: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<Vec<crate::services::chapter_service::SnapshotRecord>, AppErrorDto> {
-    state.chapter_service.list_snapshots(&project_root, chapter_id.as_deref())
+    state
+        .chapter_service
+        .list_snapshots(&project_root, chapter_id.as_deref())
 }
 
 #[tauri::command]
@@ -144,7 +161,9 @@ pub async fn read_snapshot_content(
     snapshot_id: String,
     state: State<'_, AppState>,
 ) -> Result<String, AppErrorDto> {
-    state.chapter_service.read_snapshot_content(&project_root, &snapshot_id)
+    state
+        .chapter_service
+        .read_snapshot_content(&project_root, &snapshot_id)
 }
 
 // ── Volume Commands ──
@@ -182,5 +201,7 @@ pub async fn assign_chapter_volume(
     volume_id: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<(), AppErrorDto> {
-    state.volume_service.assign_chapter(&project_root, &chapter_id, volume_id.as_deref())
+    state
+        .volume_service
+        .assign_chapter(&project_root, &chapter_id, volume_id.as_deref())
 }

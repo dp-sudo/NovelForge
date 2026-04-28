@@ -62,7 +62,8 @@ impl SearchService {
             params![entity_type, entity_id],
         )
         .map_err(|e| {
-            AppErrorDto::new("SEARCH_DELETE_FAILED", "索引删除失败", true).with_detail(e.to_string())
+            AppErrorDto::new("SEARCH_DELETE_FAILED", "索引删除失败", true)
+                .with_detail(e.to_string())
         })?;
         Ok(())
     }

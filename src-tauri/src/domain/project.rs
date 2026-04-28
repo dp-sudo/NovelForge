@@ -18,6 +18,18 @@ pub enum ProjectStatus {
 
 impl ProjectMeta {
     pub fn is_valid_genre(genre: &str) -> bool {
-        matches!(genre, "玄幻" | "都市" | "科幻" | "悬疑" | "言情" | "历史" | "奇幻" | "轻小说" | "剧本" | "其他")
+        matches!(
+            genre,
+            "玄幻"
+                | "都市"
+                | "科幻"
+                | "悬疑"
+                | "言情"
+                | "历史"
+                | "奇幻"
+                | "轻小说"
+                | "剧本"
+                | "其他"
+        )
     }
 }

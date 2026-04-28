@@ -359,7 +359,12 @@ impl LlmService for OpenAiCompatibleAdapter {
         let models_url = self.models_url();
         let (header_name, header_value) = match self.auth_header() {
             Ok(v) => v,
-            Err(e) => return Err(LlmError::ProviderError(format!("Auth error: {}", e.user_message()))),
+            Err(e) => {
+                return Err(LlmError::ProviderError(format!(
+                    "Auth error: {}",
+                    e.user_message()
+                )))
+            }
         };
 
         let models_response = self
@@ -376,7 +381,11 @@ impl LlmService for OpenAiCompatibleAdapter {
 
         // Fallback: send a minimal chat ping to verify end-to-end connectivity.
         let chat_url = self.endpoint_url();
-        let model = self.config.default_model.as_deref().unwrap_or("gpt-3.5-turbo");
+        let model = self
+            .config
+            .default_model
+            .as_deref()
+            .unwrap_or("gpt-3.5-turbo");
         let ping_body = serde_json::json!({
             "model": model,
             "messages": [{"role": "user", "content": "ping"}],
@@ -477,8 +486,7 @@ impl LlmService for OpenAiCompatibleAdapter {
         }
 
         // 5. Test thinking (vendor-specific)
-        report.thinking = self.config.vendor == "deepseek"
-            || self.config.vendor == "kimi";
+        report.thinking = self.config.vendor == "deepseek" || self.config.vendor == "kimi";
 
         Ok(report)
     }

@@ -5,7 +5,10 @@ use super::llm_types::*;
 
 #[async_trait]
 pub trait LlmService: Send + Sync {
-    async fn generate_text(&self, req: UnifiedGenerateRequest) -> Result<UnifiedGenerateResponse, LlmError>;
+    async fn generate_text(
+        &self,
+        req: UnifiedGenerateRequest,
+    ) -> Result<UnifiedGenerateResponse, LlmError>;
 
     async fn stream_text(
         &self,

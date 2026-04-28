@@ -1,3 +1,4 @@
+pub mod ai_pipeline_service;
 pub mod ai_service;
 pub mod backup_service;
 pub mod blueprint_service;
@@ -12,10 +13,10 @@ pub mod glossary_service;
 pub mod import_service;
 pub mod integrity_service;
 pub mod license_service;
+pub mod model_registry_service;
 pub mod narrative_service;
 pub mod plot_service;
 pub mod project_service;
-pub mod model_registry_service;
 pub mod prompt_builder;
 pub mod search_service;
 pub mod settings_service;

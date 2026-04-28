@@ -196,10 +196,14 @@ impl AnthropicAdapter {
             "content_block_delta" => {
                 let value: serde_json::Value = serde_json::from_str(data).ok()?;
                 let delta = value.get("delta")?;
-                let delta_type = delta.get("type").and_then(|v| v.as_str()).unwrap_or("text_delta");
+                let delta_type = delta
+                    .get("type")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("text_delta");
                 match delta_type {
                     "thinking_delta" => {
-                        let reasoning = delta.get("thinking").and_then(|v| v.as_str()).unwrap_or("");
+                        let reasoning =
+                            delta.get("thinking").and_then(|v| v.as_str()).unwrap_or("");
                         if reasoning.is_empty() {
                             return None;
                         }
@@ -291,7 +295,11 @@ impl AnthropicAdapter {
         }
     }
 
-    async fn test_anthropic_tools(&self, model: &str, _provider_id: &str) -> Result<bool, LlmError> {
+    async fn test_anthropic_tools(
+        &self,
+        model: &str,
+        _provider_id: &str,
+    ) -> Result<bool, LlmError> {
         let url = self.endpoint_url();
         let headers = match self.build_headers() {
             Ok(h) => h,
@@ -461,10 +469,19 @@ impl LlmService for AnthropicAdapter {
         let url = self.endpoint_url();
         let headers = match self.build_headers() {
             Ok(h) => h,
-            Err(e) => return Err(LlmError::ProviderError(format!("Auth error: {}", e.user_message()))),
+            Err(e) => {
+                return Err(LlmError::ProviderError(format!(
+                    "Auth error: {}",
+                    e.user_message()
+                )))
+            }
         };
 
-        log::info!("[TEST_CONNECTION] Testing {} with model={}", url, self.config.default_model.as_deref().unwrap_or("?"));
+        log::info!(
+            "[TEST_CONNECTION] Testing {} with model={}",
+            url,
+            self.config.default_model.as_deref().unwrap_or("?")
+        );
 
         let mut request = self.client.post(&url).json(&serde_json::json!({
             "model": self.config.default_model.as_deref().unwrap_or("claude-3-haiku-20240307"),
@@ -494,7 +511,11 @@ impl LlmService for AnthropicAdapter {
 
     async fn detect_capabilities(&self) -> Result<CapabilityReport, LlmError> {
         let provider_id = self.config.id.clone();
-        let model = self.config.default_model.as_deref().unwrap_or("claude-sonnet-4-6");
+        let model = self
+            .config
+            .default_model
+            .as_deref()
+            .unwrap_or("claude-sonnet-4-6");
 
         let mut report = CapabilityReport {
             provider_id: provider_id.clone(),

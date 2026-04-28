@@ -46,10 +46,12 @@ impl GitService {
     pub fn init_repository(&self, project_root: &str) -> Result<GitRepositoryStatus, AppErrorDto> {
         let root = Path::new(project_root);
         if !root.exists() {
-            return Err(
-                AppErrorDto::new("PROJECT_PATH_NOT_FOUND", "Project path does not exist", true)
-                    .with_detail(project_root.to_string()),
-            );
+            return Err(AppErrorDto::new(
+                "PROJECT_PATH_NOT_FOUND",
+                "Project path does not exist",
+                true,
+            )
+            .with_detail(project_root.to_string()));
         }
 
         if !root.join(".git").exists() {
@@ -145,15 +147,21 @@ impl GitService {
     }
 
     fn read_latest_commit(&self, project_root: &str) -> Result<GitCommitRecord, AppErrorDto> {
-        let output = run_git(project_root, &["log", "--pretty=format:%H%x09%s%x09%cI", "-n", "1"])?;
+        let output = run_git(
+            project_root,
+            &["log", "--pretty=format:%H%x09%s%x09%cI", "-n", "1"],
+        )?;
         output
             .lines()
             .find_map(|line| parse_log_line(line.trim()))
-            .ok_or_else(|| AppErrorDto::new("GIT_LOG_PARSE_FAILED", "Cannot parse git commit log", true))
+            .ok_or_else(|| {
+                AppErrorDto::new("GIT_LOG_PARSE_FAILED", "Cannot parse git commit log", true)
+            })
     }
 
     fn ensure_local_identity(&self, project_root: &str) -> Result<(), AppErrorDto> {
-        let user_name = run_git(project_root, &["config", "--get", "user.name"]).unwrap_or_default();
+        let user_name =
+            run_git(project_root, &["config", "--get", "user.name"]).unwrap_or_default();
         if user_name.trim().is_empty() {
             run_git(project_root, &["config", "user.name", "NovelForge"])?;
         }
@@ -221,10 +229,12 @@ fn run_git(project_root: &str, args: &[&str]) -> Result<String, AppErrorDto> {
     } else {
         stderr
     };
-    Err(
-        AppErrorDto::new("GIT_COMMAND_FAILED", "Git command returned non-zero exit status", true)
-            .with_detail(format!("git {}: {}", args.join(" "), detail)),
+    Err(AppErrorDto::new(
+        "GIT_COMMAND_FAILED",
+        "Git command returned non-zero exit status",
+        true,
     )
+    .with_detail(format!("git {}: {}", args.join(" "), detail)))
 }
 
 fn parse_log_line(line: &str) -> Option<GitCommitRecord> {
@@ -255,7 +265,8 @@ mod tests {
     use super::GitService;
 
     fn create_temp_workspace() -> PathBuf {
-        let workspace = std::env::temp_dir().join(format!("novelforge-git-tests-{}", Uuid::new_v4()));
+        let workspace =
+            std::env::temp_dir().join(format!("novelforge-git-tests-{}", Uuid::new_v4()));
         fs::create_dir_all(&workspace).expect("create temp workspace");
         workspace
     }

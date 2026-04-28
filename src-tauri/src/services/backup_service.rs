@@ -57,7 +57,8 @@ impl BackupService {
             }
         }) {
             let entry = entry.map_err(|e| {
-                AppErrorDto::new("BACKUP_FAILED", "读取项目文件失败", true).with_detail(e.to_string())
+                AppErrorDto::new("BACKUP_FAILED", "读取项目文件失败", true)
+                    .with_detail(e.to_string())
             })?;
 
             let path = entry.path();
@@ -69,8 +70,8 @@ impl BackupService {
             let name = relative.to_string_lossy().to_string().replace('\\', "/");
 
             if entry.file_type().is_dir() {
-                let options = FileOptions::<()>::default()
-                    .compression_method(CompressionMethod::Deflated);
+                let options =
+                    FileOptions::<()>::default().compression_method(CompressionMethod::Deflated);
                 zip.add_directory(&name, options).map_err(|err| {
                     AppErrorDto::new("BACKUP_ZIP_FAILED", "添加目录到备份失败", true)
                         .with_detail(err.to_string())
@@ -81,10 +82,11 @@ impl BackupService {
                 fs::File::open(path)
                     .and_then(|mut f| f.read_to_end(&mut content))
                     .map_err(|e| {
-                        AppErrorDto::new("BACKUP_FAILED", "读取文件失败", true).with_detail(e.to_string())
+                        AppErrorDto::new("BACKUP_FAILED", "读取文件失败", true)
+                            .with_detail(e.to_string())
                     })?;
-                let options = FileOptions::<()>::default()
-                    .compression_method(CompressionMethod::Deflated);
+                let options =
+                    FileOptions::<()>::default().compression_method(CompressionMethod::Deflated);
                 zip.start_file(&name, options).map_err(|err| {
                     AppErrorDto::new("BACKUP_ZIP_FAILED", "添加文件到备份失败", true)
                         .with_detail(err.to_string())
@@ -126,9 +128,7 @@ impl BackupService {
             }
         };
 
-        let already_backed_up = existing.iter().any(|b| {
-            b.file_path.contains(&today)
-        });
+        let already_backed_up = existing.iter().any(|b| b.file_path.contains(&today));
 
         if already_backed_up {
             log::info!("[AUTO_BACKUP] Daily backup already exists for {}", today);
@@ -157,7 +157,8 @@ impl BackupService {
 
         let mut backups: Vec<BackupResult> = Vec::new();
         let entries = fs::read_dir(&backup_dir).map_err(|e| {
-            AppErrorDto::new("BACKUP_LIST_FAILED", "读取备份列表失败", true).with_detail(e.to_string())
+            AppErrorDto::new("BACKUP_LIST_FAILED", "读取备份列表失败", true)
+                .with_detail(e.to_string())
         })?;
 
         for entry in entries.flatten() {
@@ -182,7 +183,11 @@ impl BackupService {
         Ok(backups)
     }
 
-    pub fn restore_backup(&self, project_root: &str, backup_path: &str) -> Result<RestoreResult, AppErrorDto> {
+    pub fn restore_backup(
+        &self,
+        project_root: &str,
+        backup_path: &str,
+    ) -> Result<RestoreResult, AppErrorDto> {
         let backup_file = Path::new(backup_path);
         let root = Path::new(project_root);
 
@@ -195,16 +200,26 @@ impl BackupService {
 
         // Validate: check project.json exists in archive
         let has_project_json = (0..archive.len()).any(|i| {
-            archive.by_index(i).ok().map(|f| f.name().to_string()).unwrap_or_default() == "project.json"
+            archive
+                .by_index(i)
+                .ok()
+                .map(|f| f.name().to_string())
+                .unwrap_or_default()
+                == "project.json"
         });
         if !has_project_json {
-            return Err(AppErrorDto::new("RESTORE_INVALID", "备份文件不包含 project.json，不是有效的项目备份", false));
+            return Err(AppErrorDto::new(
+                "RESTORE_INVALID",
+                "备份文件不包含 project.json，不是有效的项目备份",
+                false,
+            ));
         }
 
         let mut restored = 0usize;
         for i in 0..archive.len() {
             let mut entry = archive.by_index(i).map_err(|e| {
-                AppErrorDto::new("RESTORE_FAILED", "读取备份条目失败", true).with_detail(e.to_string())
+                AppErrorDto::new("RESTORE_FAILED", "读取备份条目失败", true)
+                    .with_detail(e.to_string())
             })?;
 
             let name = entry.name().to_string();
@@ -219,11 +234,13 @@ impl BackupService {
 
             let mut content = Vec::new();
             entry.read_to_end(&mut content).map_err(|e| {
-                AppErrorDto::new("RESTORE_FAILED", "读取备份内容失败", true).with_detail(e.to_string())
+                AppErrorDto::new("RESTORE_FAILED", "读取备份内容失败", true)
+                    .with_detail(e.to_string())
             })?;
 
             fs::write(&target_path, &content).map_err(|e| {
-                AppErrorDto::new("RESTORE_FAILED", "写入恢复文件失败", true).with_detail(e.to_string())
+                AppErrorDto::new("RESTORE_FAILED", "写入恢复文件失败", true)
+                    .with_detail(e.to_string())
             })?;
             restored += 1;
         }

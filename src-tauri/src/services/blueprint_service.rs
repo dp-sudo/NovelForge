@@ -60,9 +60,15 @@ impl BlueprintService {
                     updated_at: row.get(10)?,
                 })
             })
-            .map_err(|e| AppErrorDto::new("QUERY_FAILED", "查询蓝图步骤失败", true).with_detail(e.to_string()))?
+            .map_err(|e| {
+                AppErrorDto::new("QUERY_FAILED", "查询蓝图步骤失败", true)
+                    .with_detail(e.to_string())
+            })?
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| AppErrorDto::new("QUERY_FAILED", "查询蓝图步骤失败", true).with_detail(e.to_string()))?;
+            .map_err(|e| {
+                AppErrorDto::new("QUERY_FAILED", "查询蓝图步骤失败", true)
+                    .with_detail(e.to_string())
+            })?;
         Ok(steps)
     }
 
@@ -106,15 +112,15 @@ impl BlueprintService {
             .map_err(|e| AppErrorDto::new("INSERT_FAILED", "创建蓝图步骤失败", true).with_detail(e.to_string()))?;
         }
 
-        self.list_steps(project_root)
-            .map(|steps| steps.into_iter().find(|s| s.step_key == input.step_key).unwrap())
+        self.list_steps(project_root).map(|steps| {
+            steps
+                .into_iter()
+                .find(|s| s.step_key == input.step_key)
+                .unwrap()
+        })
     }
 
-    pub fn mark_completed(
-        &self,
-        project_root: &str,
-        step_key: &str,
-    ) -> Result<(), AppErrorDto> {
+    pub fn mark_completed(&self, project_root: &str, step_key: &str) -> Result<(), AppErrorDto> {
         let conn = open_database(Path::new(project_root)).map_err(|e| {
             AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
         })?;
@@ -149,8 +155,8 @@ mod tests {
     use std::path::PathBuf;
     use uuid::Uuid;
 
-    use crate::services::project_service::{CreateProjectInput, ProjectService};
     use super::{BlueprintService, SaveBlueprintStepInput};
+    use crate::services::project_service::{CreateProjectInput, ProjectService};
 
     fn create_temp_workspace() -> PathBuf {
         let w = std::env::temp_dir().join(format!("novelforge-rust-tests-{}", Uuid::new_v4()));
@@ -167,24 +173,40 @@ mod tests {
         let ws = create_temp_workspace();
         let ps = ProjectService;
         let bs = BlueprintService;
-        let project = ps.create_project(CreateProjectInput {
-            name: "蓝图测试".into(), author: None, genre: "测试".into(),
-            target_words: None, save_directory: ws.to_string_lossy().into(),
-        }).expect("project created");
+        let project = ps
+            .create_project(CreateProjectInput {
+                name: "蓝图测试".into(),
+                author: None,
+                genre: "测试".into(),
+                target_words: None,
+                save_directory: ws.to_string_lossy().into(),
+            })
+            .expect("project created");
 
-        bs.save_step(&project.project_root, SaveBlueprintStepInput {
-            step_key: "step-01-anchor".into(),
-            content: "核心灵感：秩序与代价。".into(),
-            ai_generated: None,
-        }).expect("save step");
+        bs.save_step(
+            &project.project_root,
+            SaveBlueprintStepInput {
+                step_key: "step-01-anchor".into(),
+                content: "核心灵感：秩序与代价。".into(),
+                ai_generated: None,
+            },
+        )
+        .expect("save step");
 
         let steps = bs.list_steps(&project.project_root).expect("list steps");
-        let step = steps.iter().find(|s| s.step_key == "step-01-anchor").unwrap();
+        let step = steps
+            .iter()
+            .find(|s| s.step_key == "step-01-anchor")
+            .unwrap();
         assert_eq!(step.content, "核心灵感：秩序与代价。");
 
-        bs.mark_completed(&project.project_root, "step-01-anchor").expect("mark completed");
+        bs.mark_completed(&project.project_root, "step-01-anchor")
+            .expect("mark completed");
         let steps = bs.list_steps(&project.project_root).expect("list steps");
-        let step = steps.iter().find(|s| s.step_key == "step-01-anchor").unwrap();
+        let step = steps
+            .iter()
+            .find(|s| s.step_key == "step-01-anchor")
+            .unwrap();
         assert_eq!(step.status, "completed");
 
         remove_temp_workspace(&ws);

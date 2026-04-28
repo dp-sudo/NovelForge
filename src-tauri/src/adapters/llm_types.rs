@@ -27,11 +27,9 @@ pub enum LlmError {
 impl From<LlmError> for AppErrorDto {
     fn from(e: LlmError) -> Self {
         let (code, message, recoverable) = match &e {
-            LlmError::MissingApiKey => (
-                "LLM_MISSING_API_KEY",
-                "请先在模型设置中填写 API Key",
-                true,
-            ),
+            LlmError::MissingApiKey => {
+                ("LLM_MISSING_API_KEY", "请先在模型设置中填写 API Key", true)
+            }
             LlmError::InvalidApiKey => (
                 "LLM_INVALID_API_KEY",
                 "API Key 认证失败，请检查密钥是否正确",
@@ -42,11 +40,7 @@ impl From<LlmError> for AppErrorDto {
                 "API 额度不足，请检查账户余额",
                 false,
             ),
-            LlmError::RateLimited => (
-                "LLM_RATE_LIMITED",
-                "请求频率过高，请稍后重试",
-                true,
-            ),
+            LlmError::RateLimited => ("LLM_RATE_LIMITED", "请求频率过高，请稍后重试", true),
             LlmError::ModelNotFound => (
                 "LLM_MODEL_NOT_FOUND",
                 "当前模型名不可用，请刷新模型列表或检查拼写",
@@ -67,21 +61,11 @@ impl From<LlmError> for AppErrorDto {
                 "内容安全策略拒绝，请调整输入内容",
                 false,
             ),
-            LlmError::NetworkTimeout => (
-                "LLM_NETWORK_TIMEOUT",
-                "连接超时，请检查网络连接",
-                true,
-            ),
-            LlmError::NetworkError => (
-                "LLM_NETWORK_ERROR",
-                "网络错误，请检查网络连接",
-                true,
-            ),
-            LlmError::StreamInterrupted => (
-                "LLM_STREAM_INTERRUPTED",
-                "流式输出意外中断，请重试",
-                true,
-            ),
+            LlmError::NetworkTimeout => ("LLM_NETWORK_TIMEOUT", "连接超时，请检查网络连接", true),
+            LlmError::NetworkError => ("LLM_NETWORK_ERROR", "网络错误，请检查网络连接", true),
+            LlmError::StreamInterrupted => {
+                ("LLM_STREAM_INTERRUPTED", "流式输出意外中断，请重试", true)
+            }
             LlmError::InvalidJsonResponse => (
                 "LLM_INVALID_JSON_RESPONSE",
                 "模型返回的结构化数据不合法，已保留原始结果",
@@ -92,9 +76,7 @@ impl From<LlmError> for AppErrorDto {
                 "该功能不被当前 Provider 支持",
                 false,
             ),
-            LlmError::ProviderError(ref msg) => {
-                ("LLM_PROVIDER_ERROR", msg.as_str(), false)
-            }
+            LlmError::ProviderError(ref msg) => ("LLM_PROVIDER_ERROR", msg.as_str(), false),
         };
         let detail = match &e {
             LlmError::ProviderError(msg) => Some(msg.clone()),

@@ -50,7 +50,9 @@ pub async fn list_character_relationships(
     character_id: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<Vec<crate::services::character_service::CharacterRelationship>, AppErrorDto> {
-    state.relationship_service.list(&project_root, character_id.as_deref())
+    state
+        .relationship_service
+        .list(&project_root, character_id.as_deref())
 }
 
 #[tauri::command]

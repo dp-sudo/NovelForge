@@ -63,9 +63,13 @@ impl GlossaryService {
                     updated_at: row.get(10)?,
                 })
             })
-            .map_err(|e| AppErrorDto::new("QUERY_FAILED", "查询名词失败", true).with_detail(e.to_string()))?
+            .map_err(|e| {
+                AppErrorDto::new("QUERY_FAILED", "查询名词失败", true).with_detail(e.to_string())
+            })?
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| AppErrorDto::new("QUERY_FAILED", "查询名词失败", true).with_detail(e.to_string()))?;
+            .map_err(|e| {
+                AppErrorDto::new("QUERY_FAILED", "查询名词失败", true).with_detail(e.to_string())
+            })?;
         Ok(terms)
     }
 

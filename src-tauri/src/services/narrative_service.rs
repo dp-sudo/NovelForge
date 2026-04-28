@@ -121,8 +121,7 @@ impl NarrativeService {
             ],
         )
         .map_err(|e| {
-            AppErrorDto::new("INSERT_FAILED", "创建叙事义务失败", true)
-                .with_detail(e.to_string())
+            AppErrorDto::new("INSERT_FAILED", "创建叙事义务失败", true).with_detail(e.to_string())
         })?;
         Ok(id)
     }
@@ -157,8 +156,7 @@ impl NarrativeService {
             params![id],
         )
         .map_err(|e| {
-            AppErrorDto::new("DELETE_FAILED", "删除叙事义务失败", true)
-                .with_detail(e.to_string())
+            AppErrorDto::new("DELETE_FAILED", "删除叙事义务失败", true).with_detail(e.to_string())
         })?;
         Ok(())
     }
@@ -170,8 +168,8 @@ mod tests {
     use std::path::PathBuf;
     use uuid::Uuid;
 
-    use crate::services::project_service::{CreateProjectInput, ProjectService};
     use super::{CreateObligationInput, NarrativeService};
+    use crate::services::project_service::{CreateProjectInput, ProjectService};
 
     fn create_temp_workspace() -> PathBuf {
         let w = std::env::temp_dir().join(format!("novelforge-rust-tests-{}", Uuid::new_v4()));

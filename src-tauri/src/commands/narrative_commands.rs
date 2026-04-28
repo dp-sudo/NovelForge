@@ -28,7 +28,9 @@ pub async fn update_obligation_status(
     status: String,
     state: State<'_, AppState>,
 ) -> Result<(), AppErrorDto> {
-    state.narrative_service.update_status(&project_root, &id, &status)
+    state
+        .narrative_service
+        .update_status(&project_root, &id, &status)
 }
 
 #[tauri::command]
