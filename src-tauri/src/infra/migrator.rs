@@ -37,10 +37,16 @@ fn project_migrations() -> Vec<Migration> {
 
 /// Return the ordered list of app-db migrations embedded at compile time.
 fn app_migrations() -> Vec<Migration> {
-    vec![Migration {
-        version: "0001_init",
-        sql: include_str!("../../migrations/app/0001_init.sql"),
-    }]
+    vec![
+        Migration {
+            version: "0001_init",
+            sql: include_str!("../../migrations/app/0001_init.sql"),
+        },
+        Migration {
+            version: "0002_skill_index",
+            sql: include_str!("../../migrations/app/0002_skill_index.sql"),
+        },
+    ]
 }
 
 /// Run all pending project-db migrations on the given connection.

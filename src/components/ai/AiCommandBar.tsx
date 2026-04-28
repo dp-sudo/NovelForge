@@ -1,58 +1,79 @@
-import { useState } from "react";
-
-interface AiCommand {
-  id: string;
-  label: string;
-  taskType: string;
-}
-
-const COMMANDS: AiCommand[] = [
-  { id: "draft", label: "生成草稿", taskType: "generate_chapter_draft" },
-  { id: "plan", label: "章节计划", taskType: "chapter_plan" },
-  { id: "continue", label: "续写", taskType: "continue_chapter" },
-  { id: "rewrite", label: "改写", taskType: "rewrite_selection" },
-  { id: "naturalize", label: "去 AI 味", taskType: "deai_text" },
-  { id: "check", label: "检查", taskType: "scan_consistency" }
-];
+import { useEffect, useState } from "react";
+import { listSkills, type SkillManifest } from "../../api/skillsApi.js";
 
 interface AiCommandBarProps {
   onCommand: (taskType: string, userInstruction: string) => void;
   disabled: boolean;
 }
 
+const CATEGORY_LABELS: Record<string, string> = {
+  writing: "写作",
+  character: "角色",
+  world: "世界观",
+  plot: "剧情",
+  review: "审稿",
+  utility: "工具",
+};
+
+const CATEGORY_ORDER = ["writing", "character", "world", "plot", "review", "utility"];
+
+/** Skills whose IDs are excluded from the command bar (internal skills). */
+const HIDDEN_SKILLS = new Set(["context.collect", "import.extract_assets"]);
+
 export function AiCommandBar({ onCommand, disabled }: AiCommandBarProps) {
-  const [activeCommand, setActiveCommand] = useState<string | null>(null);
+  const [skills, setSkills] = useState<SkillManifest[]>([]);
+  const [activeId, setActiveId] = useState<string | null>(null);
   const [instruction, setInstruction] = useState("");
 
-  function handleCommand(cmd: AiCommand) {
-    setActiveCommand(cmd.id);
-    if (!instruction.trim()) {
-      onCommand(cmd.taskType, cmd.label);
-    } else {
-      onCommand(cmd.taskType, instruction);
-    }
+  useEffect(() => {
+    listSkills().then((list) => {
+      setSkills(list.filter((s) => !HIDDEN_SKILLS.has(s.id)));
+    }).catch(() => {});
+  }, []);
+
+  function handleCommand(skill: SkillManifest) {
+    setActiveId(skill.id);
+    const userMsg = instruction.trim() || skill.name;
+    onCommand(skill.id, userMsg);
     setInstruction("");
   }
 
+  // Group by category preserving order
+  const groups = CATEGORY_ORDER
+    .map((cat) => ({
+      category: cat,
+      label: CATEGORY_LABELS[cat] || cat,
+      skills: skills.filter((s) => s.category === cat),
+    }))
+    .filter((g) => g.skills.length > 0);
+
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex gap-2">
-        {COMMANDS.map((cmd) => (
-          <button
-            key={cmd.id}
-            onClick={() => handleCommand(cmd)}
-            disabled={disabled}
-            className={`px-3 py-1.5 text-xs rounded-lg transition-colors disabled:opacity-40 ${
-              activeCommand === cmd.id
-                ? "bg-primary/20 text-primary border border-primary/30"
-                : "bg-surface-700 text-surface-300 border border-surface-600 hover:bg-surface-600"
-            }`}
-          >
-            {cmd.label}
-          </button>
-        ))}
-      </div>
-      <div className="flex gap-2">
+      {groups.map((group) => (
+        <div key={group.category}>
+          <p className="text-[10px] font-medium text-surface-500 uppercase tracking-wider mb-1.5">
+            {group.label}
+          </p>
+          <div className="flex gap-1.5 flex-wrap">
+            {group.skills.map((skill) => (
+              <button
+                key={skill.id}
+                onClick={() => handleCommand(skill)}
+                disabled={disabled}
+                className={`inline-flex items-center gap-1 px-2.5 py-1.5 text-xs rounded-lg transition-colors disabled:opacity-40 ${
+                  activeId === skill.id
+                    ? "bg-primary/20 text-primary border border-primary/30"
+                    : "bg-surface-700 text-surface-300 border border-surface-600 hover:bg-surface-600"
+                }`}
+              >
+                {skill.icon && <span>{skill.icon}</span>}
+                {skill.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
+      <div className="flex gap-2 mt-1">
         <input
           type="text"
           value={instruction}

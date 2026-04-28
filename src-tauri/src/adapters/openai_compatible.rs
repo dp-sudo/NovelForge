@@ -32,10 +32,12 @@ impl OpenAiCompatibleAdapter {
         if !path.starts_with('/') {
             path = format!("/{}", path);
         }
-        if base.ends_with("/v1") && path.starts_with("/v1/") {
-            return format!("{}{}", base, &path[3..]);
+        let mut url = format!("{}{}", base, path);
+        // Deduplicate /v1/v1 when base already contains /v1 and endpoint also starts with /v1/
+        while url.contains("/v1/v1") {
+            url = url.replace("/v1/v1", "/v1");
         }
-        format!("{}{}", base, path)
+        url
     }
 
     fn endpoint_url(&self) -> String {
@@ -43,14 +45,14 @@ impl OpenAiCompatibleAdapter {
             .config
             .endpoint_path
             .as_deref()
-            .unwrap_or("/v1/chat/completions");
+            .unwrap_or("/chat/completions");
         Self::join_url(&self.config.base_url, path)
     }
 
     fn models_url(&self) -> String {
         Self::join_url(
             &self.config.base_url,
-            self.config.models_path.as_deref().unwrap_or("/v1/models"),
+            self.config.models_path.as_deref().unwrap_or("/models"),
         )
     }
 
@@ -219,6 +221,7 @@ impl OpenAiCompatibleAdapter {
             finish_reason,
             request_id,
             error: None,
+            reasoning: None,
         })
     }
 
@@ -352,28 +355,55 @@ impl LlmService for OpenAiCompatibleAdapter {
     }
 
     async fn test_connection(&self) -> Result<(), LlmError> {
+        // Try GET /models first — fast path, doesn't need a specific model name
         let models_url = self.models_url();
-        let (header_name, header_value) = self.auth_header()?;
+        let (header_name, header_value) = match self.auth_header() {
+            Ok(v) => v,
+            Err(e) => return Err(LlmError::ProviderError(format!("Auth error: {}", e.user_message()))),
+        };
 
-        let response = self
+        let models_response = self
             .client
             .get(&models_url)
+            .header(header_name, header_value.clone())
+            .send()
+            .await;
+        if let Ok(resp) = &models_response {
+            if resp.status().is_success() {
+                return Ok(());
+            }
+        }
+
+        // Fallback: send a minimal chat ping to verify end-to-end connectivity.
+        let chat_url = self.endpoint_url();
+        let model = self.config.default_model.as_deref().unwrap_or("gpt-3.5-turbo");
+        let ping_body = serde_json::json!({
+            "model": model,
+            "messages": [{"role": "user", "content": "ping"}],
+            "max_tokens": 5,
+            "stream": false
+        });
+
+        let chat_response = self
+            .client
+            .post(&chat_url)
             .header(header_name, header_value)
+            .json(&ping_body)
             .send()
             .await
             .map_err(|e| {
                 if e.is_timeout() {
                     LlmError::NetworkTimeout
                 } else {
-                    LlmError::NetworkError
+                    LlmError::ProviderError(format!("连接失败 ({}): {}", chat_url, e))
                 }
             })?;
 
-        if response.status().is_success() {
+        if chat_response.status().is_success() {
             Ok(())
         } else {
-            let status = response.status();
-            let body: serde_json::Value = response.json().await.unwrap_or_default();
+            let status = chat_response.status();
+            let body: serde_json::Value = chat_response.json().await.unwrap_or_default();
             Err(self.map_http_error(status, &body))
         }
     }

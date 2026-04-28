@@ -6,8 +6,47 @@ mod infra;
 mod services;
 mod state;
 
+use std::path::PathBuf;
 use state::AppState;
 use tauri::Manager;
+
+/// Resolve the builtin skills directory from multiple possible locations.
+fn resolve_builtin_skills_dir(app: &tauri::App) -> PathBuf {
+    // 1. Try Tauri's resource directory (production bundles)
+    if let Ok(path) = app.path().resolve("resources/builtin-skills", tauri::path::BaseDirectory::Resource) {
+        if path.exists() {
+            return path;
+        }
+    }
+    // 2. Try relative to the resource dir
+    if let Ok(dir) = app.path().resource_dir() {
+        let path = dir.join("resources/builtin-skills");
+        if path.exists() {
+            return path;
+        }
+        let path2 = dir.join("builtin-skills");
+        if path2.exists() {
+            return path2;
+        }
+    }
+    // 3. Try relative to the current working directory (dev mode via cargo run)
+    if let Ok(cwd) = std::env::current_dir() {
+        let candidates = [
+            cwd.join("resources/builtin-skills"),
+            cwd.join("../resources/builtin-skills"),
+            cwd.join("src-tauri/../resources/builtin-skills"),
+            PathBuf::from("../resources/builtin-skills"),
+            PathBuf::from("resources/builtin-skills"),
+        ];
+        for p in &candidates {
+            if p.exists() {
+                return p.clone();
+            }
+        }
+    }
+    // Fallback
+    PathBuf::from("resources/builtin-skills")
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -27,42 +66,59 @@ pub fn run() {
             app.handle()
                 .plugin(tauri_plugin_updater::Builder::new().build())?;
 
-            // ══ Deferred provider preload (best-effort, never blocks startup) ══
+            // ══ 1. Initialize SkillRegistry & manage AppState FIRST ══
+            let app_data_dir = match crate::infra::app_database::app_dir() {
+                Ok(d) => d,
+                Err(e) => {
+                    log::warn!("[SKILLS] Cannot determine app dir: {}", e.message);
+                    let builtin_dir = resolve_builtin_skills_dir(app);
+                    let reg = crate::services::skill_registry::SkillRegistry::new(builtin_dir.clone(), builtin_dir);
+                    let _ = reg.reload();
+                    app.manage(AppState::new(reg));
+                    return Ok(());
+                }
+            };
+            let builtin_dir = resolve_builtin_skills_dir(app);
+            match crate::services::skill_registry::initialize_global_registry(&app_data_dir, &builtin_dir) {
+                Ok(reg) => {
+                    log::info!("[SKILLS] Initialized with {} skill(s)", reg.list_skills().map(|l| l.len()).unwrap_or(0));
+                    app.manage(AppState::new(reg));
+                }
+                Err(e) => {
+                    log::warn!("[SKILLS] Init failed: {} — using fallback", e.message);
+                    let reg = crate::services::skill_registry::SkillRegistry::new(builtin_dir.clone(), builtin_dir);
+                    let _ = reg.reload();
+                    app.manage(AppState::new(reg));
+                }
+            }
+
+            // ══ 2. Deferred provider preload (state is now safe to access) ══
             let ai_service = app.state::<AppState>().ai_service.clone();
-            tokio::spawn(async move {
-                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-                match crate::infra::app_database::open_or_create() {
-                    Ok(conn) => {
-                        match crate::infra::app_database::load_all_providers(&conn) {
-                            Ok(providers) => {
+            std::thread::spawn(move || {
+                let rt = tokio::runtime::Runtime::new().unwrap();
+                rt.block_on(async move {
+                    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                    match crate::infra::app_database::open_or_create() {
+                        Ok(conn) => {
+                            if let Ok(providers) = crate::infra::app_database::load_all_providers(&conn) {
                                 let count = providers.len();
                                 for provider in &providers {
                                     if let Err(e) = ai_service.reload_provider(&provider.id).await {
-                                        log::warn!(
-                                            "[PRELOAD] Failed to reload provider '{}': {}",
-                                            provider.id,
-                                            e.message
-                                        );
+                                        log::warn!("[PRELOAD] Failed to reload provider '{}': {}", provider.id, e.message);
                                     }
                                 }
                                 if count > 0 {
                                     log::info!("[PRELOAD] Pre-loaded {} provider adapter(s)", count);
                                 }
                             }
-                            Err(e) => {
-                                log::warn!("[PRELOAD] Cannot list providers: {}", e.message);
-                            }
                         }
+                        Err(e) => log::warn!("[PRELOAD] Cannot open app database: {}", e.message),
                     }
-                    Err(e) => {
-                        log::warn!("[PRELOAD] Cannot open app database: {}", e.message);
-                    }
-                }
+                });
             });
 
             Ok(())
         })
-        .manage(AppState::default())
         .invoke_handler(tauri::generate_handler![
             commands::project_commands::validate_project,
             commands::project_commands::create_project,
@@ -127,7 +183,15 @@ pub fn run() {
             commands::ai_commands::stream_ai_chapter_task,
             commands::ai_commands::register_ai_provider,
             commands::ai_commands::test_ai_connection,
-            commands::ai_commands::list_skills,
+            commands::skill_commands::list_skills,
+            commands::skill_commands::get_skill,
+            commands::skill_commands::get_skill_content,
+            commands::skill_commands::create_skill,
+            commands::skill_commands::update_skill,
+            commands::skill_commands::delete_skill,
+            commands::skill_commands::import_skill_file,
+            commands::skill_commands::reset_builtin_skill,
+            commands::skill_commands::refresh_skills,
             commands::ai_commands::generate_blueprint_suggestion,
             commands::ai_commands::ai_generate_character,
             commands::ai_commands::ai_scan_consistency,

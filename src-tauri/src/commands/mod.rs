@@ -13,4 +13,5 @@ pub mod plot_commands;
 pub mod project_commands;
 pub mod search_commands;
 pub mod settings_commands;
+pub mod skill_commands;
 pub mod world_commands;

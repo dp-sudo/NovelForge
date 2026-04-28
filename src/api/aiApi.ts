@@ -7,6 +7,7 @@ export interface AiStreamEvent {
   type: "start" | "delta" | "done" | "error";
   delta?: string;
   error?: string;
+  reasoning?: string;
 }
 
 /**
@@ -122,13 +123,16 @@ export async function* streamAiChapterTask(
 ): AsyncGenerator<AiStreamEvent> {
   const requestId = await invokeCommand<string>("stream_ai_chapter_task", { input });
 
-  yield* createEventStream<{ content: string; finishReason: string | null; requestId: string; error?: string }>(
+  yield* createEventStream<{ content: string; finishReason: string | null; requestId: string; error?: string; reasoning?: string }>(
     requestId,
     `ai:stream-chunk:${requestId}`,
     `ai:stream-done:${requestId}`,
     (payload) => {
       if (payload.error) {
         return { requestId, type: "error", error: payload.error };
+      }
+      if (payload.reasoning) {
+        return { requestId, type: "delta", reasoning: payload.reasoning };
       }
       if (payload.content) {
         return { requestId, type: "delta", delta: payload.content };
@@ -157,13 +161,16 @@ export async function* streamAiGenerate(
     }
   });
 
-  yield* createEventStream<{ content: string; finishReason: string | null; requestId: string; error?: string }>(
+  yield* createEventStream<{ content: string; finishReason: string | null; requestId: string; error?: string; reasoning?: string }>(
     requestId,
     `ai:stream-chunk:${requestId}`,
     `ai:stream-done:${requestId}`,
     (payload) => {
       if (payload.error) {
         return { requestId, type: "error", error: payload.error };
+      }
+      if (payload.reasoning) {
+        return { requestId, type: "delta", reasoning: payload.reasoning };
       }
       if (payload.content) {
         return { requestId, type: "delta", delta: payload.content };

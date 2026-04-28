@@ -12,6 +12,7 @@ use crate::errors::AppErrorDto;
 use crate::infra::database::open_database;
 use crate::infra::time::now_iso;
 use crate::infra::{app_database, credential_manager};
+use crate::services::skill_registry::{SkillRegistry, SkillTaskRouteOverride};
 
 #[derive(Clone)]
 pub struct AiService {
@@ -105,16 +106,24 @@ impl AiService {
     fn resolve_route(task_type: &str) -> Result<(String, String, Option<TaskRoute>), AppErrorDto> {
         let conn = app_database::open_or_create()?;
         let routes = app_database::load_task_routes(&conn)?;
-        let route = routes.into_iter().find(|r| r.task_type == task_type);
 
-        match route {
-            Some(r) => Ok((r.provider_id.clone(), r.model_id.clone(), Some(r))),
-            None => Err(AppErrorDto::new(
-                "TASK_ROUTE_NOT_FOUND",
-                &format!("No route configured for task type '{}'", task_type),
-                true,
-            )),
+        // First try exact match
+        if let Some(r) = routes.iter().find(|r| r.task_type == task_type) {
+            return Ok((r.provider_id.clone(), r.model_id.clone(), Some(r.clone())));
         }
+
+        // For "custom" with no dedicated route, use the first available route
+        if task_type == "custom" {
+            if let Some(first) = routes.first() {
+                return Ok((first.provider_id.clone(), first.model_id.clone(), Some(first.clone())));
+            }
+        }
+
+        Err(AppErrorDto::new(
+            "TASK_ROUTE_NOT_FOUND",
+            &format!("No route configured for task type '{}'. 请先在「任务路由」中配置至少一个 Provider。", task_type),
+            true,
+        ))
     }
 
     fn resolve_request_target(
@@ -139,12 +148,57 @@ impl AiService {
         Ok((provider_id, model, None))
     }
 
+    /// Resolve target with skill taskRoute override support.
+    /// If the req.task_type matches a skill with a taskRoute override,
+    /// the override's provider_id / model_id take precedence.
+    fn resolve_with_skill_override(
+        req: &UnifiedGenerateRequest,
+        skill_registry: &SkillRegistry,
+    ) -> Result<(String, String, Option<TaskRoute>), AppErrorDto> {
+        // Check if a skill with taskRoute override exists
+        if let Some(ref task_type) = req.task_type {
+            if let Ok(Some(skill)) = skill_registry.get_skill(task_type) {
+                if let Some(ref route_override) = skill.task_route {
+                    let pid = if route_override.provider_id.is_empty() {
+                        // No override → use global route
+                        return Self::resolve_request_target(req);
+                    } else {
+                        route_override.provider_id.clone()
+                    };
+                    let mid = if route_override.model_id.is_empty() {
+                        "default".to_string()
+                    } else {
+                        route_override.model_id.clone()
+                    };
+                    let fake_route = TaskRoute {
+                        id: String::new(),
+                        task_type: route_override.task_type.clone(),
+                        provider_id: pid.clone(),
+                        model_id: mid.clone(),
+                        fallback_provider_id: None,
+                        fallback_model_id: None,
+                        max_retries: 1,
+                        created_at: None,
+                        updated_at: None,
+                    };
+                    return Ok((pid, mid, Some(fake_route)));
+                }
+            }
+        }
+        Self::resolve_request_target(req)
+    }
+
     /// Execute text generation with task routing + fallback.
+    /// Optionally accepts a SkillRegistry for skill taskRoute override support.
     pub async fn generate_text(
         &self,
         req: UnifiedGenerateRequest,
+        skill_registry: Option<&SkillRegistry>,
     ) -> Result<UnifiedGenerateResponse, AppErrorDto> {
-        let (provider_id, model, route) = Self::resolve_request_target(&req)?;
+        let (provider_id, model, route) = match skill_registry {
+            Some(reg) => Self::resolve_with_skill_override(&req, reg)?,
+            None => Self::resolve_request_target(&req)?,
+        };
 
         let retries = route.as_ref().map(|r| r.max_retries).unwrap_or(1);
         let fallback_ids = route.as_ref().and_then(|r| {
@@ -203,11 +257,16 @@ impl AiService {
 
     /// Start streaming generation with task routing.
     /// Returns an mpsc receiver that yields StreamChunks.
+    /// Optionally accepts a SkillRegistry for skill taskRoute override support.
     pub async fn stream_generate(
         &self,
         req: UnifiedGenerateRequest,
+        skill_registry: Option<&SkillRegistry>,
     ) -> Result<mpsc::Receiver<StreamChunk>, AppErrorDto> {
-        let (provider_id, model, route) = Self::resolve_request_target(&req)?;
+        let (provider_id, model, route) = match skill_registry {
+            Some(reg) => Self::resolve_with_skill_override(&req, reg)?,
+            None => Self::resolve_request_target(&req)?,
+        };
         let fallback = route.as_ref().and_then(|r| {
             r.fallback_provider_id
                 .as_ref()
@@ -233,6 +292,7 @@ impl AiService {
                             finish_reason: None,
                             request_id: String::new(),
                             error: Some(e.message),
+                            reasoning: None,
                         })
                         .await;
                     continue;
@@ -252,6 +312,7 @@ impl AiService {
                                     finish_reason: None,
                                     request_id: String::new(),
                                     error: Some(e.user_message()),
+                                    reasoning: None,
                                 })
                                 .await;
                             continue;
@@ -264,8 +325,10 @@ impl AiService {
                             finish_reason: None,
                             request_id: String::new(),
                             error: Some(format!("Provider '{}' 未注册", attempt_provider)),
+                            reasoning: None,
                         })
                         .await;
+                    continue;
                 }
             }
         });

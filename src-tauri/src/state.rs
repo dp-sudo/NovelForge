@@ -1,3 +1,6 @@
+use std::sync::Arc;
+use std::sync::RwLock;
+
 use crate::services::ai_service::AiService;
 use crate::services::backup_service::BackupService;
 use crate::services::blueprint_service::BlueprintService;
@@ -22,7 +25,6 @@ use crate::services::skill_registry::SkillRegistry;
 use crate::services::vector_service::VectorService;
 use crate::services::world_service::WorldService;
 
-#[derive(Default)]
 pub struct AppState {
     pub ai_service: AiService,
     pub backup_service: BackupService,
@@ -46,7 +48,39 @@ pub struct AppState {
     pub project_service: ProjectService,
     pub search_service: SearchService,
     pub settings_service: SettingsService,
-    pub skill_registry: SkillRegistry,
+    pub skill_registry: Arc<RwLock<SkillRegistry>>,
     pub vector_service: VectorService,
     pub world_service: WorldService,
+}
+
+impl AppState {
+    pub fn new(skill_registry: SkillRegistry) -> Self {
+        Self {
+            skill_registry: Arc::new(RwLock::new(skill_registry)),
+            ai_service: AiService::default(),
+            backup_service: BackupService::default(),
+            blueprint_service: BlueprintService::default(),
+            chapter_service: ChapterService::default(),
+            volume_service: VolumeService::default(),
+            character_service: CharacterService::default(),
+            import_service: ImportService::default(),
+            relationship_service: RelationshipService::default(),
+            consistency_service: ConsistencyService::default(),
+            context_service: ContextService::default(),
+            dashboard_service: DashboardService::default(),
+            export_service: ExportService::default(),
+            git_service: GitService::default(),
+            glossary_service: GlossaryService::default(),
+            integrity_service: IntegrityService::default(),
+            license_service: LicenseService::default(),
+            model_registry_service: ModelRegistryService::default(),
+            narrative_service: NarrativeService::default(),
+            plot_service: PlotService::default(),
+            project_service: ProjectService::default(),
+            search_service: SearchService::default(),
+            settings_service: SettingsService::default(),
+            vector_service: VectorService::default(),
+            world_service: WorldService::default(),
+        }
+    }
 }

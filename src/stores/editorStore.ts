@@ -14,6 +14,7 @@ export interface EditorState {
   wordCount: number;
   aiStreamStatus: AiStreamStatus;
   aiPreviewContent: string;
+  aiStreamError: string | null;
   aiRequestId: string | null;
   aiTaskType: string;
   setActiveChapter: (id: string, title: string) => void;
@@ -25,6 +26,7 @@ export interface EditorState {
   setAiStreamStatus: (status: AiStreamStatus) => void;
   setAiPreviewContent: (content: string) => void;
   appendAiPreviewContent: (delta: string) => void;
+  setAiStreamError: (error: string | null) => void;
   setAiRequestId: (id: string | null) => void;
   setAiTaskType: (taskType: string) => void;
   resetAiPreview: () => void;
@@ -41,6 +43,7 @@ const initialState = {
   wordCount: 0,
   aiStreamStatus: "idle" as AiStreamStatus,
   aiPreviewContent: "",
+  aiStreamError: null,
   aiRequestId: null,
   aiTaskType: ""
 };
@@ -58,12 +61,14 @@ export const useEditorStore = create<EditorState>((set) => ({
   setAiPreviewContent: (content) => set({ aiPreviewContent: content }),
   appendAiPreviewContent: (delta) =>
     set((s) => ({ aiPreviewContent: s.aiPreviewContent + delta })),
+  setAiStreamError: (error) => set({ aiStreamError: error }),
   setAiRequestId: (id) => set({ aiRequestId: id }),
   setAiTaskType: (taskType) => set({ aiTaskType: taskType }),
   resetAiPreview: () =>
     set({
       aiStreamStatus: "idle",
       aiPreviewContent: "",
+      aiStreamError: null,
       aiRequestId: null,
       aiTaskType: ""
     }),

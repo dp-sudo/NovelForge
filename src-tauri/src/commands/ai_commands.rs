@@ -7,8 +7,9 @@ use crate::adapters::{
 };
 use crate::errors::AppErrorDto;
 use crate::services::ai_service::{AiService, GeneratePreviewInput};
-use crate::services::context_service::ContextService;
+use crate::services::context_service::{CollectedContext, ContextService};
 use crate::services::prompt_builder::PromptBuilder;
+use crate::services::skill_registry::SkillRegistry;
 use crate::state::AppState;
 
 // ── Legacy preview command ──
@@ -41,19 +42,9 @@ pub async fn generate_ai_preview(
         }
     };
 
-    let prompt = match input.task_type.as_str() {
-        "chapter_continue" | "continue_chapter" => PromptBuilder::build_continue(
-            &context,
-            input.selected_text.as_deref().unwrap_or(""),
-            &input.user_instruction,
-        ),
-        "chapter_rewrite" | "rewrite_selection" => PromptBuilder::build_rewrite(
-            &context,
-            input.selected_text.as_deref().unwrap_or(""),
-            &input.user_instruction,
-        ),
-        _ => PromptBuilder::build_chapter_draft(&context, &input.user_instruction),
-    };
+    let prompt = resolve_or_build_prompt(&state, &context, &input.task_type,
+        input.selected_text.as_deref().unwrap_or(""),
+        &input.user_instruction)?;
 
     let request_id = Uuid::new_v4().to_string();
     let used_context = vec![
@@ -80,7 +71,7 @@ pub async fn generate_ai_preview(
         ..Default::default()
     };
 
-    match state.ai_service.generate_text(req).await {
+    match state.ai_service.generate_text(req, None).await {
         Ok(resp) => {
             let preview = resp
                 .choices
@@ -145,26 +136,10 @@ pub async fn stream_ai_chapter_task(
         .context_service
         .collect_chapter_context(&input.project_root, &input.chapter_id)?;
 
-    // 2. Build prompt based on task type
-    let prompt = match input.task_type.as_str() {
-        "chapter_continue" | "continue_chapter" => PromptBuilder::build_continue(
-            &context,
-            input.selected_text.as_deref().unwrap_or(""),
-            &input.user_instruction,
-        ),
-        "chapter_rewrite" | "rewrite_selection" => PromptBuilder::build_rewrite(
-            &context,
-            input.selected_text.as_deref().unwrap_or(""),
-            &input.user_instruction,
-        ),
-        "prose_naturalize" | "deai_text" => {
-            PromptBuilder::build_naturalize(&context, input.selected_text.as_deref().unwrap_or(""))
-        }
-        "chapter_plan" | "plan_chapter" => {
-            PromptBuilder::build_chapter_plan(&context, &input.user_instruction)
-        }
-        _ => PromptBuilder::build_chapter_draft(&context, &input.user_instruction),
-    };
+    // 2. Build prompt (try skill Markdown first, fallback to PromptBuilder)
+    let prompt = resolve_or_build_prompt(&state, &context, &input.task_type,
+        input.selected_text.as_deref().unwrap_or(""),
+        &input.user_instruction)?;
 
     // 3. Build unified request with task routing
     let req = UnifiedGenerateRequest {
@@ -184,7 +159,7 @@ pub async fn stream_ai_chapter_task(
 
     // 4. Start streaming
     let request_id = Uuid::new_v4().to_string();
-    let mut rx = state.ai_service.stream_generate(req).await?;
+    let mut rx = state.ai_service.stream_generate(req, None).await?;
 
     // 5. Log AI request
     let preview = input.user_instruction.chars().take(120).collect::<String>();
@@ -226,7 +201,7 @@ pub async fn stream_ai_generate(
     let event_prefix = format!("ai:stream-chunk:{}", request_id);
     let done_event = format!("ai:stream-done:{}", request_id);
 
-    let mut rx = state.ai_service.stream_generate(req).await?;
+    let mut rx = state.ai_service.stream_generate(req, None).await?;
 
     tokio::spawn(async move {
         while let Some(chunk) = rx.recv().await {
@@ -257,15 +232,6 @@ pub async fn test_ai_connection(
     state: State<'_, AppState>,
 ) -> Result<(), AppErrorDto> {
     state.ai_service.test_connection(&provider_id).await
-}
-
-// ── List built-in skills ──
-
-#[tauri::command]
-pub async fn list_skills(
-    state: State<'_, AppState>,
-) -> Result<Vec<crate::services::skill_registry::SkillManifest>, AppErrorDto> {
-    Ok(state.skill_registry.list_skills().to_vec())
 }
 
 // ── Blueprint AI suggestion (non-streaming) ──
@@ -325,7 +291,7 @@ pub async fn generate_blueprint_suggestion(
         ..Default::default()
     };
 
-    match state.ai_service.generate_text(req).await {
+    match state.ai_service.generate_text(req, None).await {
         Ok(resp) => {
             let text = resp
                 .choices
@@ -385,7 +351,7 @@ pub async fn ai_generate_character(
         ..Default::default()
     };
 
-    match state.ai_service.generate_text(req).await {
+    match state.ai_service.generate_text(req, None).await {
         Ok(resp) => {
             let text = resp
                 .choices
@@ -445,7 +411,7 @@ pub async fn ai_generate_world_rule(
         ..Default::default()
     };
 
-    match state.ai_service.generate_text(req).await {
+    match state.ai_service.generate_text(req, None).await {
         Ok(resp) => {
             let text = resp
                 .choices
@@ -505,7 +471,7 @@ pub async fn ai_generate_plot_node(
         ..Default::default()
     };
 
-    match state.ai_service.generate_text(req).await {
+    match state.ai_service.generate_text(req, None).await {
         Ok(resp) => {
             let text = resp
                 .choices
@@ -566,7 +532,7 @@ pub async fn ai_scan_consistency(
         ..Default::default()
     };
 
-    match state.ai_service.generate_text(req).await {
+    match state.ai_service.generate_text(req, None).await {
         Ok(resp) => {
             let text = resp
                 .choices
@@ -578,4 +544,103 @@ pub async fn ai_scan_consistency(
         }
         Err(e) => Err(e),
     }
+}
+
+/// Resolve a prompt from Skill Markdown, falling back to PromptBuilder.
+fn resolve_or_build_prompt(
+    state: &State<'_, AppState>,
+    context: &CollectedContext,
+    task_type: &str,
+    selected_text: &str,
+    user_instruction: &str,
+) -> Result<String, AppErrorDto> {
+    let skill_id = match task_type {
+        "generate_chapter_draft" | "chapter_draft" | "draft" => "chapter.draft",
+        "continue_chapter" | "chapter_continue" | "continue_draft" => "chapter.continue",
+        "rewrite_selection" | "chapter_rewrite" => "chapter.rewrite",
+        "deai_text" | "prose_naturalize" => "prose.naturalize",
+        "chapter_plan" | "plan_chapter" => "chapter.plan",
+        "scan_consistency" | "consistency_scan" => "consistency.scan",
+        "blueprint_generate" | "blueprint.generate_step" => "blueprint.generate_step",
+        "character_create" | "character.create" => "character.create",
+        "world_create_rule" | "world.create_rule" => "world.create_rule",
+        "plot_create_node" | "plot.create_node" => "plot.create_node",
+        _ => task_type,
+    };
+
+    // Try loading from Skill Markdown
+    if let Ok(guard) = state.skill_registry.read() {
+        if let Ok(Some(content)) = guard.read_skill_content(skill_id) {
+            let context_str = context_to_string(context, selected_text, user_instruction);
+            let rendered = content
+                .replace("{projectContext}", &context_str)
+                .replace("{userInstruction}", user_instruction)
+                .replace("{selectedText}", selected_text);
+            return Ok(rendered);
+        }
+    }
+
+    // Fallback to PromptBuilder
+    let prompt = match task_type {
+        "chapter_continue" | "continue_chapter" | "chapter.continue" => {
+            PromptBuilder::build_continue(context, selected_text, user_instruction)
+        }
+        "chapter_rewrite" | "rewrite_selection" | "chapter.rewrite" => {
+            PromptBuilder::build_rewrite(context, selected_text, user_instruction)
+        }
+        "prose_naturalize" | "deai_text" | "prose.naturalize" => {
+            PromptBuilder::build_naturalize(context, selected_text)
+        }
+        "chapter_plan" | "plan_chapter" | "chapter.plan" => {
+            PromptBuilder::build_chapter_plan(context, user_instruction)
+        }
+        _ => PromptBuilder::build_chapter_draft(context, user_instruction),
+    };
+    Ok(prompt)
+}
+
+/// Render collected context into a string for Skill Markdown placeholders.
+fn context_to_string(
+    context: &CollectedContext,
+    _selected_text: &str,
+    _user_instruction: &str,
+) -> String {
+    let global = &context.global_context;
+    let related = &context.related_context;
+    let mut parts = vec![];
+
+    parts.push(format!("作品名称：{}", global.project_name));
+    parts.push(format!("题材：{}", global.genre));
+    if let Some(ref pov) = global.narrative_pov {
+        parts.push(format!("叙事视角：{}", pov));
+    }
+
+    for step in &global.blueprint_summary {
+        if step.status == "completed" {
+            if let Some(ref content) = step.content {
+                let preview: String = content.chars().take(200).collect();
+                parts.push(format!("[蓝图] {}: {}", step.title, preview));
+            }
+        }
+    }
+
+    if let Some(ref ch) = related.chapter {
+        parts.push(format!("章节：{}", ch.title));
+        if !ch.summary.is_empty() {
+            parts.push(format!("摘要：{}", ch.summary));
+        }
+    }
+
+    for node in &related.plot_nodes {
+        parts.push(format!("剧情节点：{}", node.title));
+    }
+    for ch in &related.characters {
+        parts.push(format!("角色：{}", ch.name));
+    }
+    for rule in &related.world_rules {
+        let preview: String = rule.description.chars().take(120).collect();
+        parts.push(format!("世界规则：{}", preview));
+    }
+
+    parts.join("\n")
 }

@@ -80,6 +80,7 @@ export function EditorPage() {
   const aiStreamStatus = useEditorStore((s) => s.aiStreamStatus);
   const aiPreviewContent = useEditorStore((s) => s.aiPreviewContent);
   const aiTaskType = useEditorStore((s) => s.aiTaskType);
+  const aiStreamError = useEditorStore((s) => s.aiStreamError);
   const store = useEditorStore();
   const projectRoot = useProjectStore((s) => s.currentProjectPath);
 
@@ -269,13 +270,17 @@ export function EditorPage() {
       for await (const event of stream) {
         if (event.type === "delta" && event.delta) {
           store.appendAiPreviewContent(event.delta);
+        } else if (event.type === "delta" && event.reasoning) {
+          store.setAiPreviewContent((store.getState().aiPreviewContent || "") + "[思考]");
         } else if (event.type === "done") {
           store.setAiStreamStatus("completed");
         } else if (event.type === "error") {
+          if (event.error) store.setAiStreamError(event.error);
           store.setAiStreamStatus("error");
         }
       }
     } catch {
+      store.setAiStreamError("AI 生成异常，请检查控制台日志");
       store.setAiStreamStatus("error");
     }
   }
@@ -596,6 +601,7 @@ export function EditorPage() {
           <AiPreviewPanel
             status={aiStreamStatus}
             content={aiPreviewContent}
+            errorMessage={aiStreamError}
             originalText={originalText}
             taskType={aiTaskType}
             onInsert={handleAiInsert}

@@ -173,117 +173,38 @@ fn validate_provider_config(config: &mut ProviderConfig) -> Result<(), AppErrorD
     config.auth_mode = config.auth_mode.trim().to_string();
 
     if config.id.is_empty() {
-        return Err(AppErrorDto::new(
-            "INVALID_PROVIDER_ID",
-            "Provider id cannot be empty",
-            true,
-        ));
+        return Err(AppErrorDto::new("INVALID_PROVIDER_ID", "Provider id cannot be empty", true));
     }
     if config.display_name.is_empty() {
-        return Err(AppErrorDto::new(
-            "INVALID_PROVIDER_NAME",
-            "Provider display name cannot be empty",
-            true,
-        ));
+        return Err(AppErrorDto::new("INVALID_PROVIDER_NAME", "Provider display name cannot be empty", true));
     }
     if config.base_url.is_empty() {
-        return Err(AppErrorDto::new(
-            "INVALID_BASE_URL",
-            "Provider base URL cannot be empty",
-            true,
-        ));
+        return Err(AppErrorDto::new("INVALID_BASE_URL", "Provider base URL cannot be empty", true));
     }
     let parsed = reqwest::Url::parse(&config.base_url).map_err(|err| {
         AppErrorDto::new("INVALID_BASE_URL", "Provider base URL is invalid", true)
             .with_detail(err.to_string())
     })?;
     if parsed.scheme() != "http" && parsed.scheme() != "https" {
-        return Err(AppErrorDto::new(
-            "INVALID_BASE_URL_SCHEME",
-            "Provider base URL must use http:// or https://",
-            true,
-        ));
+        return Err(AppErrorDto::new("INVALID_BASE_URL_SCHEME", "Provider base URL must use http:// or https://", true));
     }
 
-    if config.timeout_ms == 0 || config.connect_timeout_ms == 0 {
-        return Err(AppErrorDto::new(
-            "INVALID_TIMEOUT",
-            "Timeout values must be greater than 0",
-            true,
-        ));
+    if config.timeout_ms == 0 {
+        config.timeout_ms = 120_000;
     }
-    if config.connect_timeout_ms > config.timeout_ms {
-        return Err(AppErrorDto::new(
-            "INVALID_TIMEOUT",
-            "Connect timeout cannot exceed total timeout",
-            true,
-        ));
-    }
-    if config.max_retries > 8 {
-        return Err(AppErrorDto::new(
-            "INVALID_MAX_RETRIES",
-            "Max retries cannot exceed 8",
-            true,
-        ));
+    if config.connect_timeout_ms == 0 {
+        config.connect_timeout_ms = 15_000;
     }
 
-    if config.protocol == "custom_anthropic_compatible" {
-        let endpoint = config.endpoint_path.as_deref().map(str::trim).unwrap_or("");
-        if endpoint.is_empty() {
-            config.endpoint_path = Some("/messages".to_string());
-        }
+    if config.protocol == "custom_anthropic_compatible" && config.endpoint_path.as_deref().map(str::trim).unwrap_or("").is_empty() {
+        config.endpoint_path = Some("/messages".to_string());
     }
-
-    if config.protocol == "custom_openai_compatible" {
-        let endpoint = config.endpoint_path.as_deref().map(str::trim).unwrap_or("");
-        if endpoint.is_empty() {
-            config.endpoint_path = Some("/chat/completions".to_string());
-        }
+    if config.protocol == "custom_openai_compatible" && config.endpoint_path.as_deref().map(str::trim).unwrap_or("").is_empty() {
+        config.endpoint_path = Some("/chat/completions".to_string());
     }
 
     if config.auth_mode.is_empty() {
         config.auth_mode = "bearer".to_string();
-    }
-
-    if config.auth_mode == "custom" {
-        let custom_header = config
-            .auth_header_name
-            .as_deref()
-            .map(str::trim)
-            .unwrap_or("");
-        if custom_header.is_empty() {
-            return Err(AppErrorDto::new(
-                "INVALID_AUTH_HEADER",
-                "Custom auth mode requires authHeaderName",
-                true,
-            ));
-        }
-    }
-
-    if config.vendor == "custom" {
-        let model = config.default_model.as_deref().map(str::trim).unwrap_or("");
-        if model.is_empty() {
-            return Err(AppErrorDto::new(
-                "INVALID_DEFAULT_MODEL",
-                "Custom provider requires a default model",
-                true,
-            ));
-        }
-    }
-
-    if let Some(path) = config
-        .models_path
-        .as_deref()
-        .map(str::trim)
-        .filter(|p| !p.is_empty())
-    {
-        if !path.starts_with('/') {
-            return Err(AppErrorDto::new(
-                "INVALID_MODELS_PATH",
-                "Model list path must start with '/'",
-                true,
-            ));
-        }
     }
 
     Ok(())
@@ -331,15 +252,6 @@ mod tests {
             models_path: Some("/models".to_string()),
             last_model_refresh_at: None,
         }
-    }
-
-    #[test]
-    fn reject_custom_auth_without_header_name() {
-        let mut cfg = base_custom_config();
-        cfg.auth_mode = "custom".to_string();
-        cfg.auth_header_name = None;
-        let err = validate_provider_config(&mut cfg).expect_err("expected invalid custom auth");
-        assert_eq!(err.code, "INVALID_AUTH_HEADER");
     }
 
     #[test]

@@ -27,7 +27,8 @@
     "active": true,
     "targets": "all",
     "resources": [
-      "../resources/model-registry/llm-model-registry.json"
+      "../resources/model-registry/llm-model-registry.json",
+      "../resources/builtin-skills/*"
     ],
     "icon": [
       "icons/32x32.png",

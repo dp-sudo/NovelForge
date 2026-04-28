@@ -20,5 +20,6 @@ pub mod prompt_builder;
 pub mod search_service;
 pub mod settings_service;
 pub mod skill_registry;
+pub mod token_budget;
 pub mod vector_service;
 pub mod world_service;

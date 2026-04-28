@@ -5,6 +5,7 @@ import type { AiStreamStatus } from "../../stores/editorStore";
 interface AiPreviewPanelProps {
   status: AiStreamStatus;
   content: string;
+  errorMessage?: string | null;
   originalText?: string;
   taskType: string;
   onInsert: (strategy: "cursor" | "replace" | "append") => void;
@@ -42,6 +43,7 @@ const DIFF_TASKS = new Set(["rewrite_selection", "deai_text"]);
 export function AiPreviewPanel({
   status,
   content,
+  errorMessage,
   originalText,
   taskType,
   onInsert,
@@ -114,6 +116,11 @@ export function AiPreviewPanel({
         </div>
       </div>
       <div className="p-4 max-h-64 overflow-y-auto">
+        {status === "error" && errorMessage && (
+          <div className="mb-3 px-3 py-2 rounded-lg text-sm bg-error/10 text-error border border-error/20">
+            {errorMessage}
+          </div>
+        )}
         {status === "streaming" && !content ? (
           <div className="flex items-center gap-2 text-surface-400 text-sm">
             <span className="w-2 h-2 bg-primary rounded-full animate-pulse" />

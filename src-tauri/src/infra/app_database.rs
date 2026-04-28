@@ -443,7 +443,7 @@ pub fn upsert_model(conn: &Connection, model: &ModelRecord) -> Result<bool, AppE
              supports_json_schema, supports_thinking, supports_reasoning_effort,
              supports_prompt_cache, supports_batch, status, source, user_overridden,
              last_seen_at, registry_version, created_at, updated_at)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,0,?14,?15,?16,?17,?18,?19)",
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,0,?14,?15,?16,?17,?18,?19,?20)",
             params![
                 model.id, model.provider_id, model.model_name, model.display_name,
                 model.context_window_tokens, model.max_output_tokens,

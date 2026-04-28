@@ -39,7 +39,12 @@ impl AnthropicAdapter {
         if !path.starts_with('/') {
             path = format!("/{}", path);
         }
-        format!("{}{}", base, path)
+        let mut url = format!("{}{}", base, path);
+        // Deduplicate /v1/v1 when base already contains /v1 and endpoint also starts with /v1/
+        while url.contains("/v1/v1") {
+            url = url.replace("/v1/v1", "/v1");
+        }
+        url
     }
 
     fn build_headers(&self) -> Result<Vec<(String, String)>, LlmError> {
@@ -190,26 +195,43 @@ impl AnthropicAdapter {
         match event_type {
             "content_block_delta" => {
                 let value: serde_json::Value = serde_json::from_str(data).ok()?;
-                let text = value
-                    .get("delta")
-                    .and_then(|d| d.get("text"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
-                if text.is_empty() {
-                    return None;
+                let delta = value.get("delta")?;
+                let delta_type = delta.get("type").and_then(|v| v.as_str()).unwrap_or("text_delta");
+                match delta_type {
+                    "thinking_delta" => {
+                        let reasoning = delta.get("thinking").and_then(|v| v.as_str()).unwrap_or("");
+                        if reasoning.is_empty() {
+                            return None;
+                        }
+                        Some(StreamChunk {
+                            content: String::new(),
+                            finish_reason: None,
+                            request_id,
+                            error: None,
+                            reasoning: Some(reasoning.to_string()),
+                        })
+                    }
+                    _ => {
+                        let text = delta.get("text").and_then(|v| v.as_str()).unwrap_or("");
+                        if text.is_empty() {
+                            return None;
+                        }
+                        Some(StreamChunk {
+                            content: text.to_string(),
+                            finish_reason: None,
+                            request_id,
+                            error: None,
+                            reasoning: None,
+                        })
+                    }
                 }
-                Some(StreamChunk {
-                    content: text.to_string(),
-                    finish_reason: None,
-                    request_id,
-                    error: None,
-                })
             }
             "message_stop" => Some(StreamChunk {
                 content: String::new(),
                 finish_reason: Some("end_turn".to_string()),
                 request_id,
                 error: None,
+                reasoning: None,
             }),
             _ => None,
         }
@@ -437,7 +459,12 @@ impl LlmService for AnthropicAdapter {
 
     async fn test_connection(&self) -> Result<(), LlmError> {
         let url = self.endpoint_url();
-        let headers = self.build_headers()?;
+        let headers = match self.build_headers() {
+            Ok(h) => h,
+            Err(e) => return Err(LlmError::ProviderError(format!("Auth error: {}", e.user_message()))),
+        };
+
+        log::info!("[TEST_CONNECTION] Testing {} with model={}", url, self.config.default_model.as_deref().unwrap_or("?"));
 
         let mut request = self.client.post(&url).json(&serde_json::json!({
             "model": self.config.default_model.as_deref().unwrap_or("claude-3-haiku-20240307"),
@@ -452,7 +479,7 @@ impl LlmService for AnthropicAdapter {
             if e.is_timeout() {
                 LlmError::NetworkTimeout
             } else {
-                LlmError::NetworkError
+                LlmError::ProviderError(format!("连接失败 ({}): {}", url, e))
             }
         })?;
 

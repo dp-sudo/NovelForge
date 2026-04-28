@@ -92,8 +92,8 @@ impl From<LlmError> for AppErrorDto {
                 "该功能不被当前 Provider 支持",
                 false,
             ),
-            LlmError::ProviderError(_) => {
-                ("LLM_PROVIDER_ERROR", "AI 服务返回错误，请稍后重试", false)
+            LlmError::ProviderError(ref msg) => {
+                ("LLM_PROVIDER_ERROR", msg.as_str(), false)
             }
         };
         let detail = match &e {
@@ -218,6 +218,9 @@ pub struct StreamChunk {
     /// Error message forwarded to the frontend (non-None signals failure).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// Reasoning/thinking content (to be folded in UI).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<String>,
 }
 
 // ── ProviderConfig ──

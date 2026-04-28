@@ -10,6 +10,9 @@ import {
   deleteProvider,
   testProviderConnection,
   refreshProviderModels,
+  getProviderModels,
+  checkRemoteRegistry,
+  applyRegistryUpdate,
   listTaskRoutes,
   saveTaskRoute,
   deleteTaskRoute,
@@ -40,9 +43,10 @@ import {
   type IntegrityReport,
 } from "../../api/chapterApi";
 import { useProjectStore } from "../../stores/projectStore";
-import { VENDOR_PRESETS, type VendorInfo } from "../../types/ai";
+import { VENDOR_PRESETS, type VendorInfo, type ModelRecord, type CapabilityReport } from "../../types/ai";
+import { SkillsManager } from "../../components/skills/SkillsManager.js";
 
-type TabKey = "model" | "routing" | "editor" | "backup" | "about";
+type TabKey = "model" | "routing" | "skills" | "editor" | "backup" | "about";
 
 interface VendorFormState {
   config: LlmProviderConfig;
@@ -52,6 +56,8 @@ interface VendorFormState {
   saving: boolean;
   testing: boolean;
   refreshing: boolean;
+  models: ModelRecord[];
+  capabilities: CapabilityReport | null;
   refreshResult: string | null;
   testResult: string | null;
   validationError: string | null;
@@ -92,6 +98,11 @@ export function SettingsPage() {
   const [updateInfo, setUpdateInfo] = useState<AppUpdateInfo | null>(null);
   const [updateBusy, setUpdateBusy] = useState(false);
   const [updateMessage, setUpdateMessage] = useState<string | null>(null);
+  const [registryUrl, setRegistryUrl] = useState("https://updates.novelforge.app/llm-model-registry.json");
+  const [registryStatus, setRegistryStatus] = useState<string | null>(null);
+  const [registryChecking, setRegistryChecking] = useState(false);
+  const [registryApplying, setRegistryApplying] = useState(false);
+  const [registryUpdateAvailable, setRegistryUpdateAvailable] = useState(false);
 
   async function handleCreateBackup() {
     if (!projectRoot) { setBackupMessage("请先打开项目"); return; }
@@ -344,14 +355,7 @@ export function SettingsPage() {
 
     if (config.id === "custom") {
       if (!config.displayName.trim()) return "自定义 Provider 名称不能为空";
-      if (!config.defaultModel?.trim()) return "自定义 Provider 默认模型不能为空";
       if (!config.protocol) return "请选择自定义 Provider 协议";
-      if (config.authMode === "custom" && !config.authHeaderName?.trim()) {
-        return "自定义认证模式必须填写 Auth Header 名称";
-      }
-      if (config.modelsPath && !config.modelsPath.startsWith("/")) {
-        return "模型列表路径必须以 / 开头";
-      }
     }
 
     return null;
@@ -409,6 +413,8 @@ export function SettingsPage() {
             saving: false,
             testing: false,
             refreshing: false,
+            models: [],
+            capabilities: null,
             refreshResult: null,
             testResult: null,
             validationError: null,
@@ -472,13 +478,6 @@ export function SettingsPage() {
       customHeaders: parseHeadersInput(v.customHeadersInput),
     };
 
-    if (preset.id === "custom" && normalizedConfig.protocol === "custom_openai_compatible" && !normalizedConfig.endpointPath) {
-      normalizedConfig.endpointPath = "/chat/completions";
-    }
-    if (preset.id === "custom" && normalizedConfig.protocol === "custom_anthropic_compatible" && !normalizedConfig.endpointPath) {
-      normalizedConfig.endpointPath = "/messages";
-    }
-
     const validationError = validateProviderInput(normalizedConfig);
     if (validationError) {
       setVendors((prev) => ({
@@ -517,8 +516,22 @@ export function SettingsPage() {
   async function handleTest(preset: VendorInfo) {
     const v = vendors[preset.id];
     if (!v) return;
-    setVendors((prev) => ({ ...prev, [preset.id]: { ...prev[preset.id], testing: true, testResult: null } }));
+    setVendors((prev) => ({ ...prev, [preset.id]: { ...prev[preset.id], testing: true, testResult: null, validationError: null } }));
     try {
+      // Save the provider config first so the backend can find it when testing
+      if (v.apiKeyInput || !v.config.apiKey) {
+        // Only save if there's new input or no existing key (otherwise skip to avoid unnecessary DB write)
+        const normalizedConfig: LlmProviderConfig = {
+          ...v.config,
+          displayName: v.config.displayName.trim(),
+          baseUrl: v.config.baseUrl.trim(),
+          endpointPath: v.config.endpointPath?.trim() || undefined,
+          defaultModel: v.config.defaultModel?.trim() || undefined,
+          authHeaderName: v.config.authHeaderName?.trim() || undefined,
+          modelsPath: v.config.modelsPath?.trim() || undefined,
+        };
+        await saveProvider(normalizedConfig, v.apiKeyInput || undefined);
+      }
       const result = await testProviderConnection(preset.id);
       setVendors((prev) => ({ ...prev, [preset.id]: { ...prev[preset.id], testing: false, testResult: result } }));
     } catch (err: unknown) {
@@ -530,14 +543,19 @@ export function SettingsPage() {
   }
 
   async function handleRefresh(preset: VendorInfo) {
-    setVendors((prev) => ({ ...prev, [preset.id]: { ...prev[preset.id], refreshing: true, refreshResult: null } }));
+    setVendors((prev) => ({ ...prev, [preset.id]: { ...prev[preset.id], refreshing: true, refreshResult: null, models: [], capabilities: null } }));
     try {
       const result = await refreshProviderModels(preset.id);
+      const [models] = await Promise.all([
+        getProviderModels(preset.id).catch(() => []),
+      ]);
       setVendors((prev) => ({
         ...prev,
         [preset.id]: {
           ...prev[preset.id],
           refreshing: false,
+          models,
+          capabilities: result.capabilities,
           refreshResult: `✓ 新增 ${result.added} / 更新 ${result.updated} / 弃用 ${result.removed}`,
         },
       }));
@@ -576,6 +594,50 @@ export function SettingsPage() {
         validationError: null,
       },
     }));
+  }
+
+  // ── Remote registry handlers ──
+
+  async function handleCheckRegistry() {
+    if (!registryUrl.trim()) { setRegistryStatus("✗ 注册表 URL 不能为空"); return; }
+    setRegistryChecking(true);
+    setRegistryStatus(null);
+    setRegistryUpdateAvailable(false);
+    try {
+      const result = await checkRemoteRegistry(registryUrl.trim());
+      if (result.hasUpdate) {
+        setRegistryStatus(`✓ 发现新版本: ${result.remoteVersion} (当前: ${result.currentVersion})`);
+        setRegistryUpdateAvailable(true);
+      } else {
+        setRegistryStatus(`✓ 已是最新版本: ${result.currentVersion}`);
+        setRegistryUpdateAvailable(false);
+      }
+    } catch (err: unknown) {
+      const msg = typeof err === "object" && err && "message" in err
+        ? String((err as { message: string }).message)
+        : "检查失败";
+      setRegistryStatus(`✗ ${msg}`);
+      setRegistryUpdateAvailable(false);
+    } finally {
+      setRegistryChecking(false);
+    }
+  }
+
+  async function handleApplyRegistry() {
+    if (!registryUrl.trim() || !registryUpdateAvailable) return;
+    setRegistryApplying(true);
+    try {
+      const result = await applyRegistryUpdate(registryUrl.trim());
+      setRegistryStatus(`✓ 更新已应用: 新增 ${result.added} / 更新 ${result.updated} (版本: ${result.version})`);
+      setRegistryUpdateAvailable(false);
+    } catch (err: unknown) {
+      const msg = typeof err === "object" && err && "message" in err
+        ? String((err as { message: string }).message)
+        : "应用失败";
+      setRegistryStatus(`✗ ${msg}`);
+    } finally {
+      setRegistryApplying(false);
+    }
   }
 
   function updateTaskRoute(taskType: string, patch: Partial<TaskRoute>) {
@@ -696,6 +758,7 @@ export function SettingsPage() {
   const tabs: { key: TabKey; label: string }[] = [
     { key: "model", label: "模型配置" },
     { key: "routing", label: "任务路由" },
+    { key: "skills", label: "技能管理" },
     { key: "editor", label: "编辑器" },
     { key: "backup", label: "数据与备份" },
     { key: "about", label: "关于" },
@@ -778,82 +841,8 @@ export function SettingsPage() {
                           />
                         )}
                         <Input label="Base URL" value={config.baseUrl} onChange={(e) => updateVendor(preset.id, { baseUrl: e.target.value })} placeholder={preset.defaultBaseUrl} />
-                        {preset.id === "custom" && (
-                          <Input
-                            label="Endpoint Path"
-                            value={config.endpointPath || ""}
-                            onChange={(e) => updateVendor(preset.id, { endpointPath: e.target.value })}
-                            placeholder={config.protocol === "custom_anthropic_compatible" ? "/messages" : "/chat/completions"}
-                          />
-                        )}
                         <ApiKeyInput label="API Key" value={v.apiKeyInput} onChange={(val) => setVendors((prev) => ({ ...prev, [preset.id]: { ...prev[preset.id], apiKeyInput: val } }))} maskedValue={config.apiKey && !v.apiKeyInput ? config.apiKey : undefined} />
-                        {preset.id === "custom" && (
-                          <Select
-                            label="认证模式"
-                            value={config.authMode}
-                            onChange={(e) => updateVendor(preset.id, { authMode: e.target.value })}
-                            options={[
-                              { value: "bearer", label: "Bearer" },
-                              { value: "x-api-key", label: "x-api-key" },
-                              { value: "custom", label: "Custom Header" },
-                            ]}
-                          />
-                        )}
-                        {preset.id === "custom" && config.authMode === "custom" && (
-                          <Input
-                            label="Auth Header 名称"
-                            value={config.authHeaderName || ""}
-                            onChange={(e) => updateVendor(preset.id, { authHeaderName: e.target.value })}
-                            placeholder="X-Auth-Token"
-                          />
-                        )}
-                        {preset.id === "custom" && config.protocol === "custom_anthropic_compatible" && (
-                          <Input
-                            label="Anthropic Version"
-                            value={config.anthropicVersion || ""}
-                            onChange={(e) => updateVendor(preset.id, { anthropicVersion: e.target.value })}
-                            placeholder="2023-06-01"
-                          />
-                        )}
                         <Input label="默认模型" value={config.defaultModel || ""} onChange={(e) => updateVendor(preset.id, { defaultModel: e.target.value })} placeholder={preset.defaultModel} />
-                        {preset.id === "custom" && (
-                          <Input
-                            label="模型列表路径"
-                            value={config.modelsPath || ""}
-                            onChange={(e) => updateVendor(preset.id, { modelsPath: e.target.value })}
-                            placeholder="/models"
-                          />
-                        )}
-                        {preset.id === "custom" && (
-                          <Input
-                            label="Beta Headers（key:value，每行一条）"
-                            value={v.betaHeadersInput}
-                            onChange={(e) =>
-                              setVendors((prev) => ({
-                                ...prev,
-                                [preset.id]: { ...prev[preset.id], betaHeadersInput: e.target.value, validationError: null },
-                              }))
-                            }
-                            placeholder="context-1m-2025-08-07:true"
-                          />
-                        )}
-                        {preset.id === "custom" && (
-                          <Input
-                            label="自定义 Headers（key:value，每行一条）"
-                            value={v.customHeadersInput}
-                            onChange={(e) =>
-                              setVendors((prev) => ({
-                                ...prev,
-                                [preset.id]: { ...prev[preset.id], customHeadersInput: e.target.value, validationError: null },
-                              }))
-                            }
-                            placeholder="x-tenant-id:novelforge"
-                          />
-                        )}
-                        <div className="grid grid-cols-2 gap-3">
-                          <Input label="超时(ms)" type="number" value={String(config.timeoutMs)} onChange={(e) => updateVendor(preset.id, { timeoutMs: parseInt(e.target.value) || 120000 })} />
-                          <Input label="重试次数" type="number" value={String(config.maxRetries)} onChange={(e) => updateVendor(preset.id, { maxRetries: parseInt(e.target.value) || 2 })} />
-                        </div>
                         {v.validationError && (
                           <div className="px-3 py-2 rounded-lg text-sm bg-error/10 text-error border border-error/20">
                             {v.validationError}
@@ -877,6 +866,51 @@ export function SettingsPage() {
                             <Button variant="primary" size="sm" onClick={() => handleSave(preset)} disabled={v.saving}>{v.saving ? "保存中..." : "保存"}</Button>
                           </div>
                         </div>
+
+                        {v.capabilities && (
+                          <div className="pt-2 border-t border-surface-700">
+                            <p className="text-xs font-medium text-surface-300 mb-2">能力检测报告</p>
+                            <div className="flex flex-wrap gap-1.5">
+                              {[
+                                { key: "textResponse" as const, label: "文本生成" },
+                                { key: "streaming" as const, label: "流式" },
+                                { key: "jsonObject" as const, label: "JSON Object" },
+                                { key: "tools" as const, label: "Tools" },
+                                { key: "thinking" as const, label: "Thinking" },
+                              ].map(({ key, label }) => (
+                                <span
+                                  key={key}
+                                  className={`inline-flex items-center px-2 py-0.5 text-xs rounded-full border ${
+                                    v.capabilities![key]
+                                      ? "bg-success/10 text-success border-success/30"
+                                      : "bg-surface-800 text-surface-500 border-surface-700"
+                                  }`}
+                                >
+                                  {label} {v.capabilities![key] ? "✓" : "—"}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {v.models.length > 0 && (
+                          <div className="pt-2 border-t border-surface-700">
+                            <p className="text-xs font-medium text-surface-300 mb-2">模型列表 ({v.models.length})</p>
+                            <div className="max-h-40 overflow-y-auto space-y-1">
+                              {v.models.map((m) => (
+                                <div key={m.id} className="flex items-center justify-between px-2 py-1 rounded bg-surface-800/60 text-xs">
+                                  <span className="text-surface-200 font-mono truncate">{m.modelName}</span>
+                                  <div className="flex gap-1 shrink-0 ml-2">
+                                    {m.supportsStreaming && <span className="text-success">S</span>}
+                                    {m.supportsTools && <span className="text-info">T</span>}
+                                    {m.supportsThinking && <span className="text-warning">R</span>}
+                                    {m.supportsJsonObject && <span className="text-primary">J</span>}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
                   </Card>
@@ -884,6 +918,40 @@ export function SettingsPage() {
               })}
             </div>
           )}
+
+          {/* ── Remote Registry Update ── */}
+          <Card padding="md" className="mt-6 space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-surface-100">远程模型注册表</h3>
+            </div>
+            <p className="text-xs text-surface-400">从远程服务器拉取最新模型元数据</p>
+            <div className="flex gap-2">
+              <Input
+                label="注册表 URL"
+                value={registryUrl}
+                onChange={(e) => setRegistryUrl(e.target.value)}
+                placeholder="https://updates.novelforge.app/llm-model-registry.json"
+                containerClassName="flex-1"
+              />
+            </div>
+            {registryStatus && (
+              <div className={`px-3 py-2 rounded-lg text-sm ${
+                registryStatus.startsWith("✓") ? "bg-success/10 text-success border border-success/20" :
+                registryStatus.startsWith("✗") ? "bg-error/10 text-error border border-error/20" :
+                "bg-info/10 text-info border border-info/20"
+              }`}>
+                {registryStatus}
+              </div>
+            )}
+            <div className="flex justify-end gap-2">
+              <Button variant="secondary" size="sm" onClick={handleCheckRegistry} disabled={registryChecking}>
+                {registryChecking ? "检查中..." : "检查更新"}
+              </Button>
+              <Button variant="primary" size="sm" onClick={handleApplyRegistry} disabled={!registryUpdateAvailable || registryApplying}>
+                {registryApplying ? "应用中..." : "应用更新"}
+              </Button>
+            </div>
+          </Card>
         </div>
       )}
 
@@ -975,6 +1043,18 @@ export function SettingsPage() {
               })}
             </div>
           )}
+        </Card>
+      )}
+
+      {activeTab === "skills" && (
+        <Card padding="lg" className="min-h-[400px]">
+          <h2 className="text-base font-semibold text-surface-100 mb-4">技能管理</h2>
+          <p className="text-xs text-surface-400 mb-4">
+            技能是基于 Markdown 文件的 AI 提示词模板。您可以浏览内置技能、导入自定义 .md 文件、编辑现有技能内容。
+          </p>
+          <div className="h-[500px]">
+            <SkillsManager />
+          </div>
         </Card>
       )}
 

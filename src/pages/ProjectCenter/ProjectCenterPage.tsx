@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useUiStore } from "../../stores/uiStore.js";
 import { useProjectStore } from "../../stores/projectStore.js";
 import { Card } from "../../components/cards/Card.js";
@@ -51,6 +51,7 @@ export function ProjectCenterPage() {
   const [recentProjects, setRecentProjects] = useState<Array<{ path: string; name: string; openedAt: string }>>([]);
   const [integrityLoadingPath, setIntegrityLoadingPath] = useState<string | null>(null);
   const [integrityReports, setIntegrityReports] = useState<Record<string, IntegrityReport>>({});
+  const folderInputRef = useRef<HTMLInputElement>(null);
 
   const setActiveRoute = useUiStore((s) => s.setActiveRoute);
   const setCurrentProject = useProjectStore((s) => s.setCurrentProject);
@@ -107,17 +108,40 @@ export function ProjectCenterPage() {
   }
 
   async function handleOpenExisting(projectPath?: string) {
-    const path = projectPath ?? recentProjects[0]?.path;
-    if (path) {
+    // If a specific path is given (from recent projects list), open it directly
+    if (projectPath) {
       try {
-        const result = await openProject(path);
+        const result = await openProject(projectPath);
         setCurrentProject(result.projectRoot, result.project);
         setActiveRoute("dashboard");
         setActionError(null);
       } catch (err) {
         setActionError(getErrorMessage(err, "打开项目失败，请确认路径有效"));
       }
+      return;
     }
+    // No path: open folder picker so user can select a project directory
+    folderInputRef.current?.click();
+  }
+
+  function handleFolderSelected(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    // In Tauri, file.path gives the full native path of the selected item
+    const dirPath = file.path;
+    if (!dirPath) return;
+    e.target.value = ""; // reset so same directory can be re-selected
+    setActionError(null);
+    // The webkitdirectory gives us the first file in the directory;
+    // we need the directory itself, not the file path
+    const dir = dirPath.includes("\\") ? dirPath.substring(0, dirPath.lastIndexOf("\\")) :
+                dirPath.includes("/") ? dirPath.substring(0, dirPath.lastIndexOf("/")) : dirPath;
+    openProject(dir).then((result) => {
+      setCurrentProject(result.projectRoot, result.project);
+      setActiveRoute("dashboard");
+    }).catch((err) => {
+      setActionError(getErrorMessage(err, "打开项目失败，请确认所选目录是有效的 NovelForge 项目"));
+    });
   }
 
   function handleClearProject() {
@@ -156,6 +180,13 @@ export function ProjectCenterPage() {
               <Button variant="secondary" className="w-full justify-center" onClick={() => void handleOpenExisting()}>
                 打开本地项目
               </Button>
+              <input
+                ref={folderInputRef}
+                type="file"
+                webkitdirectory=""
+                className="hidden"
+                onChange={handleFolderSelected}
+              />
             </div>
           </Card>
 
