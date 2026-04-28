@@ -41,4 +41,10 @@ desktop.ini
 *.temp
 *.bak
 *.rar
+*.local
+*.user
+.parcel-cache/
 .omc
+
+# Test output
+/tests/**/output/
