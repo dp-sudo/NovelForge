@@ -29,63 +29,71 @@ impl From<LlmError> for AppErrorDto {
         let (code, message, recoverable) = match &e {
             LlmError::MissingApiKey => (
                 "LLM_MISSING_API_KEY",
-                "API key not configured for this provider",
+                "请先在模型设置中填写 API Key",
                 true,
             ),
             LlmError::InvalidApiKey => (
                 "LLM_INVALID_API_KEY",
-                "Authentication failed — invalid API key",
+                "API Key 认证失败，请检查密钥是否正确",
                 true,
             ),
             LlmError::InsufficientQuota => (
                 "LLM_INSUFFICIENT_QUOTA",
-                "Insufficient quota from provider",
+                "API 额度不足，请检查账户余额",
                 false,
             ),
-            LlmError::RateLimited => ("LLM_RATE_LIMITED", "Rate-limited by provider", true),
+            LlmError::RateLimited => (
+                "LLM_RATE_LIMITED",
+                "请求频率过高，请稍后重试",
+                true,
+            ),
             LlmError::ModelNotFound => (
                 "LLM_MODEL_NOT_FOUND",
-                "Specified model is not available",
+                "当前模型名不可用，请刷新模型列表或检查拼写",
                 true,
             ),
             LlmError::ContextLengthExceeded => (
                 "LLM_CONTEXT_LENGTH_EXCEEDED",
-                "Input exceeds model context window",
+                "当前上下文过长，建议减少章节范围或启用摘要压缩",
                 false,
             ),
             LlmError::MaxOutputExceeded => (
                 "LLM_MAX_OUTPUT_EXCEEDED",
-                "Output exceeded maximum tokens",
+                "输出超过最大 Token 限制，建议增大最大输出 Token",
                 false,
             ),
             LlmError::ContentPolicyViolation => (
                 "LLM_CONTENT_POLICY_VIOLATION",
-                "Content policy violation",
+                "内容安全策略拒绝，请调整输入内容",
                 false,
             ),
-            LlmError::NetworkTimeout => ("LLM_NETWORK_TIMEOUT", "Request timed out", true),
+            LlmError::NetworkTimeout => (
+                "LLM_NETWORK_TIMEOUT",
+                "连接超时，请检查网络连接",
+                true,
+            ),
             LlmError::NetworkError => (
                 "LLM_NETWORK_ERROR",
-                "Network error communicating with provider",
+                "网络错误，请检查网络连接",
                 true,
             ),
             LlmError::StreamInterrupted => (
                 "LLM_STREAM_INTERRUPTED",
-                "Stream interrupted unexpectedly",
+                "流式输出意外中断，请重试",
                 true,
             ),
             LlmError::InvalidJsonResponse => (
                 "LLM_INVALID_JSON_RESPONSE",
-                "Invalid JSON from provider",
+                "模型返回的结构化数据不合法，已保留原始结果",
                 false,
             ),
             LlmError::UnsupportedFeature => (
                 "LLM_UNSUPPORTED_FEATURE",
-                "Feature not supported by provider",
+                "该功能不被当前 Provider 支持",
                 false,
             ),
             LlmError::ProviderError(_) => {
-                ("LLM_PROVIDER_ERROR", "Provider returned an error", false)
+                ("LLM_PROVIDER_ERROR", "AI 服务返回错误，请稍后重试", false)
             }
         };
         let detail = match &e {
@@ -98,6 +106,28 @@ impl From<LlmError> for AppErrorDto {
             detail,
             recoverable,
             suggested_action: None,
+        }
+    }
+}
+
+impl LlmError {
+    /// Returns a user-facing error message (used by stream error chunks).
+    pub fn user_message(&self) -> String {
+        match self {
+            LlmError::MissingApiKey => "API Key 未配置".to_string(),
+            LlmError::InvalidApiKey => "API Key 认证失败".to_string(),
+            LlmError::InsufficientQuota => "API 额度不足".to_string(),
+            LlmError::RateLimited => "请求频率过高，请稍后重试".to_string(),
+            LlmError::ModelNotFound => "模型不可用或不存在".to_string(),
+            LlmError::ContextLengthExceeded => "上下文超过模型长度限制".to_string(),
+            LlmError::MaxOutputExceeded => "输出超过最大 Token 限制".to_string(),
+            LlmError::ContentPolicyViolation => "内容安全策略拒绝".to_string(),
+            LlmError::NetworkTimeout => "连接超时，请检查网络".to_string(),
+            LlmError::NetworkError => "网络错误，请检查网络连接".to_string(),
+            LlmError::StreamInterrupted => "流式输出意外中断".to_string(),
+            LlmError::InvalidJsonResponse => "模型返回了无效的 JSON".to_string(),
+            LlmError::UnsupportedFeature => "该功能不被当前 Provider 支持".to_string(),
+            LlmError::ProviderError(msg) => format!("AI 服务错误: {}", msg),
         }
     }
 }
@@ -185,6 +215,9 @@ pub struct StreamChunk {
     pub content: String,
     pub finish_reason: Option<String>,
     pub request_id: String,
+    /// Error message forwarded to the frontend (non-None signals failure).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 // ── ProviderConfig ──

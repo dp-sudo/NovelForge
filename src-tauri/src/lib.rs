@@ -7,6 +7,7 @@ mod services;
 mod state;
 
 use state::AppState;
+use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -25,6 +26,40 @@ pub fn run() {
             crate::infra::logger::log_startup(&version);
             app.handle()
                 .plugin(tauri_plugin_updater::Builder::new().build())?;
+
+            // ══ Deferred provider preload (best-effort, never blocks startup) ══
+            let ai_service = app.state::<AppState>().ai_service.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                match crate::infra::app_database::open_or_create() {
+                    Ok(conn) => {
+                        match crate::infra::app_database::load_all_providers(&conn) {
+                            Ok(providers) => {
+                                let count = providers.len();
+                                for provider in &providers {
+                                    if let Err(e) = ai_service.reload_provider(&provider.id).await {
+                                        log::warn!(
+                                            "[PRELOAD] Failed to reload provider '{}': {}",
+                                            provider.id,
+                                            e.message
+                                        );
+                                    }
+                                }
+                                if count > 0 {
+                                    log::info!("[PRELOAD] Pre-loaded {} provider adapter(s)", count);
+                                }
+                            }
+                            Err(e) => {
+                                log::warn!("[PRELOAD] Cannot list providers: {}", e.message);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        log::warn!("[PRELOAD] Cannot open app database: {}", e.message);
+                    }
+                }
+            });
+
             Ok(())
         })
         .manage(AppState::default())

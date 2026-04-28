@@ -202,12 +202,14 @@ impl AnthropicAdapter {
                     content: text.to_string(),
                     finish_reason: None,
                     request_id,
+                    error: None,
                 })
             }
             "message_stop" => Some(StreamChunk {
                 content: String::new(),
                 finish_reason: Some("end_turn".to_string()),
                 request_id,
+                error: None,
             }),
             _ => None,
         }
@@ -235,6 +237,106 @@ impl AnthropicAdapter {
                 LlmError::ModelNotFound
             }
             _ => LlmError::ProviderError(msg),
+        }
+    }
+
+    // ── Capability-detection helpers ──
+
+    async fn test_streaming(&self, model: &str, provider_id: &str) -> Result<bool, LlmError> {
+        use tokio::sync::mpsc;
+        let (tx, mut rx) = mpsc::channel(8);
+        let stream_req = UnifiedGenerateRequest {
+            model: model.to_string(),
+            stream: true,
+            max_tokens: Some(5),
+            messages: vec![Message {
+                role: "user".to_string(),
+                content: vec![ContentBlock {
+                    block_type: "text".to_string(),
+                    text: Some("Hi".to_string()),
+                }],
+            }],
+            provider_id: Some(provider_id.to_string()),
+            ..Default::default()
+        };
+        let adapter_clone = AnthropicAdapter::new(self.config.clone());
+        tokio::spawn(async move {
+            let _ = adapter_clone.stream_text(stream_req, tx).await;
+        });
+        match tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv()).await {
+            Ok(Some(chunk)) => Ok(!chunk.content.is_empty()),
+            _ => Ok(false),
+        }
+    }
+
+    async fn test_anthropic_tools(&self, model: &str, _provider_id: &str) -> Result<bool, LlmError> {
+        let url = self.endpoint_url();
+        let headers = match self.build_headers() {
+            Ok(h) => h,
+            Err(_) => return Ok(false),
+        };
+        let body = serde_json::json!({
+            "model": model,
+            "max_tokens": 50,
+            "messages": [{"role": "user", "content": [{"type": "text", "text": "What is the weather?"}]}],
+            "tools": [{
+                "name": "get_weather",
+                "description": "Get weather for a location",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "location": {"type": "string", "description": "City name"}
+                    },
+                    "required": ["location"]
+                }
+            }]
+        });
+        let mut request = self.client.post(&url).json(&body);
+        for (name, value) in &headers {
+            request = request.header(name, value);
+        }
+        let response = request.send().await;
+        match response {
+            Ok(resp) if resp.status().is_success() => {
+                if let Ok(val) = resp.json::<serde_json::Value>().await {
+                    let has_tool = val
+                        .get("content")
+                        .and_then(|c| c.as_array())
+                        .map(|arr| {
+                            arr.iter().any(|block| {
+                                block.get("type").and_then(|t| t.as_str()) == Some("tool_use")
+                            })
+                        })
+                        .unwrap_or(false);
+                    Ok(has_tool)
+                } else {
+                    Ok(false)
+                }
+            }
+            _ => Ok(false),
+        }
+    }
+
+    async fn test_thinking(&self, model: &str, _provider_id: &str) -> Result<bool, LlmError> {
+        let url = self.endpoint_url();
+        let headers = match self.build_headers() {
+            Ok(h) => h,
+            Err(_) => return Ok(false),
+        };
+        let body = serde_json::json!({
+            "model": model,
+            "max_tokens": 50,
+            "messages": [{"role": "user", "content": [{"type": "text", "text": "1+1=?"}]}],
+            "thinking": {"type": "enabled", "budget_tokens": 30}
+        });
+        let mut request = self.client.post(&url).json(&body);
+        for (name, value) in &headers {
+            request = request.header(name, value);
+        }
+        let response = request.send().await;
+        match response {
+            Ok(resp) => Ok(resp.status().is_success()),
+            Err(_) => Ok(false),
         }
     }
 }
@@ -364,23 +466,54 @@ impl LlmService for AnthropicAdapter {
     }
 
     async fn detect_capabilities(&self) -> Result<CapabilityReport, LlmError> {
-        // Anthropic: test basic text completion + streaming
-        let text_ok = self.test_connection().await.is_ok();
-        // Simplified: most Anthropic models support these
-        Ok(CapabilityReport {
-            provider_id: self.config.id.clone(),
-            text_response: text_ok,
-            streaming: text_ok,
+        let provider_id = self.config.id.clone();
+        let model = self.config.default_model.as_deref().unwrap_or("claude-sonnet-4-6");
+
+        let mut report = CapabilityReport {
+            provider_id: provider_id.clone(),
+            text_response: false,
+            streaming: false,
             json_object: false,
             json_schema: false,
-            tools: text_ok,
-            thinking: text_ok,
-            error: if text_ok {
-                None
-            } else {
-                Some("Connection failed".to_string())
-            },
-        })
+            tools: false,
+            thinking: false,
+            error: None,
+        };
+
+        // 1. Test basic text via test_connection
+        if self.test_connection().await.is_ok() {
+            report.text_response = true;
+        } else {
+            report.error = Some("Connection failed".to_string());
+            return Ok(report);
+        }
+
+        // 2. Test streaming — attempt a short streaming call
+        let streaming = self
+            .test_streaming(model, &provider_id)
+            .await
+            .unwrap_or(false);
+        report.streaming = streaming;
+
+        // 3. Test tools — Anthropic natively supports tool use
+        let tools = self
+            .test_anthropic_tools(model, &provider_id)
+            .await
+            .unwrap_or(true); // optimistic; most Anthropic models support tools
+        report.tools = tools;
+
+        // 4. Test thinking — Anthropic supports thinking on most recent models
+        let thinking = self
+            .test_thinking(model, &provider_id)
+            .await
+            .unwrap_or(true);
+        report.thinking = thinking;
+
+        // Anthropic has no built-in JSON mode; keep both false
+        report.json_object = false;
+        report.json_schema = false;
+
+        Ok(report)
     }
 
     async fn fetch_models(&self) -> Result<Vec<String>, LlmError> {

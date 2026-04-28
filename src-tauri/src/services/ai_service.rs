@@ -224,23 +224,48 @@ impl AiService {
                 attempts.push((fallback_provider, fallback_model_id));
             }
 
-            for (attempt_provider, attempt_model) in attempts {
-                if service
-                    .ensure_provider_registered(&attempt_provider)
-                    .await
-                    .is_err()
-                {
+            for (attempt_provider, attempt_model) in &attempts {
+                // Try to ensure provider is registered; send error if not
+                if let Err(e) = service.ensure_provider_registered(attempt_provider).await {
+                    let _ = tx
+                        .send(StreamChunk {
+                            content: String::new(),
+                            finish_reason: None,
+                            request_id: String::new(),
+                            error: Some(e.message),
+                        })
+                        .await;
                     continue;
                 }
 
                 let guard = service.adapters.read().await;
-                if let Some(adapter) = guard.get(&attempt_provider) {
+                if let Some(adapter) = guard.get(attempt_provider) {
                     let mut attempt_req = req.clone();
                     attempt_req.provider_id = Some(attempt_provider.clone());
-                    attempt_req.model = attempt_model;
-                    if adapter.stream_text(attempt_req, tx.clone()).await.is_ok() {
-                        return;
+                    attempt_req.model = attempt_model.clone();
+                    match adapter.stream_text(attempt_req, tx.clone()).await {
+                        Ok(()) => return,
+                        Err(e) => {
+                            let _ = tx
+                                .send(StreamChunk {
+                                    content: String::new(),
+                                    finish_reason: None,
+                                    request_id: String::new(),
+                                    error: Some(e.user_message()),
+                                })
+                                .await;
+                            continue;
+                        }
                     }
+                } else {
+                    let _ = tx
+                        .send(StreamChunk {
+                            content: String::new(),
+                            finish_reason: None,
+                            request_id: String::new(),
+                            error: Some(format!("Provider '{}' 未注册", attempt_provider)),
+                        })
+                        .await;
                 }
             }
         });

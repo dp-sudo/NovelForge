@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use async_trait::async_trait;
 use futures_util::StreamExt;
 use reqwest::Client;
@@ -216,6 +218,7 @@ impl OpenAiCompatibleAdapter {
             content,
             finish_reason,
             request_id,
+            error: None,
         })
     }
 
@@ -428,17 +431,24 @@ impl LlmService for OpenAiCompatibleAdapter {
             return Ok(report);
         }
 
-        // 2. Test streaming — optimistic
-        report.streaming = true;
+        // 2. Test streaming — send a stream request and check first chunk
+        if let Ok(true) = self.test_streaming(model, &provider_id).await {
+            report.streaming = true;
+        }
 
-        // 3. Test JSON mode
-        report.json_object = true; // optimistic for OpenAI-compatible
+        // 3. Test JSON object mode
+        if let Ok(true) = self.test_json_object(model, &provider_id).await {
+            report.json_object = true;
+        }
 
         // 4. Test tools
-        report.tools = true; // optimistic — most modern OpenAI-compatible support tools
+        if let Ok(true) = self.test_tools(model, &provider_id).await {
+            report.tools = true;
+        }
 
-        // 5. Test thinking (specific to deepseek)
-        report.thinking = self.config.vendor == "deepseek";
+        // 5. Test thinking (vendor-specific)
+        report.thinking = self.config.vendor == "deepseek"
+            || self.config.vendor == "kimi";
 
         Ok(report)
     }
@@ -486,6 +496,132 @@ impl LlmService for OpenAiCompatibleAdapter {
             .unwrap_or_default();
 
         Ok(names)
+    }
+}
+
+// ── Capability-detection helpers (not part of LlmService trait) ──
+impl OpenAiCompatibleAdapter {
+    async fn test_streaming(&self, model: &str, provider_id: &str) -> Result<bool, LlmError> {
+        use tokio::sync::mpsc;
+        let (tx, mut rx) = mpsc::channel(8);
+        let stream_req = UnifiedGenerateRequest {
+            model: model.to_string(),
+            stream: true,
+            max_tokens: Some(5),
+            messages: vec![Message {
+                role: "user".to_string(),
+                content: vec![ContentBlock {
+                    block_type: "text".to_string(),
+                    text: Some("Hi".to_string()),
+                }],
+            }],
+            provider_id: Some(provider_id.to_string()),
+            ..Default::default()
+        };
+        // Spawn streaming with a short timeout
+        let adapter_clone = OpenAiCompatibleAdapter::new(self.config.clone());
+        tokio::spawn(async move {
+            let _ = adapter_clone.stream_text(stream_req, tx).await;
+        });
+        // If we get any chunk within 5s, streaming works
+        match tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv()).await {
+            Ok(Some(chunk)) => Ok(!chunk.content.is_empty()),
+            _ => Ok(false),
+        }
+    }
+
+    async fn test_json_object(&self, model: &str, provider_id: &str) -> Result<bool, LlmError> {
+        // Build a raw request with response_format
+        let url = self.endpoint_url();
+        let (header_name, header_value) = match self.auth_header() {
+            Ok(v) => v,
+            Err(_) => return Ok(false),
+        };
+        let body = serde_json::json!({
+            "model": model,
+            "messages": [{"role": "user", "content": "Return JSON: {\"ok\": true}"}],
+            "response_format": {"type": "json_object"},
+            "max_tokens": 50
+        });
+        let response = self
+            .client
+            .post(&url)
+            .header(header_name, header_value)
+            .json(&body)
+            .send()
+            .await;
+        match response {
+            Ok(resp) if resp.status().is_success() => {
+                if let Ok(val) = resp.json::<serde_json::Value>().await {
+                    let text = val
+                        .get("choices")
+                        .and_then(|c| c.as_array())
+                        .and_then(|arr| arr.first())
+                        .and_then(|c| c.get("message"))
+                        .and_then(|m| m.get("content"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    Ok(serde_json::from_str::<serde_json::Value>(text).is_ok())
+                } else {
+                    Ok(false)
+                }
+            }
+            _ => Ok(false),
+        }
+    }
+
+    async fn test_tools(&self, model: &str, provider_id: &str) -> Result<bool, LlmError> {
+        let url = self.endpoint_url();
+        let (header_name, header_value) = match self.auth_header() {
+            Ok(v) => v,
+            Err(_) => return Ok(false),
+        };
+        let body = serde_json::json!({
+            "model": model,
+            "messages": [{"role": "user", "content": "What is the weather?"}],
+            "tools": [{
+                "type": "function",
+                "function": {
+                    "name": "get_weather",
+                    "description": "Get weather",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "location": {"type": "string"}
+                        },
+                        "required": ["location"]
+                    }
+                }
+            }],
+            "tool_choice": "auto",
+            "max_tokens": 50
+        });
+        let response = self
+            .client
+            .post(&url)
+            .header(header_name, header_value)
+            .json(&body)
+            .send()
+            .await;
+        match response {
+            Ok(resp) if resp.status().is_success() => {
+                if let Ok(val) = resp.json::<serde_json::Value>().await {
+                    let has_tool_calls = val
+                        .get("choices")
+                        .and_then(|c| c.as_array())
+                        .and_then(|arr| arr.first())
+                        .and_then(|c| c.get("message"))
+                        .and_then(|m| m.get("tool_calls"))
+                        .and_then(|t| t.as_array())
+                        .map(|arr| !arr.is_empty())
+                        .unwrap_or(false);
+                    Ok(has_tool_calls)
+                } else {
+                    Ok(false)
+                }
+            }
+            _ => Ok(false),
+        }
     }
 }
 

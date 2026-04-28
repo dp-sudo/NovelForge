@@ -160,6 +160,7 @@ impl GeminiAdapter {
                 content: String::new(),
                 finish_reason: Some("stop".to_string()),
                 request_id,
+                error: None,
             });
         }
         let value: serde_json::Value = serde_json::from_str(data).ok()?;
@@ -181,6 +182,7 @@ impl GeminiAdapter {
             content: text.to_string(),
             finish_reason: None,
             request_id,
+            error: None,
         })
     }
 

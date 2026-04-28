@@ -18,6 +18,7 @@ function createEventStream<T>(
   chunkEvent: string,
   doneEvent: string,
   mapPayload: (payload: T) => AiStreamEvent | null,
+  timeoutMs: number = 30000,
 ): AsyncGenerator<AiStreamEvent> {
   return (async function* () {
     yield { requestId, type: "start" };
@@ -25,8 +26,10 @@ function createEventStream<T>(
     const pending: AiStreamEvent[] = [];
     let resolve: (() => void) | null = null;
     let streamDone = false;
+    let lastEventTime = Date.now();
 
     const unlistenChunk = await listen<T>(chunkEvent, (event) => {
+      lastEventTime = Date.now();
       const mapped = mapPayload(event.payload);
       if (mapped) {
         pending.push(mapped);
@@ -55,12 +58,34 @@ function createEventStream<T>(
       while (!streamDone || pending.length > 0) {
         if (pending.length > 0) {
           const evt = pending.shift()!;
+          lastEventTime = Date.now();
           yield evt;
           if (evt.type === "done" || evt.type === "error") return;
         } else {
-          await new Promise<void>((r) => {
+          const waitPromise = new Promise<void>((r) => {
             resolve = r;
           });
+          const elapsed = Date.now() - lastEventTime;
+          const remaining = Math.max(0, timeoutMs - elapsed);
+          if (remaining <= 0) {
+            pending.push({ requestId, type: "error", error: "AI 响应超时，请检查网络连接" });
+            streamDone = true;
+            const evt = pending.shift()!;
+            yield evt;
+            return;
+          }
+          const timeoutPromise = new Promise<void>((_, reject) => {
+            setTimeout(() => reject(new Error("TIMEOUT")), remaining);
+          });
+          try {
+            await Promise.race([waitPromise, timeoutPromise]);
+          } catch {
+            pending.push({ requestId, type: "error", error: "AI 响应超时，请检查网络连接" });
+            streamDone = true;
+            const evt = pending.shift()!;
+            yield evt;
+            return;
+          }
         }
       }
     } finally {
@@ -97,13 +122,19 @@ export async function* streamAiChapterTask(
 ): AsyncGenerator<AiStreamEvent> {
   const requestId = await invokeCommand<string>("stream_ai_chapter_task", { input });
 
-  yield* createEventStream<{ content: string; finishReason: string | null; requestId: string }>(
+  yield* createEventStream<{ content: string; finishReason: string | null; requestId: string; error?: string }>(
     requestId,
     `ai:stream-chunk:${requestId}`,
     `ai:stream-done:${requestId}`,
     (payload) => {
+      if (payload.error) {
+        return { requestId, type: "error", error: payload.error };
+      }
       if (payload.content) {
         return { requestId, type: "delta", delta: payload.content };
+      }
+      if (payload.finishReason) {
+        return { requestId, type: "done" };
       }
       return null;
     }
@@ -126,13 +157,19 @@ export async function* streamAiGenerate(
     }
   });
 
-  yield* createEventStream<{ content: string; finishReason: string | null; requestId: string }>(
+  yield* createEventStream<{ content: string; finishReason: string | null; requestId: string; error?: string }>(
     requestId,
     `ai:stream-chunk:${requestId}`,
     `ai:stream-done:${requestId}`,
     (payload) => {
+      if (payload.error) {
+        return { requestId, type: "error", error: payload.error };
+      }
       if (payload.content) {
         return { requestId, type: "delta", delta: payload.content };
+      }
+      if (payload.finishReason) {
+        return { requestId, type: "done" };
       }
       return null;
     }

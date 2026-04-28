@@ -151,8 +151,12 @@ impl SettingsService {
 }
 
 fn mask_api_key(key: &str) -> String {
-    if key.len() > 8 {
-        format!("{}••••{}", &key[..4], &key[key.len() - 4..])
+    let len = key.len();
+    if len > 12 {
+        // e.g. "sk-proj-1234567890abcdefghijklmn" → "sk-proj-1234••••••••••••lmn"
+        format!("{}••••••••••••{}", &key[..8], &key[len - 4..])
+    } else if len > 8 {
+        format!("{}••••{}", &key[..4], &key[len - 4..])
     } else if !key.is_empty() {
         "••••••••".to_string()
     } else {

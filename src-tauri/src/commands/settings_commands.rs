@@ -130,6 +130,43 @@ pub async fn save_provider(
     let saved = state.settings_service.save_provider(config, api_key)?;
     crate::infra::logger::log_security("save_provider", &format!("provider={}", saved.display_name));
     state.ai_service.reload_provider(&saved.id).await?;
+
+    // Auto-create default task routes for every task type if not already configured
+    if let Some(ref default_model) = saved.default_model {
+        if !default_model.is_empty() {
+            let conn = app_database::open_or_create()?;
+            let existing_routes = app_database::load_task_routes(&conn)?;
+            let now = crate::infra::time::now_iso();
+            let task_types = [
+                "chapter_draft",
+                "chapter_continue",
+                "chapter_rewrite",
+                "prose_naturalize",
+                "character.create",
+                "world.generate",
+                "consistency.scan",
+                "blueprint.generate_step",
+                "plot.generate",
+            ];
+            for tt in &task_types {
+                if !existing_routes.iter().any(|r| r.task_type == *tt) {
+                    let route = TaskRoute {
+                        id: Uuid::new_v4().to_string(),
+                        task_type: tt.to_string(),
+                        provider_id: saved.id.clone(),
+                        model_id: default_model.clone(),
+                        fallback_provider_id: None,
+                        fallback_model_id: None,
+                        max_retries: 1,
+                        created_at: Some(now.clone()),
+                        updated_at: Some(now.clone()),
+                    };
+                    app_database::upsert_task_route(&conn, &route, &now)?;
+                }
+            }
+        }
+    }
+
     Ok(saved)
 }
 
