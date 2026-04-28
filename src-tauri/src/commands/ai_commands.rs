@@ -1,4 +1,6 @@
-use tauri::{Emitter, State};
+use std::sync::{Arc, Mutex};
+
+use tauri::{Emitter, Listener, State};
 use uuid::Uuid;
 
 use crate::adapters::{
@@ -6,10 +8,10 @@ use crate::adapters::{
     ProviderConfig,
 };
 use crate::errors::AppErrorDto;
-use crate::services::ai_service::{AiService, GeneratePreviewInput};
+use crate::services::ai_pipeline_service::RunAiTaskPipelineInput;
+use crate::services::ai_service::GeneratePreviewInput;
 use crate::services::context_service::{CollectedContext, ContextService};
 use crate::services::prompt_builder::PromptBuilder;
-use crate::services::skill_registry::SkillRegistry;
 use crate::services::task_routing;
 use crate::state::AppState;
 
@@ -136,6 +138,38 @@ pub struct ChapterTaskInput {
     pub selected_text: Option<String>,
 }
 
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PipelineEventBridgePayload {
+    pub request_id: String,
+    #[serde(rename = "type")]
+    pub event_type: String,
+    pub delta: Option<String>,
+    pub error_code: Option<String>,
+    pub message: Option<String>,
+}
+
+#[tauri::command]
+pub async fn run_ai_task_pipeline(
+    app_handle: tauri::AppHandle,
+    input: RunAiTaskPipelineInput,
+    state: State<'_, AppState>,
+) -> Result<String, AppErrorDto> {
+    let request_id = Uuid::new_v4().to_string();
+    spawn_pipeline_run(&app_handle, &state, request_id.clone(), input, false, None);
+    Ok(request_id)
+}
+
+#[tauri::command]
+pub async fn cancel_ai_task_pipeline(
+    request_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), AppErrorDto> {
+    state
+        .ai_pipeline_service
+        .cancel_ai_task_pipeline(&request_id)
+}
+
 #[tauri::command]
 pub async fn stream_ai_chapter_task(
     app_handle: tauri::AppHandle,
@@ -143,67 +177,156 @@ pub async fn stream_ai_chapter_task(
     state: State<'_, AppState>,
 ) -> Result<String, AppErrorDto> {
     crate::infra::logger::log_ai_call("streaming", "default", &input.task_type, None);
-
-    // 1. Collect context
-    let context = state
-        .context_service
-        .collect_chapter_context(&input.project_root, &input.chapter_id)?;
-
-    // 2. Build prompt (try skill Markdown first, fallback to PromptBuilder)
-    let prompt = resolve_or_build_prompt(
-        &state,
-        &context,
-        &input.task_type,
-        input.selected_text.as_deref().unwrap_or(""),
-        &input.user_instruction,
-    )?;
-
-    // 3. Build unified request with task routing
-    let req = UnifiedGenerateRequest {
-        model: "default".to_string(),
-        messages: vec![Message {
-            role: "user".to_string(),
-            content: vec![ContentBlock {
-                block_type: "text".to_string(),
-                text: Some("请根据上述要求生成内容。".to_string()),
-            }],
-        }],
-        system_prompt: Some(prompt),
-        stream: true,
-        task_type: Some(input.task_type.clone()),
-        ..Default::default()
-    };
-
-    // 4. Start streaming
     let request_id = Uuid::new_v4().to_string();
-    let mut rx = state.ai_service.stream_generate(req, None).await?;
-
-    // 5. Log AI request
-    let preview = input.user_instruction.chars().take(120).collect::<String>();
-    let _ = state.ai_service.log_ai_request(
-        &input.project_root,
-        &input.task_type,
-        None,
-        None,
-        &preview,
-        "running",
+    let pipeline_input = RunAiTaskPipelineInput {
+        project_root: input.project_root,
+        task_type: input.task_type,
+        chapter_id: Some(input.chapter_id),
+        ui_action: Some("stream_ai_chapter_task".to_string()),
+        user_instruction: input.user_instruction,
+        selected_text: input.selected_text,
+        chapter_content: None,
+        blueprint_step_key: None,
+        blueprint_step_title: None,
+    };
+    let listener_id =
+        register_legacy_stream_bridge(&app_handle, &request_id, "ai:pipeline:event".to_string());
+    spawn_pipeline_run(
+        &app_handle,
+        &state,
+        request_id.clone(),
+        pipeline_input,
+        true,
+        Some(listener_id),
     );
+    Ok(request_id)
+}
 
-    // 6. Spawn event emitter
+fn register_legacy_stream_bridge(
+    app_handle: &tauri::AppHandle,
+    request_id: &str,
+    pipeline_event_name: String,
+) -> tauri::EventId {
+    let req_id = request_id.to_string();
+    let chunk_event = format!("ai:stream-chunk:{}", req_id);
+    let done_event = format!("ai:stream-done:{}", req_id);
     let app = app_handle.clone();
-    let event_prefix = format!("ai:stream-chunk:{}", request_id);
-    let done_event = format!("ai:stream-done:{}", request_id);
-    let proj_root = input.project_root.clone();
-    let req_id = request_id.clone();
+    let slot: Arc<Mutex<Option<tauri::EventId>>> = Arc::new(Mutex::new(None));
+    let slot_for_cb = Arc::clone(&slot);
 
-    tokio::spawn(async move {
-        while let Some(chunk) = rx.recv().await {
-            let _ = app.emit(&event_prefix, &chunk);
+    let listener_id = app_handle.listen(pipeline_event_name, move |event| {
+        let payload =
+            match serde_json::from_str::<PipelineEventBridgePayload>(event.payload().as_ref()) {
+                Ok(payload) => payload,
+                Err(_) => return,
+            };
+        if payload.request_id != req_id {
+            return;
         }
-        let _ = app.emit(&done_event, "DONE");
+
+        match payload.event_type.as_str() {
+            "delta" => {
+                let _ = app.emit(
+                    &chunk_event,
+                    StreamChunk {
+                        content: payload.delta.unwrap_or_default(),
+                        finish_reason: None,
+                        request_id: req_id.clone(),
+                        error: None,
+                        reasoning: None,
+                    },
+                );
+            }
+            "error" => {
+                let error_message = payload
+                    .message
+                    .or(payload.error_code)
+                    .unwrap_or_else(|| "AI 生成异常".to_string());
+                let _ = app.emit(
+                    &chunk_event,
+                    StreamChunk {
+                        content: String::new(),
+                        finish_reason: Some("error".to_string()),
+                        request_id: req_id.clone(),
+                        error: Some(error_message),
+                        reasoning: None,
+                    },
+                );
+                let _ = app.emit(&done_event, "DONE");
+                detach_legacy_listener(&app, &slot_for_cb);
+            }
+            "done" => {
+                let _ = app.emit(
+                    &chunk_event,
+                    StreamChunk {
+                        content: String::new(),
+                        finish_reason: Some("stop".to_string()),
+                        request_id: req_id.clone(),
+                        error: None,
+                        reasoning: None,
+                    },
+                );
+                let _ = app.emit(&done_event, "DONE");
+                detach_legacy_listener(&app, &slot_for_cb);
+            }
+            _ => {}
+        }
     });
 
-    Ok(request_id)
+    if let Ok(mut guard) = slot.lock() {
+        *guard = Some(listener_id);
+    }
+    listener_id
+}
+
+fn detach_legacy_listener(
+    app_handle: &tauri::AppHandle,
+    slot: &Arc<Mutex<Option<tauri::EventId>>>,
+) {
+    if let Ok(mut guard) = slot.lock() {
+        if let Some(id) = guard.take() {
+            app_handle.unlisten(id);
+        }
+    }
+}
+
+fn spawn_pipeline_run(
+    app_handle: &tauri::AppHandle,
+    state: &State<'_, AppState>,
+    request_id: String,
+    input: RunAiTaskPipelineInput,
+    with_legacy_bridge: bool,
+    legacy_listener_id: Option<tauri::EventId>,
+) {
+    let app = app_handle.clone();
+    let pipeline_service = state.ai_pipeline_service.clone();
+    let ai_service = state.ai_service.clone();
+    let skill_registry = state.skill_registry.clone();
+    tokio::spawn(async move {
+        let context_service = ContextService;
+        let run_result = pipeline_service
+            .run_ai_task_pipeline_with_request_id(
+                &app,
+                &ai_service,
+                &context_service,
+                &skill_registry,
+                request_id.clone(),
+                input,
+            )
+            .await;
+        if run_result.is_err() {
+            crate::infra::logger::log_service(
+                "ai_commands",
+                "run_ai_task_pipeline",
+                "pipeline request failed",
+            );
+        }
+        if with_legacy_bridge {
+            if let Some(listener_id) = legacy_listener_id {
+                app.unlisten(listener_id);
+            }
+        }
+    });
 }
 
 // ── Legacy streaming command ──
@@ -338,53 +461,27 @@ pub struct AiCharacterInput {
 
 #[tauri::command]
 pub async fn ai_generate_character(
+    app_handle: tauri::AppHandle,
     input: AiCharacterInput,
     state: State<'_, AppState>,
 ) -> Result<String, AppErrorDto> {
     crate::infra::logger::log_ai_call("character", "default", "character.create", None);
-
-    let context = state
-        .context_service
-        .collect_global_context_only(&input.project_root)?;
-
-    let prompt = PromptBuilder::build_character_create(&context, &input.user_description);
-
-    let _ = state.ai_service.log_ai_request(
-        &input.project_root,
-        "character.create",
-        None,
-        None,
-        &prompt,
-        "running",
-    );
-
-    let req = UnifiedGenerateRequest {
-        model: "default".to_string(),
-        messages: vec![Message {
-            role: "user".to_string(),
-            content: vec![ContentBlock {
-                block_type: "text".to_string(),
-                text: Some("请根据用户设想生成角色卡 JSON。".to_string()),
-            }],
-        }],
-        system_prompt: Some(prompt),
-        stream: false,
-        task_type: Some("character.create".to_string()),
-        ..Default::default()
-    };
-
-    match state.ai_service.generate_text(req, None).await {
-        Ok(resp) => {
-            let text = resp
-                .choices
-                .first()
-                .and_then(|c| c.message.content.first())
-                .and_then(|c| c.text.clone())
-                .unwrap_or_default();
-            Ok(text)
-        }
-        Err(e) => Err(e),
-    }
+    run_pipeline_text_result(
+        &app_handle,
+        &state,
+        RunAiTaskPipelineInput {
+            project_root: input.project_root,
+            task_type: "character.create".to_string(),
+            chapter_id: None,
+            ui_action: Some("ai_generate_character".to_string()),
+            user_instruction: input.user_description,
+            selected_text: None,
+            chapter_content: None,
+            blueprint_step_key: None,
+            blueprint_step_title: None,
+        },
+    )
+    .await
 }
 
 // ── AI world rule creation (non-streaming) ──
@@ -398,53 +495,27 @@ pub struct AiWorldRuleInput {
 
 #[tauri::command]
 pub async fn ai_generate_world_rule(
+    app_handle: tauri::AppHandle,
     input: AiWorldRuleInput,
     state: State<'_, AppState>,
 ) -> Result<String, AppErrorDto> {
     crate::infra::logger::log_ai_call("world", "default", "world.create_rule", None);
-
-    let context = state
-        .context_service
-        .collect_global_context_only(&input.project_root)?;
-
-    let prompt = PromptBuilder::build_world_create_rule(&context, &input.user_description);
-
-    let _ = state.ai_service.log_ai_request(
-        &input.project_root,
-        "world.create_rule",
-        None,
-        None,
-        &prompt,
-        "running",
-    );
-
-    let req = UnifiedGenerateRequest {
-        model: "default".to_string(),
-        messages: vec![Message {
-            role: "user".to_string(),
-            content: vec![ContentBlock {
-                block_type: "text".to_string(),
-                text: Some("请根据用户设想生成世界设定 JSON。".to_string()),
-            }],
-        }],
-        system_prompt: Some(prompt),
-        stream: false,
-        task_type: Some("world.create_rule".to_string()),
-        ..Default::default()
-    };
-
-    match state.ai_service.generate_text(req, None).await {
-        Ok(resp) => {
-            let text = resp
-                .choices
-                .first()
-                .and_then(|c| c.message.content.first())
-                .and_then(|c| c.text.clone())
-                .unwrap_or_default();
-            Ok(text)
-        }
-        Err(e) => Err(e),
-    }
+    run_pipeline_text_result(
+        &app_handle,
+        &state,
+        RunAiTaskPipelineInput {
+            project_root: input.project_root,
+            task_type: "world.create_rule".to_string(),
+            chapter_id: None,
+            ui_action: Some("ai_generate_world_rule".to_string()),
+            user_instruction: input.user_description,
+            selected_text: None,
+            chapter_content: None,
+            blueprint_step_key: None,
+            blueprint_step_title: None,
+        },
+    )
+    .await
 }
 
 // ── AI plot node creation (non-streaming) ──
@@ -458,53 +529,27 @@ pub struct AiPlotNodeInput {
 
 #[tauri::command]
 pub async fn ai_generate_plot_node(
+    app_handle: tauri::AppHandle,
     input: AiPlotNodeInput,
     state: State<'_, AppState>,
 ) -> Result<String, AppErrorDto> {
     crate::infra::logger::log_ai_call("plot", "default", "plot.create_node", None);
-
-    let context = state
-        .context_service
-        .collect_global_context_only(&input.project_root)?;
-
-    let prompt = PromptBuilder::build_plot_create_node(&context, &input.user_description);
-
-    let _ = state.ai_service.log_ai_request(
-        &input.project_root,
-        "plot.create_node",
-        None,
-        None,
-        &prompt,
-        "running",
-    );
-
-    let req = UnifiedGenerateRequest {
-        model: "default".to_string(),
-        messages: vec![Message {
-            role: "user".to_string(),
-            content: vec![ContentBlock {
-                block_type: "text".to_string(),
-                text: Some("请根据用户设想生成剧情节点 JSON。".to_string()),
-            }],
-        }],
-        system_prompt: Some(prompt),
-        stream: false,
-        task_type: Some("plot.create_node".to_string()),
-        ..Default::default()
-    };
-
-    match state.ai_service.generate_text(req, None).await {
-        Ok(resp) => {
-            let text = resp
-                .choices
-                .first()
-                .and_then(|c| c.message.content.first())
-                .and_then(|c| c.text.clone())
-                .unwrap_or_default();
-            Ok(text)
-        }
-        Err(e) => Err(e),
-    }
+    run_pipeline_text_result(
+        &app_handle,
+        &state,
+        RunAiTaskPipelineInput {
+            project_root: input.project_root,
+            task_type: "plot.create_node".to_string(),
+            chapter_id: None,
+            ui_action: Some("ai_generate_plot_node".to_string()),
+            user_instruction: input.user_description,
+            selected_text: None,
+            chapter_content: None,
+            blueprint_step_key: None,
+            blueprint_step_title: None,
+        },
+    )
+    .await
 }
 
 // ── AI consistency scan ──
@@ -519,53 +564,46 @@ pub struct AiConsistencyInput {
 
 #[tauri::command]
 pub async fn ai_scan_consistency(
+    app_handle: tauri::AppHandle,
     input: AiConsistencyInput,
     state: State<'_, AppState>,
 ) -> Result<String, AppErrorDto> {
     crate::infra::logger::log_ai_call("consistency", "default", "consistency.scan", None);
+    run_pipeline_text_result(
+        &app_handle,
+        &state,
+        RunAiTaskPipelineInput {
+            project_root: input.project_root,
+            task_type: "consistency.scan".to_string(),
+            chapter_id: Some(input.chapter_id),
+            ui_action: Some("ai_scan_consistency".to_string()),
+            user_instruction: String::new(),
+            selected_text: None,
+            chapter_content: Some(input.chapter_content),
+            blueprint_step_key: None,
+            blueprint_step_title: None,
+        },
+    )
+    .await
+}
 
-    let context = state
-        .context_service
-        .collect_chapter_context(&input.project_root, &input.chapter_id)?;
-
-    let prompt = PromptBuilder::build_consistency_scan(&context, &input.chapter_content);
-
-    let _ = state.ai_service.log_ai_request(
-        &input.project_root,
-        "consistency.scan",
-        None,
-        None,
-        &prompt,
-        "running",
-    );
-
-    let req = UnifiedGenerateRequest {
-        model: "default".to_string(),
-        messages: vec![Message {
-            role: "user".to_string(),
-            content: vec![ContentBlock {
-                block_type: "text".to_string(),
-                text: Some("请检查章节一致性并输出 JSON。".to_string()),
-            }],
-        }],
-        system_prompt: Some(prompt),
-        stream: false,
-        task_type: Some("consistency.scan".to_string()),
-        ..Default::default()
-    };
-
-    match state.ai_service.generate_text(req, None).await {
-        Ok(resp) => {
-            let text = resp
-                .choices
-                .first()
-                .and_then(|c| c.message.content.first())
-                .and_then(|c| c.text.clone())
-                .unwrap_or_default();
-            Ok(text)
-        }
-        Err(e) => Err(e),
-    }
+async fn run_pipeline_text_result(
+    app_handle: &tauri::AppHandle,
+    state: &State<'_, AppState>,
+    input: RunAiTaskPipelineInput,
+) -> Result<String, AppErrorDto> {
+    let context_service = ContextService;
+    let result = state
+        .ai_pipeline_service
+        .run_ai_task_pipeline(
+            app_handle,
+            &state.ai_service,
+            &context_service,
+            &state.skill_registry,
+            input,
+        )
+        .await?;
+    Ok(result.output_text.unwrap_or_default())
 }
 
 /// Resolve a prompt from Skill Markdown, falling back to PromptBuilder.

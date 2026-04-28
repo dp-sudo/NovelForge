@@ -207,6 +207,8 @@ pub fn run() {
             commands::settings_commands::save_editor_settings,
             commands::ai_commands::generate_ai_preview,
             commands::ai_commands::stream_ai_generate,
+            commands::ai_commands::run_ai_task_pipeline,
+            commands::ai_commands::cancel_ai_task_pipeline,
             commands::ai_commands::stream_ai_chapter_task,
             commands::ai_commands::register_ai_provider,
             commands::ai_commands::test_ai_connection,

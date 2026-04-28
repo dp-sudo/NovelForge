@@ -100,6 +100,26 @@ impl AiPipelineService {
         input: RunAiTaskPipelineInput,
     ) -> Result<RunAiTaskPipelineResult, AppErrorDto> {
         let request_id = Uuid::new_v4().to_string();
+        self.run_ai_task_pipeline_with_request_id(
+            app_handle,
+            ai_service,
+            context_service,
+            skill_registry,
+            request_id,
+            input,
+        )
+        .await
+    }
+
+    pub async fn run_ai_task_pipeline_with_request_id(
+        &self,
+        app_handle: &tauri::AppHandle,
+        ai_service: &AiService,
+        context_service: &ContextService,
+        skill_registry: &Arc<RwLock<SkillRegistry>>,
+        request_id: String,
+        input: RunAiTaskPipelineInput,
+    ) -> Result<RunAiTaskPipelineResult, AppErrorDto> {
         let canonical_task = task_routing::canonical_task_type(&input.task_type).into_owned();
         let started_at = Instant::now();
 
