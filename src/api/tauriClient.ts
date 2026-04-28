@@ -34,13 +34,42 @@ function parseTauriError(error: unknown): AppErrorDto {
   };
 }
 
+function nowISO(): string {
+  return new Date().toISOString();
+}
+
+function logApiCall(command: string, input: Record<string, unknown> | undefined): void {
+  const safe = input
+    ? { ...input, apiKey: input.apiKey ? "[REDACTED]" : undefined, content: input.content ? `[${String(input.content).length} chars]` : undefined }
+    : {};
+  console.log(`[${nowISO()}] [API] >> ${command}`, Object.keys(safe).length ? safe : "");
+}
+
+function logApiResult(command: string, elapsedMs: number): void {
+  console.log(`[${nowISO()}] [API] << ${command} (${elapsedMs}ms)`);
+}
+
+function logApiError(command: string, elapsedMs: number, error: AppErrorDto): void {
+  console.warn(`[${nowISO()}] [API] !! ${command} (${elapsedMs}ms) FAILED: [${error.code}] ${error.message}`);
+}
+
 export async function invokeCommand<TOutput>(
   command: string,
   input?: Record<string, unknown>
 ): Promise<TOutput> {
+  const start = performance.now();
+  logApiCall(command, input);
   try {
-    return await invoke<TOutput>(command, input);
+    const result = await invoke<TOutput>(command, input);
+    logApiResult(command, Math.round(performance.now() - start));
+    return result;
   } catch (error) {
-    throw parseTauriError(error);
+    const parsed = parseTauriError(error);
+    logApiError(command, Math.round(performance.now() - start), parsed);
+    throw parsed;
   }
+}
+
+export function logUI(action: string, detail?: string): void {
+  console.log(`[${nowISO()}] [UI] ${action}${detail ? ` | ${detail}` : ""}`);
 }

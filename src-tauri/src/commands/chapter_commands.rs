@@ -66,9 +66,11 @@ pub async fn create_chapter(
     input: CreateChapterRequest,
     state: State<'_, AppState>,
 ) -> Result<ChapterRecord, AppErrorDto> {
-    state
+    let result = state
         .chapter_service
-        .create_chapter(&input.project_root, input.input)
+        .create_chapter(&input.project_root, input.input)?;
+    crate::infra::logger::log_user_action("create_chapter", &format!("chapter={}", result.title));
+    Ok(result)
 }
 
 #[tauri::command]
@@ -76,11 +78,13 @@ pub async fn save_chapter_content(
     input: SaveChapterRequest,
     state: State<'_, AppState>,
 ) -> Result<SaveChapterOutput, AppErrorDto> {
-    state.chapter_service.save_chapter_content(
+    let result = state.chapter_service.save_chapter_content(
         &input.project_root,
         &input.chapter_id,
         &input.content,
-    )
+    )?;
+    crate::infra::logger::log_user_action("save_chapter", &format!("chapter={}, words={}", input.chapter_id, result.current_words));
+    Ok(result)
 }
 
 #[tauri::command]

@@ -10,6 +10,7 @@ pub async fn scan_chapter_consistency(
     input: ScanChapterInput,
     state: State<'_, AppState>,
 ) -> Result<Vec<crate::services::consistency_service::ConsistencyIssue>, AppErrorDto> {
+    crate::infra::logger::log_user_action("consistency_scan", &format!("chapter={}", input.chapter_id));
     state.consistency_service.scan_chapter(&project_root, input)
 }
 

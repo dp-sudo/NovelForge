@@ -12,13 +12,17 @@ use state::AppState;
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
-            if cfg!(debug_assertions) {
-                app.handle().plugin(
-                    tauri_plugin_log::Builder::default()
-                        .level(log::LevelFilter::Info)
-                        .build(),
-                )?;
-            }
+            // ── Logging: stdout with Debug level ──
+            // File logging is handled by infra::logger::log_to_file() for key events
+            app.handle().plugin(
+                tauri_plugin_log::Builder::default()
+                    .level(log::LevelFilter::Debug)
+                    .timezone_strategy(tauri_plugin_log::TimezoneStrategy::UseLocal)
+                    .build(),
+            )?;
+
+            let version = app.package_info().version.to_string();
+            crate::infra::logger::log_startup(&version);
             app.handle()
                 .plugin(tauri_plugin_updater::Builder::new().build())?;
             Ok(())
@@ -81,6 +85,8 @@ pub fn run() {
             commands::settings_commands::load_provider_config,
             commands::settings_commands::save_provider_config,
             commands::settings_commands::test_provider_connection,
+            commands::settings_commands::load_editor_settings,
+            commands::settings_commands::save_editor_settings,
             commands::ai_commands::generate_ai_preview,
             commands::ai_commands::stream_ai_generate,
             commands::ai_commands::stream_ai_chapter_task,

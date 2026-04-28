@@ -1,5 +1,4 @@
 import { invokeCommand } from "./tauriClient.js";
-import * as Dev from "./dev-engine.js";
 import type { LlmProviderConfig, RefreshResult, ModelRecord, RefreshLog, TaskRoute } from "../types/ai.js";
 
 export type { LlmProviderConfig, RefreshResult, ModelRecord, RefreshLog, TaskRoute } from "../types/ai.js";
@@ -109,12 +108,12 @@ export async function applyRegistryUpdate(url: string): Promise<{ added: number;
 
 // ── Editor settings ──
 
-export function loadEditorSettings(): EditorSettingsData {
-  return Dev.DevSettings.loadEditor();
+export async function loadEditorSettings(): Promise<EditorSettingsData> {
+  return invokeCommand<EditorSettingsData>("load_editor_settings");
 }
 
-export function saveEditorSettings(input: EditorSettingsData): void {
-  Dev.DevSettings.saveEditor(input);
+export async function saveEditorSettings(input: EditorSettingsData): Promise<void> {
+  await invokeCommand<void>("save_editor_settings", { settings: input });
 }
 
 // —— Git integration ——

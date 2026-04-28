@@ -60,7 +60,9 @@ pub async fn create_project(
     input: CreateProjectInput,
     state: State<'_, AppState>,
 ) -> Result<ProjectOpenResult, AppErrorDto> {
-    state.project_service.create_project(input)
+    let result = state.project_service.create_project(input)?;
+    crate::infra::logger::log_user_action("create_project", &result.project_root);
+    Ok(result)
 }
 
 #[tauri::command]
@@ -68,7 +70,9 @@ pub async fn open_project(
     input: OpenProjectInput,
     state: State<'_, AppState>,
 ) -> Result<ProjectOpenResult, AppErrorDto> {
-    state.project_service.open_project(&input.project_root)
+    let result = state.project_service.open_project(&input.project_root)?;
+    crate::infra::logger::log_user_action("open_project", &input.project_root);
+    Ok(result)
 }
 
 #[tauri::command]

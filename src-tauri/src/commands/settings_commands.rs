@@ -6,6 +6,7 @@ use tauri_plugin_updater::UpdaterExt;
 use crate::adapters::llm_types::{ProviderConfig, TaskRoute};
 use crate::errors::AppErrorDto;
 use crate::infra::app_database;
+use crate::services::settings_service::EditorSettings;
 use crate::state::AppState;
 
 #[derive(Debug, Clone, Serialize)]
@@ -127,6 +128,7 @@ pub async fn save_provider(
     state: State<'_, AppState>,
 ) -> Result<ProviderConfig, AppErrorDto> {
     let saved = state.settings_service.save_provider(config, api_key)?;
+    crate::infra::logger::log_security("save_provider", &format!("provider={}", saved.display_name));
     state.ai_service.reload_provider(&saved.id).await?;
     Ok(saved)
 }
@@ -144,6 +146,7 @@ pub async fn delete_provider(
     provider_id: String,
     state: State<'_, AppState>,
 ) -> Result<(), AppErrorDto> {
+    crate::infra::logger::log_security("delete_provider", &format!("provider_id={}", provider_id));
     state.settings_service.delete_provider(&provider_id)?;
     state.ai_service.unregister_provider(&provider_id).await;
     Ok(())
@@ -242,6 +245,23 @@ pub async fn apply_registry_update(
         .model_registry_service
         .apply_registry_update(&url)
         .await
+}
+
+// ── Editor settings commands ──
+
+#[tauri::command]
+pub async fn load_editor_settings(
+    state: State<'_, AppState>,
+) -> Result<EditorSettings, AppErrorDto> {
+    state.settings_service.load_editor_settings()
+}
+
+#[tauri::command]
+pub async fn save_editor_settings(
+    settings: EditorSettings,
+    state: State<'_, AppState>,
+) -> Result<(), AppErrorDto> {
+    state.settings_service.save_editor_settings(&settings)
 }
 
 // ── Legacy backward-compatible wrappers ──

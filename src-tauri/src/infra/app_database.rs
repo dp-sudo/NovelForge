@@ -575,6 +575,41 @@ pub fn delete_task_route(conn: &Connection, route_id: &str) -> Result<(), AppErr
     Ok(())
 }
 
+// ── app_settings CRUD ──
+
+/// Load a single app setting by key. Returns None if not found.
+pub fn load_app_setting(conn: &Connection, key: &str) -> Result<Option<String>, AppErrorDto> {
+    let mut stmt = conn
+        .prepare("SELECT value FROM app_settings WHERE key = ?1")
+        .map_err(|e| {
+            AppErrorDto::new("DB_READ_FAILED", "Cannot read app setting", true)
+                .with_detail(e.to_string())
+        })?;
+
+    let result = stmt.query_row(params![key], |row| row.get::<_, String>(0));
+
+    match result {
+        Ok(value) => Ok(Some(value)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(AppErrorDto::new("DB_READ_FAILED", "Cannot read app setting", true)
+            .with_detail(e.to_string())),
+    }
+}
+
+/// Save (upsert) an app setting.
+pub fn save_app_setting(conn: &Connection, key: &str, value: &str, now: &str) -> Result<(), AppErrorDto> {
+    conn.execute(
+        "INSERT INTO app_settings (key, value, updated_at) VALUES (?1, ?2, ?3)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+        params![key, value, now],
+    )
+    .map_err(|e| {
+        AppErrorDto::new("DB_WRITE_FAILED", "Cannot save app setting", true)
+            .with_detail(e.to_string())
+    })?;
+    Ok(())
+}
+
 /// Get recent refresh logs for a provider.
 #[allow(dead_code)]
 pub fn load_refresh_logs(

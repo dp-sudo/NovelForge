@@ -1,5 +1,4 @@
 import { invokeCommand } from "./tauriClient.js";
-import * as Dev from "./dev-engine.js";
 import type { ExportOptions } from "../domain/types.js";
 
 export interface ExportOutput {
@@ -16,13 +15,9 @@ export async function exportChapter(
   outputPath: string,
   options?: ExportOptions
 ): Promise<ExportOutput> {
-  try {
-    return await invokeCommand<ExportOutput>("export_chapter", {
-      input: { projectRoot, chapterId, format, outputPath, options }
-    });
-  } catch {
-    return Dev.DevExport.exportChapter(projectRoot, chapterId, format, outputPath, options);
-  }
+  return await invokeCommand<ExportOutput>("export_chapter", {
+    input: { projectRoot, chapterId, format, outputPath, options }
+  });
 }
 
 export async function exportBook(
@@ -31,11 +26,7 @@ export async function exportBook(
   outputPath: string,
   options?: ExportOptions
 ): Promise<ExportOutput> {
-  try {
-    return await invokeCommand<ExportOutput>("export_book", {
-      input: { projectRoot, format, outputPath, options }
-    });
-  } catch {
-    return Dev.DevExport.exportBook(projectRoot, format, outputPath, options);
-  }
+  return await invokeCommand<ExportOutput>("export_book", {
+    input: { projectRoot, format, outputPath, options }
+  });
 }

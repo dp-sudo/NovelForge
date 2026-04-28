@@ -29,13 +29,15 @@ pub async fn export_chapter(
     input: ExportChapterRequest,
     state: State<'_, AppState>,
 ) -> Result<ExportOutput, AppErrorDto> {
-    state.export_service.export_chapter(
+    let result = state.export_service.export_chapter(
         &input.project_root,
         &input.chapter_id,
         &input.format,
         &input.output_path,
         input.options,
-    )
+    )?;
+    crate::infra::logger::log_user_action("export_chapter", &format!("format={}, path={}", input.format, input.output_path));
+    Ok(result)
 }
 
 #[tauri::command]

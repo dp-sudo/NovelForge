@@ -5,6 +5,29 @@ use crate::adapters::llm_types::ProviderConfig;
 use crate::adapters::openai_compatible::OpenAiCompatibleAdapter;
 use crate::errors::AppErrorDto;
 use crate::infra::{app_database, credential_manager};
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EditorSettings {
+    pub font_size: i32,
+    pub line_height: f64,
+    pub autosave_interval: i32,
+    pub narrative_pov: String,
+}
+
+impl Default for EditorSettings {
+    fn default() -> Self {
+        Self {
+            font_size: 16,
+            line_height: 1.75,
+            autosave_interval: 5,
+            narrative_pov: "third_limited".to_string(),
+        }
+    }
+}
+
+const EDITOR_SETTINGS_KEY: &str = "editor_settings";
 
 #[derive(Default)]
 pub struct SettingsService;
@@ -91,6 +114,39 @@ impl SettingsService {
         let adapter = build_adapter(config);
         adapter.test_connection().await.map_err(AppErrorDto::from)?;
         Ok("连接成功！".to_string())
+    }
+
+    /// Load editor settings. Returns defaults if none are saved.
+    pub fn load_editor_settings(&self) -> Result<EditorSettings, AppErrorDto> {
+        let conn = app_database::open_or_create()?;
+        match app_database::load_app_setting(&conn, EDITOR_SETTINGS_KEY)? {
+            Some(json) => {
+                serde_json::from_str(&json).map_err(|e| {
+                    AppErrorDto::new(
+                        "DESERIALIZE_FAILED",
+                        "Cannot parse editor settings",
+                        true,
+                    )
+                    .with_detail(e.to_string())
+                })
+            }
+            None => Ok(EditorSettings::default()),
+        }
+    }
+
+    /// Save editor settings.
+    pub fn save_editor_settings(&self, settings: &EditorSettings) -> Result<(), AppErrorDto> {
+        let json = serde_json::to_string(settings).map_err(|e| {
+            AppErrorDto::new(
+                "SERIALIZE_FAILED",
+                "Cannot serialize editor settings",
+                false,
+            )
+            .with_detail(e.to_string())
+        })?;
+        let now = crate::infra::time::now_iso();
+        let conn = app_database::open_or_create()?;
+        app_database::save_app_setting(&conn, EDITOR_SETTINGS_KEY, &json, &now)
     }
 }
 

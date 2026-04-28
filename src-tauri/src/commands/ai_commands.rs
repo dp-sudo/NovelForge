@@ -19,10 +19,15 @@ pub async fn generate_ai_preview(
     input: GeneratePreviewInput,
     state: State<'_, AppState>,
 ) -> Result<crate::services::ai_service::AiPreviewResult, AppErrorDto> {
+    crate::infra::logger::log_ai_call("preview", "default", &input.task_type, None);
+
     // Attempt real preview using context + prompt builder
     let chapter_id = match &input.chapter_id {
         Some(cid) if !cid.is_empty() => cid.clone(),
-        _ => return Ok(legacy_mock_preview(&input)),
+        _ => {
+            crate::infra::logger::log_service("ai_commands", "generate_ai_preview", "no chapter_id, using mock");
+            return Ok(legacy_mock_preview(&input));
+        }
     };
 
     let context = match state
@@ -30,7 +35,10 @@ pub async fn generate_ai_preview(
         .collect_chapter_context(&project_root, &chapter_id)
     {
         Ok(ctx) => ctx,
-        Err(_) => return Ok(legacy_mock_preview(&input)),
+        Err(_) => {
+            crate::infra::logger::log_service("ai_commands", "generate_ai_preview", "context collection failed, fallback to mock");
+            return Ok(legacy_mock_preview(&input));
+        }
     };
 
     let prompt = match input.task_type.as_str() {
@@ -130,6 +138,8 @@ pub async fn stream_ai_chapter_task(
     input: ChapterTaskInput,
     state: State<'_, AppState>,
 ) -> Result<String, AppErrorDto> {
+    crate::infra::logger::log_ai_call("streaming", "default", &input.task_type, None);
+
     // 1. Collect context
     let context = state
         .context_service
@@ -271,6 +281,8 @@ pub async fn generate_blueprint_suggestion(
     input: BlueprintSuggestionInput,
     state: State<'_, AppState>,
 ) -> Result<String, AppErrorDto> {
+    crate::infra::logger::log_ai_call("blueprint", "default", &format!("blueprint.{}", input.step_key), None);
+
     // Collect global context
     let context = state
         .context_service
@@ -338,6 +350,8 @@ pub async fn ai_generate_character(
     input: AiCharacterInput,
     state: State<'_, AppState>,
 ) -> Result<String, AppErrorDto> {
+    crate::infra::logger::log_ai_call("character", "default", "character.create", None);
+
     let context = state
         .context_service
         .collect_global_context_only(&input.project_root)?;
@@ -397,6 +411,8 @@ pub async fn ai_scan_consistency(
     input: AiConsistencyInput,
     state: State<'_, AppState>,
 ) -> Result<String, AppErrorDto> {
+    crate::infra::logger::log_ai_call("consistency", "default", "consistency.scan", None);
+
     let context = state
         .context_service
         .collect_chapter_context(&input.project_root, &input.chapter_id)?;

@@ -444,7 +444,9 @@ export function SettingsPage() {
         setTaskRoutesLoading(false);
       }
     })();
-    setEditor(loadEditorSettings());
+    (async () => {
+      setEditor(await loadEditorSettings());
+    })();
   }, []);
 
   function updateVendor(id: string, patch: Partial<LlmProviderConfig>) {
@@ -990,7 +992,7 @@ export function SettingsPage() {
             { value: "third_omniscient", label: "第三人称全知" },
           ]} />
           <div className="pt-3 border-t border-surface-700 flex justify-end">
-            <Button variant="primary" onClick={() => { saveEditorSettings(editor); setEditorSaved(true); setTimeout(() => setEditorSaved(false), 2000); }}>
+            <Button variant="primary" onClick={async () => { await saveEditorSettings(editor); setEditorSaved(true); setTimeout(() => setEditorSaved(false), 2000); }}>
               {editorSaved ? "已保存 ✓" : "保存"}
             </Button>
           </div>

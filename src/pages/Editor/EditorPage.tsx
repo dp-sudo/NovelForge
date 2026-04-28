@@ -25,6 +25,7 @@ import { Modal } from "../../components/dialogs/Modal";
 import { Input } from "../../components/forms/Input";
 import { Select } from "../../components/forms/Select";
 import { Textarea } from "../../components/forms/Textarea";
+import { Button } from "../../components/ui/Button.js";
 
 const AUTOSAVE_DELAY_MS = 5000;
 
