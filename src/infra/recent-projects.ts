@@ -10,7 +10,7 @@ export interface RecentProjectItem {
 const MAX_RECENT_ITEMS = 20;
 
 function recentProjectsFilePath(): string {
-  return path.join(os.homedir(), ".novelforge", "recent-projects.json");
+  return path.join(resolveAppDataDir(), "recent-projects.json");
 }
 
 async function ensureRecentProjectsFile(): Promise<string> {
@@ -62,4 +62,18 @@ export async function removeRecentProject(projectPath: string): Promise<void> {
   const list = await listRecentProjects();
   const next = list.filter((item) => item.projectPath !== projectPath);
   await writeRecentProjects(next);
+}
+
+function resolveAppDataDir(): string {
+  const override = process.env.NOVELFORGE_APP_DATA_DIR?.trim();
+  if (override) {
+    return override;
+  }
+  if (process.platform === "win32") {
+    const localAppData = process.env.LOCALAPPDATA?.trim();
+    if (localAppData) {
+      return path.join(localAppData, "NovelForge");
+    }
+  }
+  return path.join(os.homedir(), ".novelforge");
 }

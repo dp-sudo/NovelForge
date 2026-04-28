@@ -11,6 +11,7 @@ interface InflightInvokeRecord {
 }
 
 const inflightInvokes = new Map<number, InflightInvokeRecord>();
+const unloadCleanupHandlers = new Set<(reason: string) => void>();
 let invokeSequence = 0;
 
 declare global {
@@ -105,12 +106,30 @@ function logInflightSnapshot(reason: string): void {
   console.warn(`[${nowISO()}] [API] !! in-flight invoke snapshot | reason=${reason} | count=${inflightInvokes.size} | ${details}`);
 }
 
+function runUnloadCleanups(reason: string): void {
+  for (const handler of unloadCleanupHandlers) {
+    try {
+      handler(reason);
+    } catch (error) {
+      console.warn(`[${nowISO()}] [API] !! unload cleanup failed (${reason})`, error);
+    }
+  }
+}
+
+export function registerUnloadCleanup(handler: (reason: string) => void): () => void {
+  unloadCleanupHandlers.add(handler);
+  return () => {
+    unloadCleanupHandlers.delete(handler);
+  };
+}
+
 function bindUnloadDiagnosticsOnce(): void {
   if (typeof window === "undefined" || window.__NOVELFORGE_INFLIGHT_DIAGNOSTIC_BOUND__) {
     return;
   }
   window.__NOVELFORGE_INFLIGHT_DIAGNOSTIC_BOUND__ = true;
   window.addEventListener("beforeunload", () => {
+    runUnloadCleanups("beforeunload");
     logInflightSnapshot("beforeunload");
   });
 }
@@ -125,6 +144,7 @@ const hotContext = (import.meta as ImportMeta & {
 
 if (hotContext) {
   hotContext.on("vite:beforeFullReload", () => {
+    runUnloadCleanups("vite:beforeFullReload");
     logInflightSnapshot("vite:beforeFullReload");
   });
 }

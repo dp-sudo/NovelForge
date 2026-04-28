@@ -179,10 +179,7 @@ pub async fn cancel_ai_task_pipeline(
     request_id: String,
     state: State<'_, AppState>,
 ) -> Result<(), AppErrorDto> {
-    crate::infra::logger::log_user_action(
-        "pipeline.cancel",
-        &format!("requestId={}", request_id),
-    );
+    crate::infra::logger::log_user_action("pipeline.cancel", &format!("requestId={}", request_id));
     state
         .ai_pipeline_service
         .cancel_ai_task_pipeline(&request_id)
@@ -372,10 +369,14 @@ fn spawn_pipeline_run(
 #[tauri::command]
 pub async fn stream_ai_generate(
     app_handle: tauri::AppHandle,
+    request_id: Option<String>,
     req: UnifiedGenerateRequest,
     state: State<'_, AppState>,
 ) -> Result<String, AppErrorDto> {
-    let request_id = Uuid::new_v4().to_string();
+    let request_id = request_id
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| Uuid::new_v4().to_string());
     let event_prefix = format!("ai:stream-chunk:{}", request_id);
     let done_event = format!("ai:stream-done:{}", request_id);
 

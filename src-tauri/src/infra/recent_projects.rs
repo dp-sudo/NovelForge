@@ -3,8 +3,9 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
+use crate::infra::app_paths::app_data_dir;
+use crate::infra::fs_utils::write_file_atomic;
 use crate::infra::time::now_iso;
 
 const MAX_RECENT_ITEMS: usize = 20;
@@ -17,9 +18,8 @@ pub struct RecentProjectItem {
 }
 
 fn recent_projects_file_path() -> io::Result<PathBuf> {
-    let home = dirs::home_dir()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "home directory is unavailable"))?;
-    Ok(home.join(".novelforge").join("recent-projects.json"))
+    let dir = app_data_dir().map_err(|err| io::Error::other(err.message))?;
+    Ok(dir.join("recent-projects.json"))
 }
 
 fn ensure_recent_projects_file() -> io::Result<PathBuf> {
@@ -28,7 +28,7 @@ fn ensure_recent_projects_file() -> io::Result<PathBuf> {
         fs::create_dir_all(parent)?;
     }
     if !file_path.exists() {
-        fs::write(&file_path, "[]")?;
+        write_file_atomic(&file_path, "[]")?;
     }
     Ok(file_path)
 }
@@ -59,17 +59,9 @@ pub fn list_recent_projects() -> io::Result<Vec<RecentProjectItem>> {
 
 fn write_recent_projects(items: &[RecentProjectItem]) -> io::Result<()> {
     let file_path = ensure_recent_projects_file()?;
-    let temp_path = file_path.with_extension(format!("{}.tmp", Uuid::new_v4()));
     let payload = serde_json::to_string_pretty(items)
         .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
-    fs::write(&temp_path, payload)?;
-    match fs::rename(&temp_path, &file_path) {
-        Ok(_) => Ok(()),
-        Err(_) => {
-            let _ = fs::remove_file(&file_path);
-            fs::rename(temp_path, file_path)
-        }
-    }
+    write_file_atomic(&file_path, &payload)
 }
 
 pub fn mark_recent_project(project_path: &str) -> io::Result<()> {

@@ -38,9 +38,7 @@ impl SettingsService {
         let conn = app_database::open_or_create()?;
         let mut configs = app_database::load_all_providers(&conn)?;
         for config in &mut configs {
-            if let Ok(Some(key)) = credential_manager::load_api_key(&config.id) {
-                config.api_key = Some(mask_api_key(&key));
-            }
+            config.api_key = load_masked_api_key(&config.id)?;
         }
         Ok(configs)
     }
@@ -57,17 +55,18 @@ impl SettingsService {
         let conn = app_database::open_or_create()?;
 
         if let Some(ref key) = api_key {
-            if !key.is_empty() {
-                credential_manager::save_api_key(&config.id, key)?;
+            let trimmed = key.trim();
+            if trimmed.is_empty() {
+                credential_manager::delete_api_key(&config.id)?;
+            } else {
+                credential_manager::save_api_key(&config.id, trimmed)?;
             }
         }
 
         app_database::upsert_provider(&conn, &config, &now)?;
 
         let mut result = config;
-        if let Ok(Some(key)) = credential_manager::load_api_key(&result.id) {
-            result.api_key = Some(mask_api_key(&key));
-        }
+        result.api_key = load_masked_api_key(&result.id)?;
         Ok(result)
     }
 
@@ -82,9 +81,7 @@ impl SettingsService {
             )
         })?;
 
-        if let Ok(Some(key)) = credential_manager::load_api_key(provider_id) {
-            config.api_key = Some(mask_api_key(&key));
-        }
+        config.api_key = load_masked_api_key(provider_id)?;
         Ok(config)
     }
 
@@ -92,7 +89,7 @@ impl SettingsService {
     pub fn delete_provider(&self, provider_id: &str) -> Result<(), AppErrorDto> {
         let conn = app_database::open_or_create()?;
         app_database::delete_provider(&conn, provider_id)?;
-        let _ = credential_manager::delete_api_key(provider_id);
+        credential_manager::delete_api_key(provider_id)?;
         Ok(())
     }
 
@@ -107,7 +104,7 @@ impl SettingsService {
             )
         })?;
 
-        if let Ok(Some(key)) = credential_manager::load_api_key(provider_id) {
+        if let Some(key) = credential_manager::load_api_key(provider_id)? {
             config.api_key = Some(key);
         }
 
@@ -156,6 +153,10 @@ fn mask_api_key(key: &str) -> String {
     } else {
         String::new()
     }
+}
+
+fn load_masked_api_key(provider_id: &str) -> Result<Option<String>, AppErrorDto> {
+    credential_manager::load_api_key(provider_id).map(|value| value.map(|key| mask_api_key(&key)))
 }
 
 fn validate_provider_config(config: &mut ProviderConfig) -> Result<(), AppErrorDto> {

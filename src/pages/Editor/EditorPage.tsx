@@ -26,8 +26,7 @@ import {
 } from "../../api/contextApi";
 import {
   cancelTaskPipeline,
-  runTaskPipeline,
-  streamTaskPipelineByRequestId
+  streamTaskPipeline
 } from "../../api/pipelineApi";
 import type { ChapterRecord } from "../../api/chapterApi";
 import { Modal } from "../../components/dialogs/Modal";
@@ -93,6 +92,8 @@ const PIPELINE_SUGGESTION_BY_ERROR_CODE: Record<string, string> = {
   PROVIDER_NOT_FOUND: "前往 设置 > 模型配置，确认 Provider 已创建且可用。",
   LLM_ADAPTER_NOT_FOUND: "前往 设置 > 模型配置，先测试并重新加载该 Provider。",
   LLM_NO_PROVIDER: "前往 设置 > 任务路由或模型配置，补齐可用模型后重试。",
+  PIPELINE_START_TIMEOUT: "任务启动超时，可能是开发热重载或后端回调中断，重试前先确认页面未重载。",
+  PIPELINE_FIRST_EVENT_TIMEOUT: "任务已启动但未收到事件，可能存在事件监听竞态或开发热重载，请重试。",
   PIPELINE_EVENT_TIMEOUT: "模型响应超时，请检查网络/API Key 或切换模型后重试。",
   PIPELINE_CANCELLED: "任务已取消，可重新发起。"
 };
@@ -452,7 +453,7 @@ export function EditorPage() {
     store.setAiStreamError(null);
 
     try {
-      const requestId = await runTaskPipeline({
+      const stream = streamTaskPipeline({
         projectRoot,
         taskType: canonicalTask,
         chapterId,
@@ -462,18 +463,13 @@ export function EditorPage() {
         chapterContent: requirements.requiresChapterContent ? content : undefined
       });
 
-      if (runToken !== aiRunTokenRef.current) {
-        await cancelTaskPipeline(requestId).catch(() => undefined);
-        return;
-      }
-
-      activeAiRequestIdRef.current = requestId;
-      store.setAiRequestId(requestId);
-
-      const stream = streamTaskPipelineByRequestId(requestId);
       for await (const event of stream) {
         if (runToken !== aiRunTokenRef.current) {
           break;
+        }
+        if (activeAiRequestIdRef.current !== event.requestId) {
+          activeAiRequestIdRef.current = event.requestId;
+          store.setAiRequestId(event.requestId);
         }
         if (event.type === "delta" && event.delta) {
           store.appendAiPreviewContent(event.delta);

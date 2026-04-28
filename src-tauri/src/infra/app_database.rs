@@ -1,8 +1,10 @@
 //! App-level SQLite database (separate from project databases).
 //!
 //! Stores provider configurations, model registry, task routes, and app settings.
-//! Located at `~/.novelforge/novelforge.db`.
+//! Located at the per-user app data directory (`%LOCALAPPDATA%\\NovelForge` on Windows).
 
+use std::fs;
+use std::path::Path;
 use std::path::PathBuf;
 
 use rusqlite::{params, Connection};
@@ -115,28 +117,14 @@ use log::info;
 /// Get the path to the app-level database.
 pub fn app_database_path() -> Result<PathBuf, AppErrorDto> {
     let app_dir = app_dir()?;
-    Ok(app_dir.join("novelforge.db"))
+    let db_path = app_dir.join("novelforge.db");
+    migrate_legacy_database_if_needed(&db_path)?;
+    Ok(db_path)
 }
 
 /// Get the app data directory, creating it if needed.
 pub fn app_dir() -> Result<PathBuf, AppErrorDto> {
-    let home = dirs::home_dir().ok_or_else(|| {
-        AppErrorDto::new(
-            "HOME_DIR_MISSING",
-            "Cannot determine user home directory",
-            false,
-        )
-    })?;
-    let dir = home.join(".novelforge");
-    std::fs::create_dir_all(&dir).map_err(|e| {
-        AppErrorDto::new(
-            "APP_DIR_CREATE_FAILED",
-            "Cannot create app data directory",
-            true,
-        )
-        .with_detail(e.to_string())
-    })?;
-    Ok(dir)
+    crate::infra::app_paths::app_data_dir()
 }
 
 /// Initialize the app-level database (creates tables if not exists).
@@ -735,5 +723,55 @@ fn ensure_column(
         )
         .with_detail(e.to_string())
     })?;
+    Ok(())
+}
+
+fn migrate_legacy_database_if_needed(target_db_path: &Path) -> Result<(), AppErrorDto> {
+    if target_db_path.exists() {
+        return Ok(());
+    }
+
+    let Some(legacy_dir) = crate::infra::app_paths::legacy_home_app_dir() else {
+        return Ok(());
+    };
+    let legacy_db_path = legacy_dir.join("novelforge.db");
+    if !legacy_db_path.exists() {
+        return Ok(());
+    }
+
+    if let Some(parent) = target_db_path.parent() {
+        fs::create_dir_all(parent).map_err(|err| {
+            AppErrorDto::new(
+                "APP_DB_MIGRATION_FAILED",
+                "Cannot create app data directory for database migration",
+                false,
+            )
+            .with_detail(err.to_string())
+        })?;
+    }
+
+    fs::copy(&legacy_db_path, target_db_path).map_err(|err| {
+        AppErrorDto::new(
+            "APP_DB_MIGRATION_FAILED",
+            "Cannot migrate legacy app database",
+            false,
+        )
+        .with_detail(err.to_string())
+    })?;
+
+    for suffix in [".wal", ".shm"] {
+        let legacy_sidecar = legacy_db_path.with_extension(format!("db{}", suffix));
+        if legacy_sidecar.exists() {
+            let target_sidecar = target_db_path.with_extension(format!("db{}", suffix));
+            let _ = fs::copy(legacy_sidecar, target_sidecar);
+        }
+    }
+
+    info!(
+        "[APP_DB] migrated legacy app database from {} to {}",
+        legacy_db_path.to_string_lossy(),
+        target_db_path.to_string_lossy()
+    );
+
     Ok(())
 }

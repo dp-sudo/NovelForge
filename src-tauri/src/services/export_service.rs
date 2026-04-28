@@ -10,6 +10,7 @@ use zip::{CompressionMethod, ZipWriter};
 
 use crate::errors::AppErrorDto;
 use crate::infra::database::open_database;
+use crate::infra::fs_utils::{write_bytes_atomic, write_file_atomic};
 use crate::infra::path_utils::resolve_project_relative_path;
 use crate::infra::time::now_iso;
 
@@ -286,7 +287,7 @@ fn write_export_output(
     match format {
         ExportFormat::Txt | ExportFormat::Md => {
             let content = render_text_export(chapters, options, format);
-            fs::write(&resolved, content).map_err(|err| {
+            write_file_atomic(&resolved, &content).map_err(|err| {
                 AppErrorDto::new("EXPORT_FAILED", "导出失败", true)
                     .with_detail(err.to_string())
                     .with_suggested_action("请检查导出文件写入权限")
@@ -361,7 +362,8 @@ fn write_docx_output(
     chapters: &[RenderedChapter],
     options: &ExportOptions,
 ) -> Result<(), AppErrorDto> {
-    let file = fs::File::create(output_path).map_err(|err| {
+    let temp_output = temporary_output_path(output_path);
+    let file = fs::File::create(&temp_output).map_err(|err| {
         AppErrorDto::new("EXPORT_FAILED", "导出失败", true)
             .with_detail(err.to_string())
             .with_suggested_action("请检查导出文件写入权限")
@@ -454,6 +456,7 @@ fn write_docx_output(
             .with_detail(err.to_string())
             .with_suggested_action("请检查 DOCX 文件完整性")
     })?;
+    commit_temporary_output(&temp_output, output_path)?;
 
     Ok(())
 }
@@ -479,7 +482,7 @@ fn write_pdf_output(
 ) -> Result<(), AppErrorDto> {
     let lines = collect_export_lines(chapters, options, false);
     let bytes = build_pdf_bytes(&lines);
-    fs::write(output_path, bytes).map_err(|err| {
+    write_bytes_atomic(output_path, &bytes).map_err(|err| {
         AppErrorDto::new("EXPORT_FAILED", "导出失败", true)
             .with_detail(err.to_string())
             .with_suggested_action("请检查 PDF 文件写入权限")
@@ -594,7 +597,8 @@ fn write_epub_output(
     options: &ExportOptions,
     project_name: &str,
 ) -> Result<(), AppErrorDto> {
-    let file = fs::File::create(output_path).map_err(|err| {
+    let temp_output = temporary_output_path(output_path);
+    let file = fs::File::create(&temp_output).map_err(|err| {
         AppErrorDto::new("EXPORT_FAILED", "导出失败", true)
             .with_detail(err.to_string())
             .with_suggested_action("请检查导出文件写入权限")
@@ -711,7 +715,34 @@ fn write_epub_output(
             .with_detail(err.to_string())
             .with_suggested_action("请检查 EPUB 文件完整性")
     })?;
+    commit_temporary_output(&temp_output, output_path)?;
     Ok(())
+}
+
+fn temporary_output_path(output_path: &Path) -> PathBuf {
+    let file_name = output_path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("export");
+    let temp_name = format!("{file_name}.{}.tmp", Uuid::new_v4());
+    match output_path.parent() {
+        Some(parent) => parent.join(temp_name),
+        None => PathBuf::from(temp_name),
+    }
+}
+
+fn commit_temporary_output(temp_path: &Path, target_path: &Path) -> Result<(), AppErrorDto> {
+    match fs::rename(temp_path, target_path) {
+        Ok(()) => Ok(()),
+        Err(_) => {
+            let _ = fs::remove_file(target_path);
+            fs::rename(temp_path, target_path).map_err(|err| {
+                AppErrorDto::new("EXPORT_FAILED", "导出失败", true)
+                    .with_detail(err.to_string())
+                    .with_suggested_action("请检查导出目录写入权限")
+            })
+        }
+    }
 }
 
 fn build_epub_chapter_xhtml(chapter: &RenderedChapter, options: &ExportOptions) -> String {

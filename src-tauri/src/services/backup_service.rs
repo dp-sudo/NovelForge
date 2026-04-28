@@ -10,6 +10,7 @@ use zip::CompressionMethod;
 use zip::ZipWriter;
 
 use crate::errors::AppErrorDto;
+use crate::infra::fs_utils::write_bytes_atomic;
 use crate::infra::path_utils::resolve_project_relative_path;
 use crate::infra::time::now_iso;
 
@@ -249,7 +250,7 @@ impl BackupService {
                     .with_detail(e.to_string())
             })?;
 
-            fs::write(&target_path, &content).map_err(|e| {
+            write_bytes_atomic(&target_path, &content).map_err(|e| {
                 AppErrorDto::new("RESTORE_FAILED", "写入恢复文件失败", true)
                     .with_detail(e.to_string())
             })?;

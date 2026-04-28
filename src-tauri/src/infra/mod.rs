@@ -1,5 +1,6 @@
 //! Infrastructure helpers for local filesystem and persistence.
 pub mod app_database;
+pub mod app_paths;
 pub mod credential_manager;
 pub mod crypto;
 pub mod database;

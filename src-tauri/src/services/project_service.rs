@@ -159,6 +159,7 @@ impl ProjectService {
 
         let sanitized_directory_name = sanitize_project_directory_name(&normalized_name);
         let project_root_path = save_directory_path.join(sanitized_directory_name);
+        reject_dev_watch_conflict(&project_root_path)?;
         if project_root_path.exists() {
             return Err(
                 AppErrorDto::new("PROJECT_PATH_EXISTS", "目标目录已存在同名项目", true)
@@ -283,7 +284,30 @@ impl ProjectService {
     }
 
     pub fn open_project(&self, project_root: &str) -> Result<ProjectOpenResult, AppErrorDto> {
-        let project_root_path = Path::new(project_root);
+        let normalized_root = project_root.trim();
+        if normalized_root.is_empty() {
+            return Err(
+                AppErrorDto::new("PROJECT_INVALID_PATH", "项目目录不能为空", true)
+                    .with_suggested_action("请输入有效的 Windows 绝对路径"),
+            );
+        }
+
+        let project_root_path = Path::new(normalized_root);
+        if !project_root_path.is_absolute() {
+            return Err(
+                AppErrorDto::new("PROJECT_INVALID_PATH", "项目目录必须是绝对路径", true)
+                    .with_suggested_action("请输入有效的 Windows 绝对路径"),
+            );
+        }
+        if !project_root_path.exists() || !project_root_path.is_dir() {
+            return Err(
+                AppErrorDto::new("PROJECT_INVALID_PATH", "项目目录不存在或不可用", true)
+                    .with_detail(normalized_root.to_string())
+                    .with_suggested_action("请检查目录路径并重试"),
+            );
+        }
+
+        reject_dev_watch_conflict(project_root_path)?;
         let project_json_path = project_root_path.join("project.json");
         let db_path = project_root_path.join("database").join("project.sqlite");
 
@@ -316,9 +340,9 @@ impl ProjectService {
         })?;
         validate_project_db_paths(project_root_path, &conn)?;
 
-        let _ = mark_recent_project(project_root);
+        let _ = mark_recent_project(normalized_root);
         Ok(ProjectOpenResult {
-            project_root: project_root.to_string(),
+            project_root: normalized_root.to_string(),
             project,
         })
     }
@@ -390,6 +414,45 @@ impl ProjectService {
             None => Ok(WritingStyle::default()),
         }
     }
+}
+
+fn reject_dev_watch_conflict(project_root: &Path) -> Result<(), AppErrorDto> {
+    if !cfg!(debug_assertions) {
+        return Ok(());
+    }
+    let cwd = std::env::current_dir().map_err(|err| {
+        AppErrorDto::new("PROJECT_PATH_CHECK_FAILED", "项目路径检查失败", true)
+            .with_detail(err.to_string())
+    })?;
+    if is_path_within(project_root, &cwd) {
+        return Err(AppErrorDto::new(
+            "PROJECT_DEV_WATCH_CONFLICT",
+            "开发模式下，请勿将项目放在代码仓库目录内",
+            true,
+        )
+        .with_detail(project_root.to_string_lossy())
+        .with_suggested_action("请将项目保存到仓库外目录（如 D:\\NovelProjects）"));
+    }
+    Ok(())
+}
+
+fn normalize_path_prefix(path: &Path) -> String {
+    path.to_string_lossy()
+        .replace('/', "\\")
+        .trim_end_matches('\\')
+        .to_ascii_lowercase()
+}
+
+fn is_path_within(path: &Path, base: &Path) -> bool {
+    let normalized_path = normalize_path_prefix(path);
+    let normalized_base = normalize_path_prefix(base);
+    if normalized_base.is_empty() {
+        return false;
+    }
+    if normalized_path == normalized_base {
+        return true;
+    }
+    normalized_path.starts_with(&(normalized_base + "\\"))
 }
 
 fn initialize_project_directories(project_root: &Path) -> Result<(), std::io::Error> {
@@ -656,5 +719,31 @@ mod tests {
         assert_eq!(err.code, "PROJECT_PATH_INVALID_ENTRY");
 
         remove_temp_workspace(&workspace);
+    }
+
+    #[test]
+    fn is_path_within_matches_same_and_nested_paths() {
+        let base = PathBuf::from(r"F:\NovelForge");
+        assert!(super::is_path_within(
+            &PathBuf::from(r"F:\NovelForge"),
+            &base
+        ));
+        assert!(super::is_path_within(
+            &PathBuf::from(r"F:\NovelForge\workspace\demo"),
+            &base
+        ));
+        assert!(!super::is_path_within(
+            &PathBuf::from(r"F:\NovelForgeX\workspace"),
+            &base
+        ));
+    }
+
+    #[test]
+    fn open_project_rejects_relative_root_path() {
+        let service = ProjectService;
+        let err = service
+            .open_project("relative\\project")
+            .expect_err("relative path should be rejected");
+        assert_eq!(err.code, "PROJECT_INVALID_PATH");
     }
 }

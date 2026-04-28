@@ -4,6 +4,7 @@ interface ApiKeyInputProps {
   label?: string;
   value: string;
   onChange: (value: string) => void;
+  onClearMasked?: () => void;
   maskedValue?: string;
   error?: string;
 }
@@ -12,6 +13,7 @@ export function ApiKeyInput({
   label = "API Key",
   value,
   onChange,
+  onClearMasked,
   maskedValue,
   error
 }: ApiKeyInputProps) {
@@ -28,6 +30,15 @@ export function ApiKeyInput({
       {hasExistingKey && !isEditing ? (
         <div className="flex items-center gap-2 px-3 py-2 text-sm bg-surface-800 border border-surface-600 rounded-lg">
           <span className="text-surface-300 flex-1">{maskedValue}</span>
+          {onClearMasked && (
+            <button
+              type="button"
+              onClick={onClearMasked}
+              className="text-xs text-error hover:text-error-light"
+            >
+              移除
+            </button>
+          )}
           <button
             type="button"
             onClick={() => setIsEditing(true)}

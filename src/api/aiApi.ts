@@ -22,6 +22,51 @@ export interface AiStreamEvent {
   reasoning?: string;
 }
 
+const LEGACY_STREAM_START_TIMEOUT_MS = 15000;
+
+interface EventStreamOptions {
+  timeoutMs?: number;
+  startOperation?: () => Promise<void>;
+  startErrorFallback?: string;
+}
+
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  onTimeout: () => unknown,
+): Promise<T> {
+  let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+  const timeoutPromise = new Promise<T>((_, reject) => {
+    timeoutHandle = setTimeout(() => reject(onTimeout()), timeoutMs);
+  });
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timeoutHandle !== null) {
+      clearTimeout(timeoutHandle);
+    }
+  }
+}
+
+function normalizeStartOperationError(
+  error: unknown,
+  fallback: string,
+): Pick<AiStreamEvent, "error" | "errorCode"> {
+  if (typeof error === "object" && error !== null) {
+    const candidate = error as { code?: unknown; message?: unknown };
+    if (typeof candidate.message === "string" && candidate.message.trim()) {
+      return {
+        error: candidate.message,
+        errorCode: typeof candidate.code === "string" ? candidate.code : undefined,
+      };
+    }
+  }
+  if (error instanceof Error && error.message.trim()) {
+    return { error: error.message };
+  }
+  return { error: fallback };
+}
+
 /**
  * Bridge Tauri event listener to an async generator.
  * Returns an async generator that yields AiStreamEvents as they arrive.
@@ -31,9 +76,10 @@ function createEventStream<T>(
   chunkEvent: string,
   doneEvent: string,
   mapPayload: (payload: T) => AiStreamEvent | null,
-  timeoutMs: number = 30000,
+  options: EventStreamOptions = {},
 ): AsyncGenerator<AiStreamEvent> {
   return (async function* () {
+    const timeoutMs = options.timeoutMs ?? 30000;
     yield { requestId, type: "start" };
 
     const pending: AiStreamEvent[] = [];
@@ -68,6 +114,23 @@ function createEventStream<T>(
     });
 
     try {
+      if (options.startOperation) {
+        try {
+          await options.startOperation();
+        } catch (error) {
+          const normalized = normalizeStartOperationError(
+            error,
+            options.startErrorFallback ?? "AI 请求启动失败",
+          );
+          yield {
+            requestId,
+            type: "error",
+            error: normalized.error,
+            errorCode: normalized.errorCode,
+          };
+          return;
+        }
+      }
       while (!streamDone || pending.length > 0) {
         if (pending.length > 0) {
           const evt = pending.shift()!;
@@ -155,16 +218,8 @@ export async function* streamAiChapterTask(
 export async function* streamAiGenerate(
   input: AiPreviewRequest
 ): AsyncGenerator<AiStreamEvent> {
-  const requestId = await invokeCommand<string>("stream_ai_generate", {
-    req: {
-      providerId: "default",
-      model: "default",
-      messages: [{ role: "user", content: input.userInstruction }],
-      stream: true,
-      taskType: input.taskType,
-      maxOutputTokens: 4096,
-    }
-  });
+  const requestId = globalThis.crypto?.randomUUID?.()
+    ?? `legacy-stream-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
   yield* createEventStream<{ content: string; finishReason: string | null; requestId: string; error?: string; reasoning?: string }>(
     requestId,
@@ -184,7 +239,40 @@ export async function* streamAiGenerate(
         return { requestId, type: "done" };
       }
       return null;
-    }
+    },
+    {
+      timeoutMs: 30000,
+      startErrorFallback: "AI 请求启动失败，请重试",
+      startOperation: async () => {
+        const startTimeoutMs = LEGACY_STREAM_START_TIMEOUT_MS;
+        const startedRequestId = await withTimeout(
+          invokeCommand<string>("stream_ai_generate", {
+            requestId,
+            req: {
+              providerId: "default",
+              model: "default",
+              messages: [{ role: "user", content: input.userInstruction }],
+              stream: true,
+              taskType: input.taskType,
+              maxOutputTokens: 4096,
+            }
+          }),
+          startTimeoutMs,
+          () => ({
+            code: "LEGACY_STREAM_START_TIMEOUT",
+            message: `AI 请求启动超时（>${startTimeoutMs}ms），请重试`,
+            recoverable: true,
+          }),
+        );
+        if (startedRequestId !== requestId) {
+          throw {
+            code: "LEGACY_STREAM_REQUEST_ID_MISMATCH",
+            message: "AI 请求标识不一致，请重试",
+            recoverable: true,
+          };
+        }
+      },
+    },
   );
 }
 

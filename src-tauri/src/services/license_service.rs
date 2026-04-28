@@ -1,10 +1,12 @@
 use std::fs;
+use std::path::Path;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::errors::AppErrorDto;
+use crate::infra::app_paths::{app_data_dir, legacy_home_app_dir};
 use crate::infra::fs_utils::{read_text_if_exists, write_file_atomic};
 use crate::infra::time::now_iso;
 
@@ -134,14 +136,9 @@ fn license_file_path() -> Result<PathBuf, AppErrorDto> {
             return Ok(PathBuf::from(trimmed));
         }
     }
-    let home = dirs::home_dir().ok_or_else(|| {
-        AppErrorDto::new(
-            "LICENSE_PATH_UNAVAILABLE",
-            "Cannot resolve user home directory",
-            false,
-        )
-    })?;
-    Ok(home.join(".novelforge").join("license.json"))
+    let path = app_data_dir()?.join("license.json");
+    migrate_legacy_license_if_needed(&path)?;
+    Ok(path)
 }
 
 fn normalize_license_key(input: &str) -> String {
@@ -201,6 +198,42 @@ fn sha256_hex(value: &str) -> String {
     hasher.update(value.as_bytes());
     let digest = hasher.finalize();
     digest.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+fn migrate_legacy_license_if_needed(target_path: &Path) -> Result<(), AppErrorDto> {
+    if target_path.exists() {
+        return Ok(());
+    }
+
+    let Some(legacy_dir) = legacy_home_app_dir() else {
+        return Ok(());
+    };
+    let legacy_path = legacy_dir.join("license.json");
+    if !legacy_path.exists() {
+        return Ok(());
+    }
+
+    if let Some(parent) = target_path.parent() {
+        fs::create_dir_all(parent).map_err(|err| {
+            AppErrorDto::new(
+                "LICENSE_WRITE_FAILED",
+                "Cannot create license cache directory",
+                true,
+            )
+            .with_detail(err.to_string())
+        })?;
+    }
+
+    fs::copy(&legacy_path, target_path).map_err(|err| {
+        AppErrorDto::new(
+            "LICENSE_WRITE_FAILED",
+            "Cannot migrate legacy license cache",
+            true,
+        )
+        .with_detail(err.to_string())
+    })?;
+
+    Ok(())
 }
 
 #[cfg(test)]

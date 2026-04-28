@@ -5,6 +5,10 @@ use std::path::Path;
 use uuid::Uuid;
 
 pub fn write_file_atomic(target_path: &Path, content: &str) -> io::Result<()> {
+    write_bytes_atomic(target_path, content.as_bytes())
+}
+
+pub fn write_bytes_atomic(target_path: &Path, content: &[u8]) -> io::Result<()> {
     let parent = target_path.parent().ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::InvalidInput,

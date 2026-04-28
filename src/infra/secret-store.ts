@@ -43,7 +43,7 @@ function decrypt(envelope: SecretEnvelope): string {
 }
 
 function secretPath(projectId: string): string {
-  return path.join(os.homedir(), ".novelforge", "secrets", `${projectId}.json`);
+  return path.join(resolveAppDataDir(), "secrets", `${projectId}.json`);
 }
 
 export async function saveProjectApiKey(projectId: string, apiKey: string): Promise<void> {
@@ -62,4 +62,27 @@ export async function loadProjectApiKey(projectId: string): Promise<string | und
   } catch {
     return undefined;
   }
+}
+
+export async function deleteProjectApiKey(projectId: string): Promise<void> {
+  const filePath = secretPath(projectId);
+  try {
+    await fs.rm(filePath, { force: true });
+  } catch {
+    // best effort delete
+  }
+}
+
+function resolveAppDataDir(): string {
+  const override = process.env.NOVELFORGE_APP_DATA_DIR?.trim();
+  if (override) {
+    return override;
+  }
+  if (process.platform === "win32") {
+    const localAppData = process.env.LOCALAPPDATA?.trim();
+    if (localAppData) {
+      return path.join(localAppData, "NovelForge");
+    }
+  }
+  return path.join(os.homedir(), ".novelforge");
 }

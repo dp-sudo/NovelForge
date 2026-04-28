@@ -275,6 +275,13 @@ export class ChapterService {
       try {
         for (let i = 0; i < orderedChapterIds.length; i += 1) {
           db.prepare("UPDATE chapters SET chapter_index = ?, updated_at = ? WHERE id = ?").run(
+            -(i + 1),
+            nowIso(),
+            orderedChapterIds[i]
+          );
+        }
+        for (let i = 0; i < orderedChapterIds.length; i += 1) {
+          db.prepare("UPDATE chapters SET chapter_index = ?, updated_at = ? WHERE id = ?").run(
             i + 1,
             nowIso(),
             orderedChapterIds[i]

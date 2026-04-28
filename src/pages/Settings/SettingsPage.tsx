@@ -61,6 +61,7 @@ type TabKey = "model" | "routing" | "skills" | "editor" | "writing" | "backup" |
 interface VendorFormState {
   config: LlmProviderConfig;
   apiKeyInput: string;
+  clearApiKeyRequested: boolean;
   betaHeadersInput: string;
   customHeadersInput: string;
   saving: boolean;
@@ -569,6 +570,7 @@ export function SettingsPage() {
               lastModelRefreshAt: existing?.lastModelRefreshAt,
             },
             apiKeyInput: "",
+            clearApiKeyRequested: false,
             betaHeadersInput: mapToInput(existing?.betaHeaders),
             customHeadersInput: mapToInput(existing?.customHeaders),
             saving: false,
@@ -652,7 +654,8 @@ export function SettingsPage() {
 
     setVendors((prev) => ({ ...prev, [preset.id]: { ...prev[preset.id], saving: true, validationError: null } }));
     try {
-      const saved = await saveProvider(normalizedConfig, v.apiKeyInput || undefined);
+      const apiKeyPayload = resolveApiKeyPayload(v);
+      const saved = await saveProvider(normalizedConfig, apiKeyPayload);
       const models = await getProviderModels(preset.id).catch(() => [] as ModelRecord[]);
       setVendors((prev) => ({
         ...prev,
@@ -660,6 +663,7 @@ export function SettingsPage() {
           ...prev[preset.id],
           config: saved,
           apiKeyInput: "",
+          clearApiKeyRequested: false,
           betaHeadersInput: mapToInput(saved.betaHeaders),
           customHeadersInput: mapToInput(saved.customHeaders),
           models,
@@ -706,7 +710,7 @@ export function SettingsPage() {
     setVendors((prev) => ({ ...prev, [preset.id]: { ...prev[preset.id], testing: true, testResult: null, validationError: null } }));
     try {
       // Save the provider config first so the backend can find it when testing
-      if (v.apiKeyInput || !v.config.apiKey) {
+      if (v.apiKeyInput || !v.config.apiKey || v.clearApiKeyRequested) {
         // Only save if there's new input or no existing key (otherwise skip to avoid unnecessary DB write)
         const normalizedConfig: LlmProviderConfig = {
           ...v.config,
@@ -717,7 +721,7 @@ export function SettingsPage() {
           authHeaderName: v.config.authHeaderName?.trim() || undefined,
           modelsPath: v.config.modelsPath?.trim() || undefined,
         };
-        await saveProvider(normalizedConfig, v.apiKeyInput || undefined);
+        await saveProvider(normalizedConfig, resolveApiKeyPayload(v));
       }
       const result = await testProviderConnection(preset.id);
       setVendors((prev) => ({ ...prev, [preset.id]: { ...prev[preset.id], testing: false, testResult: result } }));
@@ -777,6 +781,7 @@ export function SettingsPage() {
           modelsPath: undefined,
         },
         apiKeyInput: "",
+        clearApiKeyRequested: false,
         betaHeadersInput: "",
         customHeadersInput: "",
         validationError: null,
@@ -802,6 +807,14 @@ export function SettingsPage() {
       }
       return next;
     });
+  }
+
+  function resolveApiKeyPayload(vendor: VendorFormState): string | undefined {
+    if (vendor.clearApiKeyRequested) {
+      return "";
+    }
+    const trimmed = vendor.apiKeyInput.trim();
+    return trimmed ? trimmed : undefined;
   }
 
   // ── Remote registry handlers ──
@@ -1093,7 +1106,32 @@ export function SettingsPage() {
                           />
                         )}
                         <Input label="Base URL" value={config.baseUrl} onChange={(e) => updateVendor(preset.id, { baseUrl: e.target.value })} placeholder={preset.defaultBaseUrl} />
-                        <ApiKeyInput label="API Key" value={v.apiKeyInput} onChange={(val) => setVendors((prev) => ({ ...prev, [preset.id]: { ...prev[preset.id], apiKeyInput: val } }))} maskedValue={config.apiKey && !v.apiKeyInput ? config.apiKey : undefined} />
+                        <ApiKeyInput
+                          label="API Key"
+                          value={v.apiKeyInput}
+                          onChange={(val) =>
+                            setVendors((prev) => ({
+                              ...prev,
+                              [preset.id]: {
+                                ...prev[preset.id],
+                                apiKeyInput: val,
+                                clearApiKeyRequested: false,
+                              },
+                            }))
+                          }
+                          onClearMasked={() =>
+                            setVendors((prev) => ({
+                              ...prev,
+                              [preset.id]: {
+                                ...prev[preset.id],
+                                apiKeyInput: "",
+                                clearApiKeyRequested: true,
+                                validationError: null,
+                              },
+                            }))
+                          }
+                          maskedValue={config.apiKey && !v.apiKeyInput ? config.apiKey : undefined}
+                        />
                         <Input label="默认模型" value={config.defaultModel || ""} onChange={(e) => updateVendor(preset.id, { defaultModel: e.target.value })} placeholder={preset.defaultModel} />
                         {v.validationError && (
                           <div className="px-3 py-2 rounded-lg text-sm bg-error/10 text-error border border-error/20">

@@ -25,7 +25,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": "msi",
     "resources": [
       "../resources/model-registry/llm-model-registry.json",
       "../resources/builtin-skills/*"
@@ -47,4 +47,3 @@
     }
   }
 }
-

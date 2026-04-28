@@ -126,6 +126,54 @@ fn ensure_default_task_routes(
     Ok(normalize_task_routes(refreshed))
 }
 
+fn ensure_updater_configured() -> Result<(), AppErrorDto> {
+    let conf: serde_json::Value = serde_json::from_str(include_str!("../../tauri.conf.json"))
+        .map_err(|err| {
+            AppErrorDto::new("UPDATER_CONFIG_INVALID", "Updater config is invalid", false)
+                .with_detail(err.to_string())
+        })?;
+
+    let updater = conf
+        .get("plugins")
+        .and_then(|plugins| plugins.get("updater"))
+        .and_then(|value| value.as_object())
+        .ok_or_else(|| {
+            AppErrorDto::new("UPDATER_NOT_CONFIGURED", "Updater is not configured", true)
+                .with_suggested_action("请在 tauri.conf.json 中配置 updater 插件")
+        })?;
+
+    let pubkey = updater
+        .get("pubkey")
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .trim();
+    let endpoints = updater
+        .get("endpoints")
+        .and_then(|value| value.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let placeholder_pubkey = pubkey.is_empty()
+        || pubkey
+            .chars()
+            .all(|ch| ch == 'A' || ch == '=' || ch.is_whitespace());
+    let has_valid_endpoint = endpoints
+        .iter()
+        .filter_map(|value| value.as_str())
+        .any(|value| !value.trim().is_empty());
+
+    if placeholder_pubkey || !has_valid_endpoint {
+        return Err(AppErrorDto::new(
+            "UPDATER_NOT_CONFIGURED",
+            "Updater config is incomplete",
+            true,
+        )
+        .with_suggested_action("请先配置真实 pubkey 与更新端点后再检查更新"));
+    }
+
+    Ok(())
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppUpdateInfo {
@@ -157,6 +205,7 @@ pub async fn check_app_update(
     state: State<'_, AppState>,
 ) -> Result<AppUpdateInfo, AppErrorDto> {
     let _ = state;
+    ensure_updater_configured()?;
     let updater = app.updater().map_err(|err| {
         AppErrorDto::new("UPDATER_INIT_FAILED", "Cannot initialize updater", false)
             .with_detail(err.to_string())
@@ -192,6 +241,7 @@ pub async fn install_app_update(
     state: State<'_, AppState>,
 ) -> Result<AppUpdateInfo, AppErrorDto> {
     let _ = state;
+    ensure_updater_configured()?;
     let updater = app.updater().map_err(|err| {
         AppErrorDto::new("UPDATER_INIT_FAILED", "Cannot initialize updater", false)
             .with_detail(err.to_string())

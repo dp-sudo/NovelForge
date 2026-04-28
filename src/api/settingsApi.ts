@@ -70,7 +70,7 @@ export async function saveProvider(
 ): Promise<LlmProviderConfig> {
   return invokeCommand<LlmProviderConfig>("save_provider", {
     config,
-    apiKey: apiKey || null,
+    apiKey: apiKey ?? null,
   });
 }
 

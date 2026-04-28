@@ -1,6 +1,10 @@
 import { AppError } from "../errors/app-error.js";
 import type { ProviderConfigInput } from "../domain/types.js";
-import { loadProjectApiKey, saveProjectApiKey } from "../infra/secret-store.js";
+import {
+  deleteProjectApiKey,
+  loadProjectApiKey,
+  saveProjectApiKey,
+} from "../infra/secret-store.js";
 import { nowIso } from "../infra/time.js";
 import { withDatabase } from "./service-context.js";
 import { getProjectId } from "./service-utils.js";
@@ -27,8 +31,13 @@ export class SettingsService {
         `
       ).run(CONFIG_KEY, JSON.stringify(payload), now);
 
-      if (config.apiKey && config.apiKey.trim().length > 0) {
-        await saveProjectApiKey(projectId, config.apiKey.trim());
+      if (typeof config.apiKey === "string") {
+        const trimmed = config.apiKey.trim();
+        if (trimmed.length > 0) {
+          await saveProjectApiKey(projectId, trimmed);
+        } else {
+          await deleteProjectApiKey(projectId);
+        }
       }
     });
   }
