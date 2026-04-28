@@ -1,0 +1,456 @@
+use async_trait::async_trait;
+use futures_util::StreamExt;
+use reqwest::Client;
+use tokio::sync::mpsc;
+use uuid::Uuid;
+
+use super::llm_service::LlmService;
+use super::llm_types::*;
+
+pub struct AnthropicAdapter {
+    pub config: ProviderConfig,
+    client: Client,
+}
+
+impl AnthropicAdapter {
+    pub fn new(config: ProviderConfig) -> Self {
+        let timeout = std::time::Duration::from_millis(config.timeout_ms);
+        let connect_timeout = std::time::Duration::from_millis(config.connect_timeout_ms);
+        let client = Client::builder()
+            .timeout(timeout)
+            .connect_timeout(connect_timeout)
+            .build()
+            .unwrap_or_default();
+        Self { config, client }
+    }
+
+    fn endpoint_url(&self) -> String {
+        let path = self
+            .config
+            .endpoint_path
+            .as_deref()
+            .unwrap_or("/v1/messages");
+        Self::join_url(&self.config.base_url, path)
+    }
+
+    fn join_url(base: &str, raw_path: &str) -> String {
+        let base = base.trim_end_matches('/');
+        let mut path = raw_path.trim().to_string();
+        if !path.starts_with('/') {
+            path = format!("/{}", path);
+        }
+        format!("{}{}", base, path)
+    }
+
+    fn build_headers(&self) -> Result<Vec<(String, String)>, LlmError> {
+        let key = self
+            .config
+            .api_key
+            .as_deref()
+            .ok_or(LlmError::MissingApiKey)?;
+        let mut headers = match self.config.auth_mode.as_str() {
+            "bearer" => vec![("Authorization".to_string(), format!("Bearer {}", key))],
+            "x-api-key" | "x_api_key" => vec![("x-api-key".to_string(), key.to_string())],
+            "custom" => {
+                let header_name = self
+                    .config
+                    .auth_header_name
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|v| !v.is_empty())
+                    .ok_or_else(|| {
+                        LlmError::ProviderError(
+                            "custom auth mode requires auth_header_name".to_string(),
+                        )
+                    })?;
+                vec![(header_name.to_string(), key.to_string())]
+            }
+            _ => vec![("x-api-key".to_string(), key.to_string())],
+        };
+        headers.push((
+            "anthropic-version".to_string(),
+            self.config
+                .anthropic_version
+                .clone()
+                .unwrap_or_else(|| "2023-06-01".to_string()),
+        ));
+        if let Some(ref betas) = self.config.beta_headers {
+            let joined: Vec<String> = betas.values().cloned().collect();
+            if !joined.is_empty() {
+                headers.push(("anthropic-beta".to_string(), joined.join(",")));
+            }
+        }
+
+        if let Some(ref custom_headers) = self.config.custom_headers {
+            for (name, value) in custom_headers {
+                let key = name.trim();
+                if !key.is_empty() {
+                    headers.push((key.to_string(), value.clone()));
+                }
+            }
+        }
+        Ok(headers)
+    }
+
+    fn build_request_body(&self, req: &UnifiedGenerateRequest) -> serde_json::Value {
+        let mut body = serde_json::json!({
+            "model": req.model,
+            "max_tokens": req.max_tokens.unwrap_or(4096),
+            "messages": req.messages.iter().map(|m| {
+                serde_json::json!({
+                    "role": m.role,
+                    "content": m.content.iter().map(|c| {
+                        serde_json::json!({
+                            "type": c.block_type,
+                            "text": c.text
+                        })
+                    }).collect::<Vec<_>>()
+                })
+            }).collect::<Vec<_>>()
+        });
+
+        if let Some(ref system) = req.system_prompt {
+            body["system"] = serde_json::json!(system);
+        }
+        if let Some(t) = req.temperature {
+            body["temperature"] = serde_json::json!(t);
+        }
+        if let Some(p) = req.top_p {
+            body["top_p"] = serde_json::json!(p);
+        }
+
+        body
+    }
+
+    fn parse_response(
+        &self,
+        body: &serde_json::Value,
+        req: &UnifiedGenerateRequest,
+    ) -> Result<UnifiedGenerateResponse, LlmError> {
+        let id = body
+            .get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let model = body
+            .get("model")
+            .and_then(|v| v.as_str())
+            .unwrap_or(&req.model)
+            .to_string();
+        let request_id = Uuid::new_v4().to_string();
+
+        let text = body
+            .get("content")
+            .and_then(|v| v.as_array())
+            .and_then(|arr| arr.first())
+            .and_then(|c| c.get("text"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        let finish_reason = body
+            .get("stop_reason")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        let usage = body.get("usage").map(|u| Usage {
+            prompt_tokens: u.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
+            completion_tokens: u.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
+            total_tokens: 0,
+            prompt_tokens_details: None,
+        });
+
+        let choice = Choice {
+            index: 0,
+            message: Message {
+                role: "assistant".to_string(),
+                content: vec![ContentBlock {
+                    block_type: "text".to_string(),
+                    text: Some(text.to_string()),
+                }],
+            },
+            finish_reason: finish_reason.clone(),
+        };
+
+        Ok(UnifiedGenerateResponse {
+            id,
+            model,
+            provider_id: self.config.id.clone(),
+            choices: vec![choice],
+            usage,
+            created_at: None,
+            finish_reason,
+            raw: Some(body.clone()),
+            request_id,
+            metadata: None,
+        })
+    }
+
+    fn parse_stream_event(&self, event_type: &str, data: &str) -> Option<StreamChunk> {
+        let request_id = Uuid::new_v4().to_string();
+        match event_type {
+            "content_block_delta" => {
+                let value: serde_json::Value = serde_json::from_str(data).ok()?;
+                let text = value
+                    .get("delta")
+                    .and_then(|d| d.get("text"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                if text.is_empty() {
+                    return None;
+                }
+                Some(StreamChunk {
+                    content: text.to_string(),
+                    finish_reason: None,
+                    request_id,
+                })
+            }
+            "message_stop" => Some(StreamChunk {
+                content: String::new(),
+                finish_reason: Some("end_turn".to_string()),
+                request_id,
+            }),
+            _ => None,
+        }
+    }
+
+    fn map_http_error(&self, status: reqwest::StatusCode, body: &serde_json::Value) -> LlmError {
+        let msg = body
+            .get("error")
+            .and_then(|e| e.get("message"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        match status.as_u16() {
+            401 | 403 => LlmError::InvalidApiKey,
+            429 => LlmError::RateLimited,
+            400 if msg.contains("too many tokens")
+                || msg.contains("context_length")
+                || msg.contains("maximum context") =>
+            {
+                LlmError::ContextLengthExceeded
+            }
+            404 => LlmError::ModelNotFound,
+            400 if msg.contains("not found") || msg.contains("not support") => {
+                LlmError::ModelNotFound
+            }
+            _ => LlmError::ProviderError(msg),
+        }
+    }
+}
+
+#[async_trait]
+impl LlmService for AnthropicAdapter {
+    async fn generate_text(
+        &self,
+        req: UnifiedGenerateRequest,
+    ) -> Result<UnifiedGenerateResponse, LlmError> {
+        let url = self.endpoint_url();
+        let headers = self.build_headers()?;
+        let body = self.build_request_body(&req);
+
+        let mut request = self.client.post(&url).json(&body);
+        for (name, value) in &headers {
+            request = request.header(name, value);
+        }
+
+        let response = request.send().await.map_err(|e| {
+            if e.is_timeout() {
+                LlmError::NetworkTimeout
+            } else {
+                LlmError::NetworkError
+            }
+        })?;
+
+        let status = response.status();
+        let response_body: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|_| LlmError::InvalidJsonResponse)?;
+
+        if !status.is_success() {
+            return Err(self.map_http_error(status, &response_body));
+        }
+
+        self.parse_response(&response_body, &req)
+    }
+
+    async fn stream_text(
+        &self,
+        req: UnifiedGenerateRequest,
+        tx: mpsc::Sender<StreamChunk>,
+    ) -> Result<(), LlmError> {
+        let url = self.endpoint_url();
+        let headers = self.build_headers()?;
+        let mut body = self.build_request_body(&req);
+        body["stream"] = serde_json::json!(true);
+
+        let mut request = self.client.post(&url).json(&body);
+        for (name, value) in &headers {
+            request = request.header(name, value);
+        }
+
+        let response = request.send().await.map_err(|e| {
+            if e.is_timeout() {
+                LlmError::NetworkTimeout
+            } else {
+                LlmError::NetworkError
+            }
+        })?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let body: serde_json::Value = response.json().await.unwrap_or_default();
+            return Err(self.map_http_error(status, &body));
+        }
+
+        let mut stream = response.bytes_stream();
+        let mut buffer = String::new();
+        let mut event_type = String::new();
+
+        while let Some(chunk_result) = stream.next().await {
+            let chunk = chunk_result.map_err(|_| LlmError::StreamInterrupted)?;
+            let chunk_str = String::from_utf8_lossy(&chunk);
+            buffer.push_str(&chunk_str);
+
+            while let Some(line_end) = buffer.find('\n') {
+                let line = buffer[..line_end].trim().to_string();
+                buffer = buffer[line_end + 1..].to_string();
+
+                if let Some(event) = line.strip_prefix("event: ") {
+                    event_type = event.to_string();
+                } else if let Some(data) = line.strip_prefix("data: ") {
+                    if let Some(chunk) = self.parse_stream_event(&event_type, data) {
+                        if tx.send(chunk).await.is_err() {
+                            return Ok(());
+                        }
+                    }
+                    event_type.clear();
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn test_connection(&self) -> Result<(), LlmError> {
+        let url = self.endpoint_url();
+        let headers = self.build_headers()?;
+
+        let mut request = self.client.post(&url).json(&serde_json::json!({
+            "model": self.config.default_model.as_deref().unwrap_or("claude-3-haiku-20240307"),
+            "max_tokens": 10,
+            "messages": [{"role": "user", "content": "ping"}]
+        }));
+        for (name, value) in &headers {
+            request = request.header(name, value);
+        }
+
+        let response = request.send().await.map_err(|e| {
+            if e.is_timeout() {
+                LlmError::NetworkTimeout
+            } else {
+                LlmError::NetworkError
+            }
+        })?;
+
+        if response.status().is_success() {
+            return Ok(());
+        }
+
+        let status = response.status();
+        let body: serde_json::Value = response.json().await.unwrap_or_default();
+        Err(self.map_http_error(status, &body))
+    }
+
+    async fn detect_capabilities(&self) -> Result<CapabilityReport, LlmError> {
+        // Anthropic: test basic text completion + streaming
+        let text_ok = self.test_connection().await.is_ok();
+        // Simplified: most Anthropic models support these
+        Ok(CapabilityReport {
+            provider_id: self.config.id.clone(),
+            text_response: text_ok,
+            streaming: text_ok,
+            json_object: false,
+            json_schema: false,
+            tools: text_ok,
+            thinking: text_ok,
+            error: if text_ok {
+                None
+            } else {
+                Some("Connection failed".to_string())
+            },
+        })
+    }
+
+    async fn fetch_models(&self) -> Result<Vec<String>, LlmError> {
+        if let Some(models_path) = self
+            .config
+            .models_path
+            .as_deref()
+            .map(str::trim)
+            .filter(|p| !p.is_empty())
+        {
+            let url = Self::join_url(&self.config.base_url, models_path);
+            let headers = self.build_headers()?;
+
+            let mut request = self.client.get(&url);
+            for (name, value) in &headers {
+                request = request.header(name, value);
+            }
+
+            let response = request.send().await.map_err(|e| {
+                if e.is_timeout() {
+                    LlmError::NetworkTimeout
+                } else {
+                    LlmError::NetworkError
+                }
+            })?;
+
+            if response.status().is_success() {
+                let body: serde_json::Value = response
+                    .json()
+                    .await
+                    .map_err(|_| LlmError::InvalidJsonResponse)?;
+                let from_data = body
+                    .get("data")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|m| m.get("id").and_then(|n| n.as_str()))
+                            .map(|s| s.to_string())
+                            .collect::<Vec<String>>()
+                    })
+                    .unwrap_or_default();
+                if !from_data.is_empty() {
+                    return Ok(from_data);
+                }
+
+                let from_models = body
+                    .get("models")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|m| {
+                                m.get("name")
+                                    .and_then(|n| n.as_str())
+                                    .or_else(|| m.get("id").and_then(|n| n.as_str()))
+                            })
+                            .map(|s| s.to_string())
+                            .collect::<Vec<String>>()
+                    })
+                    .unwrap_or_default();
+                if !from_models.is_empty() {
+                    return Ok(from_models);
+                }
+            }
+        }
+
+        Ok(self
+            .config
+            .default_model
+            .as_ref()
+            .map(|m| vec![m.clone()])
+            .unwrap_or_default())
+    }
+}

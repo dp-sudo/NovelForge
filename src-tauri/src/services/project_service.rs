@@ -1,0 +1,407 @@
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use rusqlite::params;
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+use crate::errors::AppErrorDto;
+use crate::infra::database::{initialize_database, open_database};
+use crate::infra::path_utils::sanitize_project_directory_name;
+use crate::infra::recent_projects::{list_recent_projects, mark_recent_project, RecentProjectItem};
+use crate::infra::time::now_iso;
+
+const PROJECT_SCHEMA_VERSION: &str = "1.0.0";
+const PROJECT_APP_MIN_VERSION: &str = "0.1.0";
+
+const REQUIRED_DIRS: [&str; 15] = [
+    "database",
+    "database/backups",
+    "manuscript",
+    "manuscript/chapters",
+    "manuscript/drafts",
+    "manuscript/snapshots",
+    "blueprint",
+    "assets",
+    "assets/covers",
+    "assets/attachments",
+    "exports",
+    "backups",
+    "prompts",
+    "workflows",
+    "logs",
+];
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateProjectInput {
+    pub name: String,
+    pub author: Option<String>,
+    pub genre: String,
+    pub target_words: Option<i64>,
+    pub save_directory: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectSettings {
+    pub default_narrative_pov: String,
+    pub language: String,
+    pub autosave_interval_ms: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectJson {
+    pub schema_version: String,
+    pub app_min_version: String,
+    pub project_id: String,
+    pub name: String,
+    pub author: String,
+    pub genre: String,
+    pub target_words: i64,
+    pub created_at: String,
+    pub updated_at: String,
+    pub database: String,
+    pub manuscript_root: String,
+    pub settings: ProjectSettings,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectOpenResult {
+    pub project_root: String,
+    pub project: ProjectJson,
+}
+
+#[derive(Default)]
+pub struct ProjectService;
+
+impl ProjectService {
+    pub fn validate_name(&self, name: &str) -> Result<String, AppErrorDto> {
+        let normalized = name.trim();
+
+        if normalized.is_empty() {
+            return Err(
+                AppErrorDto::new("PROJECT_NAME_INVALID", "项目名称不能为空", true)
+                    .with_suggested_action("请填写 1-80 字的项目名称"),
+            );
+        }
+
+        if normalized.chars().count() > 80 {
+            return Err(AppErrorDto::new(
+                "PROJECT_NAME_INVALID",
+                "项目名称长度不能超过 80 字",
+                true,
+            )
+            .with_suggested_action("请缩短项目名称"));
+        }
+
+        Ok(normalized.to_string())
+    }
+
+    pub fn create_project(
+        &self,
+        input: CreateProjectInput,
+    ) -> Result<ProjectOpenResult, AppErrorDto> {
+        let normalized_name = self.validate_name(&input.name)?;
+        let normalized_genre = input.genre.trim().to_string();
+        if normalized_genre.is_empty() {
+            return Err(
+                AppErrorDto::new("PROJECT_GENRE_REQUIRED", "题材不能为空", true)
+                    .with_suggested_action("请填写题材"),
+            );
+        }
+
+        let sanitized_directory_name = sanitize_project_directory_name(&normalized_name);
+        let project_root_path = Path::new(&input.save_directory).join(sanitized_directory_name);
+        if project_root_path.exists() {
+            return Err(
+                AppErrorDto::new("PROJECT_PATH_EXISTS", "目标目录已存在同名项目", true)
+                    .with_detail(project_root_path.to_string_lossy())
+                    .with_suggested_action("请更换项目名称或保存位置"),
+            );
+        }
+
+        fs::create_dir(&project_root_path).map_err(|err| {
+            AppErrorDto::new("PROJECT_CREATE_FAILED", "创建项目失败", true)
+                .with_detail(err.to_string())
+                .with_suggested_action("请检查目标目录权限或更换保存路径")
+        })?;
+
+        let result = self.create_project_inner(
+            &project_root_path,
+            &normalized_name,
+            &normalized_genre,
+            &input,
+        );
+        match result {
+            Ok(project) => Ok(project),
+            Err(err) => {
+                let _ = fs::remove_dir_all(project_root_path);
+                Err(err)
+            }
+        }
+    }
+
+    fn create_project_inner(
+        &self,
+        project_root_path: &Path,
+        normalized_name: &str,
+        normalized_genre: &str,
+        input: &CreateProjectInput,
+    ) -> Result<ProjectOpenResult, AppErrorDto> {
+        initialize_project_directories(project_root_path).map_err(|err| {
+            AppErrorDto::new("PROJECT_CREATE_FAILED", "创建项目失败", true)
+                .with_detail(err.to_string())
+                .with_suggested_action("请检查目标目录权限或更换保存路径")
+        })?;
+
+        let created_at = now_iso();
+        initialize_database(project_root_path, &created_at).map_err(|err| {
+            AppErrorDto::new("PROJECT_CREATE_FAILED", "创建项目失败", true)
+                .with_detail(err.to_string())
+                .with_suggested_action("请检查数据库初始化权限")
+        })?;
+
+        let target_words = input.target_words.unwrap_or(300_000);
+        let project_json = ProjectJson {
+            schema_version: PROJECT_SCHEMA_VERSION.to_string(),
+            app_min_version: PROJECT_APP_MIN_VERSION.to_string(),
+            project_id: Uuid::new_v4().to_string(),
+            name: normalized_name.to_string(),
+            author: input.author.clone().unwrap_or_default(),
+            genre: normalized_genre.to_string(),
+            target_words,
+            created_at: created_at.clone(),
+            updated_at: created_at.clone(),
+            database: "database/project.sqlite".to_string(),
+            manuscript_root: "manuscript/chapters".to_string(),
+            settings: ProjectSettings {
+                default_narrative_pov: "third_limited".to_string(),
+                language: "zh-CN".to_string(),
+                autosave_interval_ms: 5_000,
+            },
+        };
+
+        write_project_json(project_root_path, &project_json).map_err(|err| {
+            AppErrorDto::new("PROJECT_CREATE_FAILED", "创建项目失败", true)
+                .with_detail(err.to_string())
+                .with_suggested_action("请检查 project.json 写入权限")
+        })?;
+
+        let conn = open_database(project_root_path).map_err(|err| {
+            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false)
+                .with_detail(err.to_string())
+                .with_suggested_action("请检查 database/project.sqlite 是否可读写")
+        })?;
+        conn
+      .execute(
+        "
+        INSERT INTO projects(id, name, author, genre, narrative_pov, target_words, current_words, project_path, schema_version, created_at, updated_at)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+        ",
+        params![
+          project_json.project_id,
+          project_json.name,
+          project_json.author,
+          project_json.genre,
+          project_json.settings.default_narrative_pov.clone(),
+          project_json.target_words,
+          0_i64,
+          project_root_path.to_string_lossy().to_string(),
+          project_json.schema_version,
+          created_at,
+          project_json.updated_at
+        ],
+      )
+      .map_err(|err| {
+        AppErrorDto::new("PROJECT_CREATE_FAILED", "创建项目失败", true)
+          .with_detail(err.to_string())
+          .with_suggested_action("请检查项目数据库结构")
+      })?;
+
+        let project_root = project_root_path.to_string_lossy().to_string();
+        let _ = mark_recent_project(&project_root);
+        Ok(ProjectOpenResult {
+            project_root,
+            project: project_json,
+        })
+    }
+
+    pub fn open_project(&self, project_root: &str) -> Result<ProjectOpenResult, AppErrorDto> {
+        let project_root_path = Path::new(project_root);
+        let project_json_path = project_root_path.join("project.json");
+        let db_path = project_root_path.join("database").join("project.sqlite");
+
+        if !project_json_path.exists() || !db_path.exists() {
+            return Err(
+                AppErrorDto::new("PROJECT_INVALID_PATH", "不是有效项目目录", true)
+                    .with_suggested_action(
+                        "请选择包含 project.json 和 database/project.sqlite 的目录",
+                    ),
+            );
+        }
+
+        let project = read_project_json(project_root_path).map_err(|err| {
+            AppErrorDto::new("PROJECT_INVALID_JSON", "project.json 读取失败", true)
+                .with_detail(err.to_string())
+                .with_suggested_action("请检查 project.json 是否损坏")
+        })?;
+        if project.schema_version != PROJECT_SCHEMA_VERSION {
+            return Err(
+                AppErrorDto::new("PROJECT_VERSION_UNSUPPORTED", "项目版本不兼容", false)
+                    .with_detail(format!("schemaVersion={}", project.schema_version))
+                    .with_suggested_action("请先执行项目迁移"),
+            );
+        }
+
+        open_database(project_root_path).map_err(|err| {
+            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false)
+                .with_detail(err.to_string())
+                .with_suggested_action("请检查 database/project.sqlite 是否存在并可读写")
+        })?;
+
+        let _ = mark_recent_project(project_root);
+        Ok(ProjectOpenResult {
+            project_root: project_root.to_string(),
+            project,
+        })
+    }
+
+    pub fn list_recent_projects(&self) -> Result<Vec<RecentProjectItem>, AppErrorDto> {
+        list_recent_projects().map_err(|err| {
+            AppErrorDto::new("RECENT_PROJECTS_READ_FAILED", "读取最近项目失败", true)
+                .with_detail(err.to_string())
+        })
+    }
+}
+
+fn initialize_project_directories(project_root: &Path) -> Result<(), std::io::Error> {
+    for dir in REQUIRED_DIRS {
+        fs::create_dir_all(project_root.join(dir))?;
+    }
+    Ok(())
+}
+
+fn project_json_path(project_root: &Path) -> PathBuf {
+    project_root.join("project.json")
+}
+
+fn write_project_json(
+    project_root: &Path,
+    project_json: &ProjectJson,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let path = project_json_path(project_root);
+    let payload = serde_json::to_string_pretty(project_json)?;
+    fs::write(path, payload)?;
+    Ok(())
+}
+
+fn read_project_json(project_root: &Path) -> Result<ProjectJson, Box<dyn std::error::Error>> {
+    let raw = fs::read_to_string(project_json_path(project_root))?;
+    Ok(serde_json::from_str::<ProjectJson>(&raw)?)
+}
+
+pub fn get_project_id(conn: &rusqlite::Connection) -> Result<String, AppErrorDto> {
+    conn.query_row("SELECT id FROM projects LIMIT 1", [], |row| {
+        row.get::<_, String>(0)
+    })
+    .map_err(|err| {
+        AppErrorDto::new("PROJECT_NOT_INITIALIZED", "项目未初始化", false)
+            .with_detail(err.to_string())
+            .with_suggested_action("请重新创建或打开有效项目")
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    use std::path::PathBuf;
+
+    use uuid::Uuid;
+
+    use super::{CreateProjectInput, ProjectService};
+
+    fn create_temp_workspace() -> PathBuf {
+        let workspace =
+            std::env::temp_dir().join(format!("novelforge-rust-tests-{}", Uuid::new_v4()));
+        fs::create_dir_all(&workspace).expect("create temp workspace");
+        workspace
+    }
+
+    fn remove_temp_workspace(path: &PathBuf) {
+        let _ = fs::remove_dir_all(path);
+    }
+
+    #[test]
+    fn validate_name_succeeds_for_normal_input() {
+        let service = ProjectService;
+        let output = service
+            .validate_name("  长夜行舟  ")
+            .expect("expected success");
+        assert_eq!(output, "长夜行舟");
+    }
+
+    #[test]
+    fn validate_name_rejects_empty_input_with_standard_error() {
+        let service = ProjectService;
+        let err = service
+            .validate_name("   ")
+            .expect_err("expected validation error");
+        assert_eq!(err.code, "PROJECT_NAME_INVALID");
+        assert!(err.recoverable);
+        assert_eq!(err.message, "项目名称不能为空");
+    }
+
+    #[test]
+    fn create_and_open_project_roundtrip_succeeds() {
+        let workspace = create_temp_workspace();
+        let service = ProjectService;
+
+        let create_result = service
+            .create_project(CreateProjectInput {
+                name: "夜潮计划".to_string(),
+                author: Some("测试作者".to_string()),
+                genre: "玄幻".to_string(),
+                target_words: Some(120_000),
+                save_directory: workspace.to_string_lossy().to_string(),
+            })
+            .expect("create project should succeed");
+
+        assert!(PathBuf::from(&create_result.project_root)
+            .join("project.json")
+            .exists());
+
+        let reopen = service
+            .open_project(&create_result.project_root)
+            .expect("open project should succeed");
+        assert_eq!(reopen.project.project_id, create_result.project.project_id);
+
+        remove_temp_workspace(&workspace);
+    }
+
+    #[test]
+    fn create_project_rejects_existing_directory_without_deleting_it() {
+        let workspace = create_temp_workspace();
+        let service = ProjectService;
+        let existing_root = workspace.join("同名项目");
+        fs::create_dir_all(&existing_root).expect("create existing root");
+        let marker = existing_root.join("keep.txt");
+        fs::write(&marker, "keep").expect("write marker");
+
+        let err = service
+            .create_project(CreateProjectInput {
+                name: "同名项目".to_string(),
+                author: None,
+                genre: "测试".to_string(),
+                target_words: None,
+                save_directory: workspace.to_string_lossy().to_string(),
+            })
+            .expect_err("expected directory exists error");
+        assert_eq!(err.code, "PROJECT_PATH_EXISTS");
+        assert!(marker.exists());
+
+        remove_temp_workspace(&workspace);
+    }
+}
