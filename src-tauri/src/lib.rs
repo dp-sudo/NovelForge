@@ -228,6 +228,8 @@ pub fn run() {
             commands::consistency_commands::list_consistency_issues,
             commands::consistency_commands::update_issue_status,
             commands::context_commands::get_chapter_context,
+            commands::context_commands::apply_asset_candidate,
+            commands::context_commands::apply_structured_draft,
             commands::dashboard_commands::get_dashboard_stats,
             commands::search_commands::search_project,
             commands::search_commands::search_project_semantic,

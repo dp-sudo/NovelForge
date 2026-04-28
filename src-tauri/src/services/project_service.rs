@@ -141,8 +141,23 @@ impl ProjectService {
             );
         }
 
+        let save_directory_path = Path::new(&input.save_directory);
+        if !save_directory_path.is_absolute() {
+            return Err(
+                AppErrorDto::new("PROJECT_INVALID_PATH", "保存目录必须是绝对路径", true)
+                    .with_suggested_action("请输入有效的 Windows 绝对路径"),
+            );
+        }
+        if !save_directory_path.exists() || !save_directory_path.is_dir() {
+            return Err(
+                AppErrorDto::new("PROJECT_INVALID_PATH", "保存目录不存在或不可用", true)
+                    .with_detail(input.save_directory.clone())
+                    .with_suggested_action("请先创建目录后再新建项目"),
+            );
+        }
+
         let sanitized_directory_name = sanitize_project_directory_name(&normalized_name);
-        let project_root_path = Path::new(&input.save_directory).join(sanitized_directory_name);
+        let project_root_path = save_directory_path.join(sanitized_directory_name);
         if project_root_path.exists() {
             return Err(
                 AppErrorDto::new("PROJECT_PATH_EXISTS", "目标目录已存在同名项目", true)

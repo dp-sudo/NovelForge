@@ -49,9 +49,85 @@ export interface ChapterContext {
     confidence: number;
     evidence: string;
   }>;
+  relationshipDrafts: Array<{
+    sourceLabel: string;
+    targetLabel: string;
+    relationshipType: string;
+    confidence: number;
+    evidence: string;
+  }>;
+  involvementDrafts: Array<{
+    characterLabel: string;
+    involvementType: string;
+    occurrences: number;
+    confidence: number;
+    evidence: string;
+  }>;
+  sceneDrafts: Array<{
+    sceneLabel: string;
+    sceneType: string;
+    confidence: number;
+    evidence: string;
+  }>;
   previousChapterSummary: string | null;
 }
 
 export async function getChapterContext(projectRoot: string, chapterId: string): Promise<ChapterContext> {
   return invokeCommand<ChapterContext>("get_chapter_context", { projectRoot, chapterId });
+}
+
+export interface ApplyAssetCandidateInput {
+  label: string;
+  assetType: string;
+  evidence?: string;
+  targetKind?: "character" | "world_rule" | "plot_node" | "glossary_term";
+}
+
+export interface ApplyAssetCandidateResult {
+  action: "created" | "reused";
+  targetType: string;
+  targetId: string;
+  linkCreated: boolean;
+  label: string;
+}
+
+export interface ApplyStructuredDraftInput {
+  draftKind: "relationship" | "involvement" | "scene";
+  sourceLabel: string;
+  targetLabel?: string;
+  relationshipType?: string;
+  involvementType?: string;
+  sceneType?: string;
+  evidence?: string;
+}
+
+export interface ApplyStructuredDraftResult {
+  action: "created" | "reused";
+  draftKind: string;
+  primaryTargetId: string;
+  secondaryTargetId: string | null;
+}
+
+export async function applyAssetCandidate(
+  projectRoot: string,
+  chapterId: string,
+  input: ApplyAssetCandidateInput
+): Promise<ApplyAssetCandidateResult> {
+  return invokeCommand<ApplyAssetCandidateResult>("apply_asset_candidate", {
+    projectRoot,
+    chapterId,
+    input,
+  });
+}
+
+export async function applyStructuredDraft(
+  projectRoot: string,
+  chapterId: string,
+  input: ApplyStructuredDraftInput
+): Promise<ApplyStructuredDraftResult> {
+  return invokeCommand<ApplyStructuredDraftResult>("apply_structured_draft", {
+    projectRoot,
+    chapterId,
+    input,
+  });
 }

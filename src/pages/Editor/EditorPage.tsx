@@ -18,7 +18,12 @@ import {
   type SnapshotRecord,
   type VolumeRecord
 } from "../../api/chapterApi";
-import { getChapterContext, type ChapterContext } from "../../api/contextApi";
+import {
+  applyAssetCandidate,
+  applyStructuredDraft,
+  getChapterContext,
+  type ChapterContext
+} from "../../api/contextApi";
 import { streamAiChapterTask } from "../../api/aiApi";
 import type { ChapterRecord } from "../../api/chapterApi";
 import { Modal } from "../../components/dialogs/Modal";
@@ -46,6 +51,20 @@ const ASSET_TYPE_LABEL: Record<string, string> = {
   term: "术语"
 };
 
+const CANDIDATE_STATUS_LABEL: Record<"idle" | "applying" | "applied" | "error", string> = {
+  idle: "待处理",
+  applying: "处理中",
+  applied: "已采纳",
+  error: "失败"
+};
+
+const STRUCTURED_DRAFT_STATUS_LABEL: Record<"idle" | "applying" | "applied" | "error", string> = {
+  idle: "待确认",
+  applying: "处理中",
+  applied: "已入库",
+  error: "失败"
+};
+
 export function EditorPage() {
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const selRef = useRef<{ start: number; end: number }>({ start: 0, end: 0 });
@@ -69,6 +88,8 @@ export function EditorPage() {
   const [snapshotLoading, setSnapshotLoading] = useState(false);
   const [creatingSnapshot, setCreatingSnapshot] = useState(false);
   const [editorNotice, setEditorNotice] = useState<string | null>(null);
+  const [candidateStatus, setCandidateStatus] = useState<Record<string, "idle" | "applying" | "applied" | "error">>({});
+  const [structuredDraftStatus, setStructuredDraftStatus] = useState<Record<string, "idle" | "applying" | "applied" | "error">>({});
   const [currentTab, setCurrentTab] = useState<"characters" | "world" | "plot" | "glossary">("characters");
 
   const chapterId = useEditorStore((s) => s.activeChapterId);
@@ -98,12 +119,30 @@ export function EditorPage() {
     setVolumes(volumeRows);
   }, [projectRoot]);
 
+  const refreshChapterContext = useCallback(async (root: string, cid: string) => {
+    try {
+      const ctx = await getChapterContext(root, cid);
+      setContext(ctx);
+    } catch {
+      setContext(null);
+    }
+  }, []);
+
+  const getCandidateKey = useCallback((assetType: string, label: string) => `${assetType}:${label}`, []);
+  const getStructuredDraftKey = useCallback(
+    (kind: "relationship" | "involvement" | "scene", sourceLabel: string, targetLabel?: string) =>
+      `${kind}:${sourceLabel}:${targetLabel ?? ""}`,
+    []
+  );
+
   useEffect(() => { void load(); }, [load]);
 
   // Load chapter content and check recovery
   useEffect(() => {
     if (!chapterId || !projectRoot) {
       setContext(null);
+      setCandidateStatus({});
+      setStructuredDraftStatus({});
       return;
     }
     const cid = chapterId;
@@ -120,22 +159,15 @@ export function EditorPage() {
           setShowRecovery(false);
         }
       }
-      try {
-        const ctx = await getChapterContext(projectRoot, cid);
-        if (!cancelled) {
-          setContext(ctx);
-        }
-      } catch {
-        if (!cancelled) {
-          setContext(null);
-        }
+      if (!cancelled) {
+        await refreshChapterContext(projectRoot, cid);
       }
     }
     void loadChapterRuntimeData();
     return () => {
       cancelled = true;
     };
-  }, [chapterId, projectRoot]);
+  }, [chapterId, projectRoot, refreshChapterContext]);
 
   // Update word count when content changes
   useEffect(() => {
@@ -207,6 +239,9 @@ export function EditorPage() {
       store.setLastSavedAt(result.updatedAt);
       store.setIsDirty(false);
       await load();
+      await refreshChapterContext(projectRoot, chapterId);
+      setCandidateStatus({});
+      setStructuredDraftStatus({});
     } catch {
       store.setSaveStatus("error");
     }
@@ -217,6 +252,8 @@ export function EditorPage() {
     store.setContent("");
     store.setSaveStatus("saved");
     store.setIsDirty(false);
+    setCandidateStatus({});
+    setStructuredDraftStatus({});
     setShowRecovery(false);
     setShowAiPanel(false);
     store.resetAiPreview();
@@ -390,6 +427,139 @@ export function EditorPage() {
       await load();
     } catch (err) {
       setEditorNotice(err instanceof Error ? err.message : "章节归卷失败");
+    }
+  }
+
+  function getCandidateActions(assetType: string): Array<{ label: string; targetKind: "character" | "world_rule" | "plot_node" | "glossary_term" }> {
+    if (assetType === "character") {
+      return [
+        { label: "加入角色", targetKind: "character" },
+        { label: "加入支线", targetKind: "plot_node" },
+      ];
+    }
+    if (assetType === "location" || assetType === "organization" || assetType === "world_rule") {
+      return [
+        { label: "加入设定", targetKind: "world_rule" },
+        { label: "加入支线", targetKind: "plot_node" },
+        { label: "加入名词", targetKind: "glossary_term" },
+      ];
+    }
+    return [
+      { label: "加入名词", targetKind: "glossary_term" },
+      { label: "加入支线", targetKind: "plot_node" },
+    ];
+  }
+
+  async function handleApplyCandidate(
+    candidate: { label: string; assetType: string; evidence: string },
+    targetKind: "character" | "world_rule" | "plot_node" | "glossary_term"
+  ) {
+    if (!projectRoot || !chapterId) return;
+    const key = getCandidateKey(candidate.assetType, candidate.label);
+    setCandidateStatus((prev) => ({ ...prev, [key]: "applying" }));
+    try {
+      const result = await applyAssetCandidate(projectRoot, chapterId, {
+        label: candidate.label,
+        assetType: candidate.assetType,
+        evidence: candidate.evidence,
+        targetKind,
+      });
+      setCandidateStatus((prev) => ({ ...prev, [key]: "applied" }));
+      setEditorNotice(
+        result.action === "created"
+          ? `已创建并关联：${candidate.label}`
+          : `已关联已有资产：${candidate.label}`
+      );
+      await refreshChapterContext(projectRoot, chapterId);
+    } catch (err) {
+      setCandidateStatus((prev) => ({ ...prev, [key]: "error" }));
+      setEditorNotice(err instanceof Error ? err.message : "候选采纳失败");
+    }
+  }
+
+  async function handleApplyRelationshipDraft(draft: {
+    sourceLabel: string;
+    targetLabel: string;
+    relationshipType: string;
+    evidence: string;
+  }) {
+    if (!projectRoot || !chapterId) return;
+    const key = getStructuredDraftKey("relationship", draft.sourceLabel, draft.targetLabel);
+    setStructuredDraftStatus((prev) => ({ ...prev, [key]: "applying" }));
+    try {
+      const result = await applyStructuredDraft(projectRoot, chapterId, {
+        draftKind: "relationship",
+        sourceLabel: draft.sourceLabel,
+        targetLabel: draft.targetLabel,
+        relationshipType: draft.relationshipType,
+        evidence: draft.evidence,
+      });
+      setStructuredDraftStatus((prev) => ({ ...prev, [key]: "applied" }));
+      setEditorNotice(
+        result.action === "created"
+          ? `关系已入库：${draft.sourceLabel} - ${draft.targetLabel}`
+          : `关系已存在：${draft.sourceLabel} - ${draft.targetLabel}`
+      );
+      await refreshChapterContext(projectRoot, chapterId);
+    } catch (err) {
+      setStructuredDraftStatus((prev) => ({ ...prev, [key]: "error" }));
+      setEditorNotice(err instanceof Error ? err.message : "关系草案入库失败");
+    }
+  }
+
+  async function handleApplyInvolvementDraft(draft: {
+    characterLabel: string;
+    involvementType: string;
+    evidence: string;
+  }) {
+    if (!projectRoot || !chapterId) return;
+    const key = getStructuredDraftKey("involvement", draft.characterLabel);
+    setStructuredDraftStatus((prev) => ({ ...prev, [key]: "applying" }));
+    try {
+      const result = await applyStructuredDraft(projectRoot, chapterId, {
+        draftKind: "involvement",
+        sourceLabel: draft.characterLabel,
+        involvementType: draft.involvementType,
+        evidence: draft.evidence,
+      });
+      setStructuredDraftStatus((prev) => ({ ...prev, [key]: "applied" }));
+      setEditorNotice(
+        result.action === "created"
+          ? `戏份已入库：${draft.characterLabel}`
+          : `戏份已存在：${draft.characterLabel}`
+      );
+      await refreshChapterContext(projectRoot, chapterId);
+    } catch (err) {
+      setStructuredDraftStatus((prev) => ({ ...prev, [key]: "error" }));
+      setEditorNotice(err instanceof Error ? err.message : "戏份草案入库失败");
+    }
+  }
+
+  async function handleApplySceneDraft(draft: {
+    sceneLabel: string;
+    sceneType: string;
+    evidence: string;
+  }) {
+    if (!projectRoot || !chapterId) return;
+    const key = getStructuredDraftKey("scene", draft.sceneLabel);
+    setStructuredDraftStatus((prev) => ({ ...prev, [key]: "applying" }));
+    try {
+      const result = await applyStructuredDraft(projectRoot, chapterId, {
+        draftKind: "scene",
+        sourceLabel: draft.sceneLabel,
+        sceneType: draft.sceneType,
+        evidence: draft.evidence,
+      });
+      setStructuredDraftStatus((prev) => ({ ...prev, [key]: "applied" }));
+      setEditorNotice(
+        result.action === "created"
+          ? `场景已入库：${draft.sceneLabel}`
+          : `场景已存在：${draft.sceneLabel}`
+      );
+      await refreshChapterContext(projectRoot, chapterId);
+    } catch (err) {
+      setStructuredDraftStatus((prev) => ({ ...prev, [key]: "error" }));
+      setEditorNotice(err instanceof Error ? err.message : "场景草案入库失败");
     }
   }
 
@@ -735,9 +905,14 @@ export function EditorPage() {
                       <div key={`${candidate.assetType}:${candidate.label}`} className="p-2 bg-surface-700/50 rounded-lg">
                         <div className="flex items-center justify-between gap-2">
                           <span className="text-sm text-surface-200">{candidate.label}</span>
-                          <span className="text-[11px] text-primary">
-                            {ASSET_TYPE_LABEL[candidate.assetType] ?? candidate.assetType}
-                          </span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[11px] text-primary">
+                              {ASSET_TYPE_LABEL[candidate.assetType] ?? candidate.assetType}
+                            </span>
+                            <span className="text-[11px] text-surface-500">
+                              {CANDIDATE_STATUS_LABEL[candidateStatus[getCandidateKey(candidate.assetType, candidate.label)] ?? "idle"]}
+                            </span>
+                          </div>
                         </div>
                         <p className="text-[11px] text-surface-500 mt-1">
                           命中 {candidate.occurrences} 次 · 置信度 {(candidate.confidence * 100).toFixed(0)}%
@@ -745,10 +920,134 @@ export function EditorPage() {
                         <p className="text-xs text-surface-400 mt-1 whitespace-pre-wrap break-words">
                           {candidate.evidence}
                         </p>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {getCandidateActions(candidate.assetType).map((action) => {
+                            const status = candidateStatus[getCandidateKey(candidate.assetType, candidate.label)] ?? "idle";
+                            const isApplying = status === "applying";
+                            return (
+                              <button
+                                key={`${candidate.assetType}:${candidate.label}:${action.targetKind}`}
+                                onClick={() => void handleApplyCandidate(candidate, action.targetKind)}
+                                disabled={isApplying}
+                                className="px-2 py-1 text-[11px] bg-surface-800 text-surface-200 border border-surface-600 rounded hover:bg-surface-700 disabled:opacity-40 transition-colors"
+                              >
+                                {action.label}
+                              </button>
+                            );
+                          })}
+                        </div>
                       </div>
                     ))}
                   </div>
                 )}
+              </div>
+
+              <div className="mt-3 pt-3 border-t border-surface-700 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="text-xs font-semibold text-surface-400 uppercase tracking-wider">
+                    结构化草案
+                  </div>
+                  <span className="text-[11px] text-surface-500">
+                    {(context.relationshipDrafts.length + context.involvementDrafts.length + context.sceneDrafts.length).toString()} 条
+                  </span>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="text-[11px] text-surface-500">关系</div>
+                  {context.relationshipDrafts.length === 0 ? (
+                    <p className="text-xs text-surface-500">未发现关系草案</p>
+                  ) : (
+                    context.relationshipDrafts.slice(0, 4).map((draft) => {
+                      const key = getStructuredDraftKey("relationship", draft.sourceLabel, draft.targetLabel);
+                      const status = structuredDraftStatus[key] ?? "idle";
+                      return (
+                        <div key={key} className="p-2 bg-surface-700/50 rounded-lg">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-sm text-surface-200">
+                              {draft.sourceLabel} ↔ {draft.targetLabel}
+                            </span>
+                            <span className="text-[11px] text-surface-500">
+                              {STRUCTURED_DRAFT_STATUS_LABEL[status]}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-primary mt-1">{draft.relationshipType}</p>
+                          <p className="text-xs text-surface-400 mt-1">{draft.evidence}</p>
+                          <button
+                            onClick={() => void handleApplyRelationshipDraft(draft)}
+                            disabled={status === "applying"}
+                            className="mt-2 px-2 py-1 text-[11px] bg-surface-800 text-surface-200 border border-surface-600 rounded hover:bg-surface-700 disabled:opacity-40 transition-colors"
+                          >
+                            确认入库
+                          </button>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <div className="text-[11px] text-surface-500">戏份</div>
+                  {context.involvementDrafts.length === 0 ? (
+                    <p className="text-xs text-surface-500">未发现戏份草案</p>
+                  ) : (
+                    context.involvementDrafts.slice(0, 4).map((draft) => {
+                      const key = getStructuredDraftKey("involvement", draft.characterLabel);
+                      const status = structuredDraftStatus[key] ?? "idle";
+                      return (
+                        <div key={key} className="p-2 bg-surface-700/50 rounded-lg">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-sm text-surface-200">{draft.characterLabel}</span>
+                            <span className="text-[11px] text-surface-500">
+                              {STRUCTURED_DRAFT_STATUS_LABEL[status]}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-primary mt-1">
+                            {draft.involvementType} · {draft.occurrences} 次
+                          </p>
+                          <p className="text-xs text-surface-400 mt-1">{draft.evidence}</p>
+                          <button
+                            onClick={() => void handleApplyInvolvementDraft(draft)}
+                            disabled={status === "applying"}
+                            className="mt-2 px-2 py-1 text-[11px] bg-surface-800 text-surface-200 border border-surface-600 rounded hover:bg-surface-700 disabled:opacity-40 transition-colors"
+                          >
+                            确认入库
+                          </button>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <div className="text-[11px] text-surface-500">场景</div>
+                  {context.sceneDrafts.length === 0 ? (
+                    <p className="text-xs text-surface-500">未发现场景草案</p>
+                  ) : (
+                    context.sceneDrafts.slice(0, 4).map((draft) => {
+                      const key = getStructuredDraftKey("scene", draft.sceneLabel);
+                      const status = structuredDraftStatus[key] ?? "idle";
+                      return (
+                        <div key={key} className="p-2 bg-surface-700/50 rounded-lg">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-sm text-surface-200">{draft.sceneLabel}</span>
+                            <span className="text-[11px] text-surface-500">
+                              {STRUCTURED_DRAFT_STATUS_LABEL[status]}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-primary mt-1">{draft.sceneType}</p>
+                          <p className="text-xs text-surface-400 mt-1">{draft.evidence}</p>
+                          <button
+                            onClick={() => void handleApplySceneDraft(draft)}
+                            disabled={status === "applying"}
+                            className="mt-2 px-2 py-1 text-[11px] bg-surface-800 text-surface-200 border border-surface-600 rounded hover:bg-surface-700 disabled:opacity-40 transition-colors"
+                          >
+                            确认入库
+                          </button>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
               </div>
 
               <div className="mt-3 pt-3 border-t border-surface-700">
