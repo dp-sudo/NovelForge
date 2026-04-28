@@ -1,6 +1,5 @@
 import { useState, useEffect } from "react";
 import { Button } from "../ui/Button.js";
-import { Textarea } from "../forms/Textarea.js";
 
 interface SkillEditorProps {
   initialContent: string;
@@ -39,7 +38,7 @@ export function SkillEditor({ initialContent, readOnlyFields = ["id", "source", 
     : "";
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full min-h-0 rounded-lg border border-surface-700 bg-surface-900/40 p-4">
       <div className="flex items-center justify-between mb-3 shrink-0">
         <div className="flex items-center gap-2">
           <span className="text-xs text-surface-400">Markdown 编辑器</span>
@@ -56,11 +55,11 @@ export function SkillEditor({ initialContent, readOnlyFields = ["id", "source", 
         <p className="text-xs text-surface-500 mb-2 shrink-0">{frontmatterHint}</p>
       )}
       <div className="flex-1 min-h-0">
-        <Textarea
+        <textarea
           value={content}
           onChange={(e) => handleChange(e.target.value)}
-          className="min-h-full font-mono text-xs leading-relaxed resize-none"
-          style={{ height: "100%" }}
+          className="h-full min-h-full w-full rounded-lg border border-input bg-surface-800 px-3 py-2 font-mono text-sm leading-relaxed text-surface-100 placeholder:text-surface-400 focus:outline-none focus:ring-2 focus:ring-ring/50 focus:border-primary resize-none"
+          spellCheck={false}
         />
       </div>
     </div>

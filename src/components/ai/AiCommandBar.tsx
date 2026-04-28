@@ -48,32 +48,34 @@ export function AiCommandBar({ onCommand, disabled }: AiCommandBarProps) {
     .filter((g) => g.skills.length > 0);
 
   return (
-    <div className="flex flex-col gap-2">
-      {groups.map((group) => (
-        <div key={group.category}>
-          <p className="text-[10px] font-medium text-surface-500 uppercase tracking-wider mb-1.5">
-            {group.label}
-          </p>
-          <div className="flex gap-1.5 flex-wrap">
-            {group.skills.map((skill) => (
-              <button
-                key={skill.id}
-                onClick={() => handleCommand(skill)}
-                disabled={disabled}
-                className={`inline-flex items-center gap-1 px-2.5 py-1.5 text-xs rounded-lg transition-colors disabled:opacity-40 ${
-                  activeId === skill.id
-                    ? "bg-primary/20 text-primary border border-primary/30"
-                    : "bg-surface-700 text-surface-300 border border-surface-600 hover:bg-surface-600"
-                }`}
-              >
-                {skill.icon && <span>{skill.icon}</span>}
-                {skill.name}
-              </button>
-            ))}
+    <div className="rounded-xl border border-surface-700 bg-surface-900/40 p-3">
+      <div className="grid grid-cols-1 xl:grid-cols-2 2xl:grid-cols-3 gap-2">
+        {groups.map((group) => (
+          <div key={group.category} className="rounded-lg border border-surface-700/80 bg-surface-800/35 p-2">
+            <p className="text-[10px] font-medium text-surface-500 uppercase tracking-wider mb-1.5">
+              {group.label}
+            </p>
+            <div className="flex gap-1.5 flex-wrap">
+              {group.skills.map((skill) => (
+                <button
+                  key={skill.id}
+                  onClick={() => handleCommand(skill)}
+                  disabled={disabled}
+                  className={`inline-flex items-center gap-1 px-2.5 py-1.5 text-xs rounded-lg transition-colors disabled:opacity-40 ${
+                    activeId === skill.id
+                      ? "bg-primary/20 text-primary border border-primary/30"
+                      : "bg-surface-700 text-surface-300 border border-surface-600 hover:bg-surface-600"
+                  }`}
+                >
+                  {skill.icon && <span>{skill.icon}</span>}
+                  {skill.name}
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
-      ))}
-      <div className="flex gap-2 mt-1">
+        ))}
+      </div>
+      <div className="flex gap-2 mt-3">
         <input
           type="text"
           value={instruction}

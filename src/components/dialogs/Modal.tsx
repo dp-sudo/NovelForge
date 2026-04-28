@@ -6,6 +6,7 @@ interface ModalProps {
   open: boolean;
   onClose: () => void;
   title?: string;
+  description?: string;
   width?: "sm" | "md" | "lg";
 }
 
@@ -15,7 +16,8 @@ const widthStyles = {
   lg: "max-w-2xl",
 };
 
-export function Modal({ open, onClose, title, width = "md", children }: PropsWithChildren<ModalProps>) {
+export function Modal({ open, onClose, title, description, width = "md", children }: PropsWithChildren<ModalProps>) {
+  const a11yDescription = description ?? (title ? `${title}对话框内容` : "对话框内容");
   return (
     <Dialog.Root open={open} onOpenChange={(open) => { if (!open) onClose(); }}>
       <Dialog.Portal>
@@ -29,6 +31,9 @@ export function Modal({ open, onClose, title, width = "md", children }: PropsWit
             widthStyles[width],
           )}
         >
+          <Dialog.Description className="sr-only">
+            {a11yDescription}
+          </Dialog.Description>
           {title && (
             <div className="flex items-center justify-between px-5 py-4 border-b border-border">
               <Dialog.Title className="text-base font-semibold text-foreground">

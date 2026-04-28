@@ -132,6 +132,7 @@ function SliderControl({
 export function SettingsPage() {
   const [activeTab, setActiveTab] = useState<TabKey>("model");
   const [vendors, setVendors] = useState<Record<string, VendorFormState>>({});
+  const [configuredProviderIds, setConfiguredProviderIds] = useState<string[]>([]);
   const [taskRoutes, setTaskRoutes] = useState<Record<string, TaskRouteFormState>>({});
   const [taskRouteMessage, setTaskRouteMessage] = useState<string | null>(null);
   const [taskRoutesLoading, setTaskRoutesLoading] = useState(true);
@@ -492,6 +493,33 @@ export function SettingsPage() {
     };
   }
 
+  function pickPrimaryRouteSeed(configs: LlmProviderConfig[]): { providerId: string; modelId: string } | null {
+    for (const preset of VENDOR_PRESETS) {
+      const existing = configs.find((config) => config.id === preset.id);
+      const modelId = existing?.defaultModel?.trim() || "";
+      if (existing && modelId) {
+        return { providerId: existing.id, modelId };
+      }
+    }
+    for (const config of configs) {
+      const modelId = config.defaultModel?.trim() || "";
+      if (modelId) {
+        return { providerId: config.id, modelId };
+      }
+    }
+    return null;
+  }
+
+  function collectProviderModelChoices(providerId: string): string[] {
+    const provider = vendors[providerId];
+    if (!provider) return [];
+    const values = [
+      provider.config.defaultModel?.trim() || "",
+      ...provider.models.map((model) => model.modelName.trim()),
+    ].filter(Boolean);
+    return Array.from(new Set(values));
+  }
+
   useEffect(() => {
     (async () => {
       setLoading(true);
@@ -501,6 +529,17 @@ export function SettingsPage() {
           listProviders(),
           listTaskRoutes(),
         ]);
+        const configuredIds = configs.map((config) => config.id);
+        setConfiguredProviderIds(configuredIds);
+        const modelsByProvider = new Map<string, ModelRecord[]>(
+          await Promise.all(
+            configuredIds.map(async (providerId) => [
+              providerId,
+              await getProviderModels(providerId).catch(() => [] as ModelRecord[]),
+            ] as const)
+          )
+        );
+        const primaryRouteSeed = pickPrimaryRouteSeed(configs);
         const currentLicense = await getLicenseStatus().catch(() => null);
         setLicenseStatus(currentLicense);
 
@@ -535,7 +574,7 @@ export function SettingsPage() {
             saving: false,
             testing: false,
             refreshing: false,
-            models: [],
+            models: modelsByProvider.get(preset.id) || [],
             capabilities: null,
             refreshResult: null,
             testResult: null,
@@ -555,8 +594,8 @@ export function SettingsPage() {
               : {
                   id: "",
                   taskType: task.value,
-                  providerId: "",
-                  modelId: "",
+                  providerId: primaryRouteSeed?.providerId || "",
+                  modelId: primaryRouteSeed?.modelId || "",
                   fallbackProviderId: "",
                   fallbackModelId: "",
                   maxRetries: 1,
@@ -614,6 +653,7 @@ export function SettingsPage() {
     setVendors((prev) => ({ ...prev, [preset.id]: { ...prev[preset.id], saving: true, validationError: null } }));
     try {
       const saved = await saveProvider(normalizedConfig, v.apiKeyInput || undefined);
+      const models = await getProviderModels(preset.id).catch(() => [] as ModelRecord[]);
       setVendors((prev) => ({
         ...prev,
         [preset.id]: {
@@ -622,10 +662,33 @@ export function SettingsPage() {
           apiKeyInput: "",
           betaHeadersInput: mapToInput(saved.betaHeaders),
           customHeadersInput: mapToInput(saved.customHeaders),
+          models,
           saving: false,
           validationError: null,
         },
       }));
+      setConfiguredProviderIds((prev) => (prev.includes(saved.id) ? prev : [...prev, saved.id]));
+      const defaultModelId = saved.defaultModel?.trim() || "";
+      if (defaultModelId) {
+        setTaskRoutes((prev) => {
+          const next: Record<string, TaskRouteFormState> = {};
+          for (const [taskType, state] of Object.entries(prev)) {
+            if (state.route.providerId.trim() || state.route.modelId.trim()) {
+              next[taskType] = state;
+            } else {
+              next[taskType] = {
+                ...state,
+                route: {
+                  ...state.route,
+                  providerId: saved.id,
+                  modelId: defaultModelId,
+                },
+              };
+            }
+          }
+          return next;
+        });
+      }
     } catch (err: unknown) {
       const msg = typeof err === "object" && err && "message" in err
         ? String((err as { message: string }).message)
@@ -693,6 +756,7 @@ export function SettingsPage() {
 
   async function handleDelete(preset: VendorInfo) {
     await deleteProvider(preset.id);
+    setConfiguredProviderIds((prev) => prev.filter((providerId) => providerId !== preset.id));
     setVendors((prev) => ({
       ...prev,
       [preset.id]: {
@@ -718,6 +782,26 @@ export function SettingsPage() {
         validationError: null,
       },
     }));
+    setTaskRoutes((prev) => {
+      const next: Record<string, TaskRouteFormState> = {};
+      for (const [taskType, state] of Object.entries(prev)) {
+        if (state.route.providerId !== preset.id && state.route.fallbackProviderId !== preset.id) {
+          next[taskType] = state;
+          continue;
+        }
+        next[taskType] = {
+          ...state,
+          route: {
+            ...state.route,
+            providerId: state.route.providerId === preset.id ? "" : state.route.providerId,
+            modelId: state.route.providerId === preset.id ? "" : state.route.modelId,
+            fallbackProviderId: state.route.fallbackProviderId === preset.id ? "" : state.route.fallbackProviderId,
+            fallbackModelId: state.route.fallbackProviderId === preset.id ? "" : state.route.fallbackModelId,
+          },
+        };
+      }
+      return next;
+    });
   }
 
   // ── Remote registry handlers ──
@@ -774,6 +858,24 @@ export function SettingsPage() {
       },
     }));
     setTaskRouteMessage(null);
+  }
+
+  function handleTaskRouteProviderChange(taskType: string, providerId: string) {
+    const nextModelId = collectProviderModelChoices(providerId)[0] || "";
+    updateTaskRoute(taskType, {
+      providerId,
+      modelId: nextModelId,
+    });
+  }
+
+  function handleTaskRouteFallbackProviderChange(taskType: string, fallbackProviderId: string) {
+    const fallbackModelId = fallbackProviderId
+      ? collectProviderModelChoices(fallbackProviderId)[0] || ""
+      : "";
+    updateTaskRoute(taskType, {
+      fallbackProviderId,
+      fallbackModelId,
+    });
   }
 
   async function handleSaveTaskRoute(taskType: string) {
@@ -889,10 +991,35 @@ export function SettingsPage() {
     { key: "about", label: "关于" },
   ];
 
-  const providerOptions = VENDOR_PRESETS.map((preset) => ({
-    value: preset.id,
-    label: vendors[preset.id]?.config.displayName || preset.displayName,
-  }));
+  const configuredProviderIdSet = new Set(configuredProviderIds);
+  const providerIdsForRouting = configuredProviderIds.length > 0
+    ? VENDOR_PRESETS
+      .map((preset) => preset.id)
+      .filter((providerId) => configuredProviderIdSet.has(providerId))
+    : VENDOR_PRESETS.map((preset) => preset.id);
+
+  function toProviderLabel(providerId: string): string {
+    const preset = VENDOR_PRESETS.find((item) => item.id === providerId);
+    return vendors[providerId]?.config.displayName || preset?.displayName || providerId;
+  }
+
+  function buildRouteProviderOptions(currentProviderId: string): { value: string; label: string }[] {
+    const ids = providerIdsForRouting.includes(currentProviderId) || !currentProviderId
+      ? providerIdsForRouting
+      : [...providerIdsForRouting, currentProviderId];
+    return ids.map((providerId) => ({
+      value: providerId,
+      label: toProviderLabel(providerId),
+    }));
+  }
+
+  function buildRouteModelOptions(providerId: string, currentModelId: string): { value: string; label: string }[] {
+    const modelIds = collectProviderModelChoices(providerId);
+    const merged = currentModelId && !modelIds.includes(currentModelId)
+      ? [currentModelId, ...modelIds]
+      : modelIds;
+    return merged.map((modelId) => ({ value: modelId, label: modelId }));
+  }
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -1097,6 +1224,16 @@ export function SettingsPage() {
                 const state = taskRoutes[task.value];
                 if (!state) return null;
                 const route = state.route;
+                const routeProviderOptions = buildRouteProviderOptions(route.providerId || "");
+                const fallbackProviderOptions = [
+                  { value: "", label: "不使用 fallback" },
+                  ...buildRouteProviderOptions(route.fallbackProviderId || ""),
+                ];
+                const modelOptions = buildRouteModelOptions(route.providerId || "", route.modelId || "");
+                const fallbackModelOptions = buildRouteModelOptions(
+                  route.fallbackProviderId || "",
+                  route.fallbackModelId || "",
+                );
                 return (
                   <div key={task.value} className="border border-surface-700 rounded-lg p-4 space-y-3 bg-surface-800/40">
                     <div className="flex items-center justify-between">
@@ -1107,28 +1244,48 @@ export function SettingsPage() {
                       <Select
                         label="Provider"
                         value={route.providerId || ""}
-                        onChange={(e) => updateTaskRoute(task.value, { providerId: e.target.value })}
-                        options={providerOptions}
+                        onChange={(e) => handleTaskRouteProviderChange(task.value, e.target.value)}
+                        options={routeProviderOptions}
                         placeholder="选择 Provider"
                       />
-                      <Input
-                        label="模型 ID"
-                        value={route.modelId || ""}
-                        onChange={(e) => updateTaskRoute(task.value, { modelId: e.target.value })}
-                        placeholder="例如 deepseek-v4-flash"
-                      />
+                      {modelOptions.length > 0 ? (
+                        <Select
+                          label="模型 ID"
+                          value={route.modelId || ""}
+                          onChange={(e) => updateTaskRoute(task.value, { modelId: e.target.value })}
+                          options={modelOptions}
+                          placeholder="选择已配置模型"
+                        />
+                      ) : (
+                        <Input
+                          label="模型 ID"
+                          value={route.modelId || ""}
+                          onChange={(e) => updateTaskRoute(task.value, { modelId: e.target.value })}
+                          placeholder="例如 deepseek-v4-flash"
+                        />
+                      )}
                       <Select
                         label="Fallback Provider"
                         value={route.fallbackProviderId || ""}
-                        onChange={(e) => updateTaskRoute(task.value, { fallbackProviderId: e.target.value })}
-                        options={[{ value: "", label: "不使用 fallback" }, ...providerOptions]}
+                        onChange={(e) => handleTaskRouteFallbackProviderChange(task.value, e.target.value)}
+                        options={fallbackProviderOptions}
                       />
-                      <Input
-                        label="Fallback 模型 ID"
-                        value={route.fallbackModelId || ""}
-                        onChange={(e) => updateTaskRoute(task.value, { fallbackModelId: e.target.value })}
-                        placeholder="可留空"
-                      />
+                      {fallbackModelOptions.length > 0 ? (
+                        <Select
+                          label="Fallback 模型 ID"
+                          value={route.fallbackModelId || ""}
+                          onChange={(e) => updateTaskRoute(task.value, { fallbackModelId: e.target.value })}
+                          options={fallbackModelOptions}
+                          placeholder="选择已配置模型"
+                        />
+                      ) : (
+                        <Input
+                          label="Fallback 模型 ID"
+                          value={route.fallbackModelId || ""}
+                          onChange={(e) => updateTaskRoute(task.value, { fallbackModelId: e.target.value })}
+                          placeholder="可留空"
+                        />
+                      )}
                       <Input
                         label="最大重试次数"
                         type="number"
@@ -1172,12 +1329,12 @@ export function SettingsPage() {
       )}
 
       {activeTab === "skills" && (
-        <Card padding="lg" className="min-h-[400px]">
+        <Card padding="lg" className="min-h-[560px]">
           <h2 className="text-base font-semibold text-surface-100 mb-4">技能管理</h2>
           <p className="text-xs text-surface-400 mb-4">
             技能是基于 Markdown 文件的 AI 提示词模板。您可以浏览内置技能、导入自定义 .md 文件、编辑现有技能内容。
           </p>
-          <div className="h-[500px]">
+          <div className="h-[70vh] min-h-[480px]">
             <SkillsManager />
           </div>
         </Card>

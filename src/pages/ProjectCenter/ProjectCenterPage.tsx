@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useUiStore } from "../../stores/uiStore.js";
 import { useProjectStore } from "../../stores/projectStore.js";
 import { Card } from "../../components/cards/Card.js";
@@ -8,6 +8,7 @@ import { Select } from "../../components/forms/Select.js";
 import { Modal } from "../../components/dialogs/Modal.js";
 import { clearRecentProjects, createProject, listRecentProjects, openProject, validateProjectName } from "../../api/projectApi.js";
 import { checkProjectIntegrity, type IntegrityReport } from "../../api/chapterApi.js";
+import type { AppErrorDto } from "../../types/error.js";
 
 const GENRES = ["玄幻", "都市", "科幻", "悬疑", "言情", "历史", "奇幻", "轻小说", "剧本", "其他"];
 const WINDOWS_INVALID_PATH_CHARS = /[<>:"|?*]/;
@@ -31,12 +32,32 @@ function validateWindowsDirectoryPath(path: string): string | null {
 
 function getErrorMessage(error: unknown, fallback: string): string {
   if (typeof error === "object" && error !== null) {
-    const maybeError = error as { message?: unknown };
+    const maybeError = error as { message?: unknown; suggestedAction?: unknown };
     if (typeof maybeError.message === "string" && maybeError.message.trim()) {
-      return maybeError.message;
+      const suggestion = typeof maybeError.suggestedAction === "string" && maybeError.suggestedAction.trim()
+        ? `（${maybeError.suggestedAction}）`
+        : "";
+      return `${maybeError.message}${suggestion}`;
     }
   }
   return fallback;
+}
+
+function asAppError(error: unknown): AppErrorDto | null {
+  if (typeof error !== "object" || error === null) {
+    return null;
+  }
+  const maybeError = error as Partial<AppErrorDto>;
+  if (typeof maybeError.code !== "string" || typeof maybeError.message !== "string") {
+    return null;
+  }
+  return {
+    code: maybeError.code,
+    message: maybeError.message,
+    detail: maybeError.detail,
+    recoverable: Boolean(maybeError.recoverable),
+    suggestedAction: maybeError.suggestedAction,
+  };
 }
 
 export function ProjectCenterPage() {
@@ -46,12 +67,14 @@ export function ProjectCenterPage() {
   const [genre, setGenre] = useState("玄幻");
   const [targetWords, setTargetWords] = useState(300000);
   const [saveDirectory, setSaveDirectory] = useState("");
+  const [openDirectory, setOpenDirectory] = useState("");
   const [creating, setCreating] = useState(false);
+  const [opening, setOpening] = useState(false);
+  const [showOpen, setShowOpen] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [recentProjects, setRecentProjects] = useState<Array<{ path: string; name: string; openedAt: string }>>([]);
   const [integrityLoadingPath, setIntegrityLoadingPath] = useState<string | null>(null);
   const [integrityReports, setIntegrityReports] = useState<Record<string, IntegrityReport>>({});
-  const folderInputRef = useRef<HTMLInputElement>(null);
 
   const setActiveRoute = useUiStore((s) => s.setActiveRoute);
   const setCurrentProject = useProjectStore((s) => s.setCurrentProject);
@@ -100,6 +123,19 @@ export function ProjectCenterPage() {
       setName("");
       setAuthor("");
     } catch (err) {
+      const appError = asAppError(err);
+      if (appError?.code === "PROJECT_PATH_EXISTS" && appError.detail) {
+        try {
+          const existing = await openProject(appError.detail);
+          setCurrentProject(existing.projectRoot, existing.project);
+          setShowNew(false);
+          setActiveRoute("dashboard");
+          setActionError(null);
+          return;
+        } catch {
+          // Keep original create error when existing directory is not a valid project.
+        }
+      }
       console.error("Create project failed", err);
       setActionError(getErrorMessage(err, "项目创建失败，请检查保存目录和权限"));
     } finally {
@@ -120,28 +156,30 @@ export function ProjectCenterPage() {
       }
       return;
     }
-    // No path: open folder picker so user can select a project directory
-    folderInputRef.current?.click();
+    // No path: use explicit absolute-directory input for reliable Tauri path handling.
+    setOpenDirectory("");
+    setShowOpen(true);
   }
 
-  function handleFolderSelected(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    // In Tauri, file.path gives the full native path of the selected item
-    const dirPath = file.path;
-    if (!dirPath) return;
-    e.target.value = ""; // reset so same directory can be re-selected
+  async function handleOpenByDirectoryPath() {
+    const pathError = validateWindowsDirectoryPath(openDirectory);
+    if (pathError) {
+      setActionError(pathError);
+      return;
+    }
+    setOpening(true);
     setActionError(null);
-    // The webkitdirectory gives us the first file in the directory;
-    // we need the directory itself, not the file path
-    const dir = dirPath.includes("\\") ? dirPath.substring(0, dirPath.lastIndexOf("\\")) :
-                dirPath.includes("/") ? dirPath.substring(0, dirPath.lastIndexOf("/")) : dirPath;
-    openProject(dir).then((result) => {
+    try {
+      const result = await openProject(openDirectory.trim());
       setCurrentProject(result.projectRoot, result.project);
       setActiveRoute("dashboard");
-    }).catch((err) => {
+      setShowOpen(false);
+      setOpenDirectory("");
+    } catch (err) {
       setActionError(getErrorMessage(err, "打开项目失败，请确认所选目录是有效的 NovelForge 项目"));
-    });
+    } finally {
+      setOpening(false);
+    }
   }
 
   async function handleClearProject() {
@@ -186,13 +224,6 @@ export function ProjectCenterPage() {
               <Button variant="secondary" className="w-full justify-center" onClick={() => void handleOpenExisting()}>
                 打开本地项目
               </Button>
-              <input
-                ref={folderInputRef}
-                type="file"
-                webkitdirectory=""
-                className="hidden"
-                onChange={handleFolderSelected}
-              />
             </div>
           </Card>
 
@@ -275,6 +306,26 @@ export function ProjectCenterPage() {
             <Button variant="ghost" onClick={() => setShowNew(false)}>取消</Button>
             <Button variant="primary" onClick={() => void handleCreate()} disabled={!name.trim() || creating}>
               {creating ? "创建中..." : "创建项目"}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal open={showOpen} onClose={() => setShowOpen(false)} title="打开本地项目" width="md">
+        <div className="space-y-4">
+          <Input
+            label="项目目录 *"
+            value={openDirectory}
+            onChange={(e) => setOpenDirectory(e.target.value)}
+            placeholder="例如：F:\\NovelProjects\\夜潮计划"
+          />
+          <p className="text-xs text-surface-500">
+            请选择包含 <code>project.json</code> 与 <code>database\\project.sqlite</code> 的项目根目录。
+          </p>
+          <div className="pt-3 border-t border-surface-700 flex justify-end gap-3">
+            <Button variant="ghost" onClick={() => setShowOpen(false)}>取消</Button>
+            <Button variant="primary" onClick={() => void handleOpenByDirectoryPath()} disabled={!openDirectory.trim() || opening}>
+              {opening ? "打开中..." : "打开项目"}
             </Button>
           </div>
         </div>

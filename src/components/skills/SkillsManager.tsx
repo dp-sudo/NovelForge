@@ -98,9 +98,9 @@ export function SkillsManager() {
     : skills;
 
   return (
-    <div className="flex gap-4 h-full">
+    <div className="flex h-full min-h-0 gap-4">
       {/* Left panel: list */}
-      <div className="w-72 shrink-0 flex flex-col gap-3">
+      <div className="w-[300px] lg:w-[340px] shrink-0 flex flex-col gap-3 min-h-0">
         {/* Toolbar */}
         <div className="flex gap-2">
           <Input
@@ -164,7 +164,7 @@ export function SkillsManager() {
       </div>
 
       {/* Right panel: detail */}
-      <div className="flex-1 min-w-0">
+      <div className="flex-1 min-w-0 h-full">
         {selected ? (
           <SkillDetail
             skill={selected}
