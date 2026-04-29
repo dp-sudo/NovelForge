@@ -149,6 +149,7 @@ export function EditorPage() {
   const aiPreviewContent = useEditorStore((s) => s.aiPreviewContent);
   const aiTaskType = useEditorStore((s) => s.aiTaskType);
   const aiStreamError = useEditorStore((s) => s.aiStreamError);
+  const setAiRequestId = useEditorStore((s) => s.setAiRequestId);
   const store = useEditorStore();
   const projectRoot = useProjectStore((s) => s.currentProjectPath);
 
@@ -322,24 +323,24 @@ export function EditorPage() {
     return parts.join(" | ") || "AI 生成异常，请检查控制台日志";
   }, []);
 
-  const cancelActivePipeline = useCallback(async () => {
+  const cancelActivePipeline = useCallback(async (reason: string = "manual") => {
     const requestId = activeAiRequestIdRef.current;
     if (!requestId) return;
     activeAiRequestIdRef.current = null;
     aiRunTokenRef.current += 1;
-    store.setAiRequestId(null);
-    await cancelTaskPipeline(requestId).catch(() => undefined);
-  }, [store]);
+    setAiRequestId(null);
+    await cancelTaskPipeline(requestId, reason).catch(() => undefined);
+  }, [setAiRequestId]);
 
   useEffect(() => {
     return () => {
-      void cancelActivePipeline();
+      void cancelActivePipeline("unmount");
     };
   }, [cancelActivePipeline]);
 
   useEffect(() => {
     if (lastChapterIdRef.current !== null && lastChapterIdRef.current !== chapterId) {
-      void cancelActivePipeline();
+      void cancelActivePipeline("chapter_change");
     }
     lastChapterIdRef.current = chapterId;
   }, [chapterId, cancelActivePipeline]);
@@ -362,7 +363,7 @@ export function EditorPage() {
   }
 
   function handleSelectChapter(ch: ChapterRecord) {
-    void cancelActivePipeline();
+    void cancelActivePipeline("select_chapter");
     store.setActiveChapter(ch.id, ch.title);
     store.setContent("");
     store.setSaveStatus("saved");
@@ -441,7 +442,7 @@ export function EditorPage() {
       return;
     }
 
-    await cancelActivePipeline();
+    await cancelActivePipeline("new_request");
     const runToken = aiRunTokenRef.current + 1;
     aiRunTokenRef.current = runToken;
 
@@ -469,7 +470,7 @@ export function EditorPage() {
         }
         if (activeAiRequestIdRef.current !== event.requestId) {
           activeAiRequestIdRef.current = event.requestId;
-          store.setAiRequestId(event.requestId);
+          setAiRequestId(event.requestId);
         }
         if (event.type === "delta" && event.delta) {
           store.appendAiPreviewContent(event.delta);
@@ -504,7 +505,7 @@ export function EditorPage() {
     } finally {
       if (runToken === aiRunTokenRef.current) {
         activeAiRequestIdRef.current = null;
-        store.setAiRequestId(null);
+        setAiRequestId(null);
       }
     }
   }
@@ -532,7 +533,7 @@ export function EditorPage() {
 
   function handleAiDiscard() {
     if (aiStreamStatus === "streaming") {
-      void cancelActivePipeline();
+      void cancelActivePipeline("discard");
     }
     setShowAiPanel(false);
     store.resetAiPreview();

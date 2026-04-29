@@ -178,10 +178,18 @@ export async function* streamTaskPipeline(
   let requestId: string | null = null;
   let done = false;
   let terminalLogged = false;
+  let firstBackendEventSeen = false;
   let resolveWaiter: (() => void) | null = null;
   let lastEventTime = Date.now();
+  let runAcceptedAt = Date.now();
 
-  const acceptEvent = (event: AiPipelineEvent) => {
+  const acceptEvent = (
+    event: AiPipelineEvent,
+    source: "backend" | "synthetic" = "backend",
+  ) => {
+    if (source === "backend") {
+      firstBackendEventSeen = true;
+    }
     pending.push(event);
     lastEventTime = Date.now();
     if (event.type === "done" || event.type === "error") {
@@ -226,13 +234,14 @@ export async function* streamTaskPipeline(
 
   try {
     requestId = await runTaskPipeline(input, { timeoutMs: startTimeoutMs });
+    runAcceptedAt = Date.now();
     acceptEvent({
       requestId,
       phase: "run",
       type: "start",
       message: "pipeline accepted",
       meta: null,
-    });
+    }, "synthetic");
     const earlyEvents = pendingBeforeRequest.get(requestId);
     if (earlyEvents) {
       for (const event of earlyEvents) {
@@ -247,20 +256,26 @@ export async function* streamTaskPipeline(
         continue;
       }
 
-      const elapsed = Date.now() - lastEventTime;
-      const remaining = timeoutMs - elapsed;
+      const activeTimeout = firstBackendEventSeen
+        ? timeoutMs
+        : Math.min(timeoutMs, DEFAULT_FIRST_EVENT_TIMEOUT_MS);
+      const waitBaseline = firstBackendEventSeen ? lastEventTime : runAcceptedAt;
+      const remaining = activeTimeout - (Date.now() - waitBaseline);
       if (remaining <= 0) {
         done = true;
         if (!terminalLogged) {
-          logUI("PIPELINE.ERROR", `requestId=${requestId} phase=done errorCode=PIPELINE_EVENT_TIMEOUT`);
+          const code = firstBackendEventSeen ? "PIPELINE_EVENT_TIMEOUT" : "PIPELINE_FIRST_EVENT_TIMEOUT";
+          logUI("PIPELINE.ERROR", `requestId=${requestId} phase=done errorCode=${code}`);
           terminalLogged = true;
         }
         yield {
           requestId,
           phase: "done",
           type: "error",
-          errorCode: "PIPELINE_EVENT_TIMEOUT",
-          message: "AI 响应超时，请检查网络连接",
+          errorCode: firstBackendEventSeen ? "PIPELINE_EVENT_TIMEOUT" : "PIPELINE_FIRST_EVENT_TIMEOUT",
+          message: firstBackendEventSeen
+            ? "AI 响应超时，请检查网络连接"
+            : "AI 启动后未收到事件，请重试",
           recoverable: true,
           meta: null,
         };
@@ -287,15 +302,18 @@ export async function* streamTaskPipeline(
         resolveWaiter = null;
         done = true;
         if (!terminalLogged) {
-          logUI("PIPELINE.ERROR", `requestId=${requestId} phase=done errorCode=PIPELINE_EVENT_TIMEOUT`);
+          const code = firstBackendEventSeen ? "PIPELINE_EVENT_TIMEOUT" : "PIPELINE_FIRST_EVENT_TIMEOUT";
+          logUI("PIPELINE.ERROR", `requestId=${requestId} phase=done errorCode=${code}`);
           terminalLogged = true;
         }
         yield {
           requestId,
           phase: "done",
           type: "error",
-          errorCode: "PIPELINE_EVENT_TIMEOUT",
-          message: "AI 响应超时，请检查网络连接",
+          errorCode: firstBackendEventSeen ? "PIPELINE_EVENT_TIMEOUT" : "PIPELINE_FIRST_EVENT_TIMEOUT",
+          message: firstBackendEventSeen
+            ? "AI 响应超时，请检查网络连接"
+            : "AI 启动后未收到事件，请重试",
           recoverable: true,
           meta: null,
         };

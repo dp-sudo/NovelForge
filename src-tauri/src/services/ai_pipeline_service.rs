@@ -123,25 +123,30 @@ impl AiPipelineService {
         let canonical_task = task_routing::canonical_task_type(&input.task_type).into_owned();
         let started_at = Instant::now();
 
-        self.insert_pipeline_run(
+        let run_result = match self.insert_pipeline_run(
             &input.project_root,
             &request_id,
             input.chapter_id.as_deref(),
             &canonical_task,
             input.ui_action.as_deref(),
-        )?;
-
-        let run_result = self
-            .run_pipeline_inner(
-                app_handle,
-                ai_service,
-                context_service,
-                skill_registry,
-                &request_id,
-                &canonical_task,
-                &input,
-            )
-            .await;
+        ) {
+            Ok(()) => {
+                self.run_pipeline_inner(
+                    app_handle,
+                    ai_service,
+                    context_service,
+                    skill_registry,
+                    &request_id,
+                    &canonical_task,
+                    &input,
+                )
+                .await
+            }
+            Err(error) => Err(StageError {
+                phase: PHASE_VALIDATE,
+                error,
+            }),
+        };
 
         match run_result {
             Ok(success) => {

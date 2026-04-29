@@ -305,7 +305,9 @@ const FIELD_LABELS: Record<string, Record<string, string>> = {
 export function BlueprintPage() {
   const [steps, setSteps] = useState<Array<{ status: string; content: string; aiGenerated: boolean }>>([]);
   const [activeIdx, setActiveIdx] = useState(0);
-  const [formData, setFormData] = useState<Record<string, string>>({});
+  const [formData, setFormData] = useState<Record<string, string>>(() =>
+    parseBlueprintContent(STEPS[0].key, "")
+  );
   const [saving, setSaving] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiResult, setAiResult] = useState<string | null>(null);
@@ -388,7 +390,7 @@ export function BlueprintPage() {
         stepTitle: cur.label,
         userInstruction: textSummary || ""
       });
-      setAiResult(suggestion || "未能生成建议。请检查 AI 供应商配置和任务路由。");
+      setAiResult(suggestion.trim() ? suggestion : "AI 返回为空内容，请重试或切换模型后再试。");
     } catch {
       setAiResult("AI 建议生成失败。请检查 AI 供应商配置。");
     } finally { setAiLoading(false); }

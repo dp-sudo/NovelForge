@@ -123,6 +123,37 @@ impl OpenAiCompatibleAdapter {
         body
     }
 
+    fn extract_message_text(message: &serde_json::Value) -> String {
+        if let Some(text) = message.get("content").and_then(|v| v.as_str()) {
+            return text.to_string();
+        }
+
+        let mut parts: Vec<String> = Vec::new();
+        if let Some(items) = message.get("content").and_then(|v| v.as_array()) {
+            for item in items {
+                if let Some(text) = item.as_str() {
+                    if !text.trim().is_empty() {
+                        parts.push(text.to_string());
+                    }
+                    continue;
+                }
+                if let Some(text) = item.get("text").and_then(|v| v.as_str()) {
+                    if !text.trim().is_empty() {
+                        parts.push(text.to_string());
+                    }
+                    continue;
+                }
+                if let Some(text) = item.get("content").and_then(|v| v.as_str()) {
+                    if !text.trim().is_empty() {
+                        parts.push(text.to_string());
+                    }
+                }
+            }
+        }
+
+        parts.join("\n")
+    }
+
     fn parse_response(
         &self,
         body: &serde_json::Value,
@@ -152,14 +183,14 @@ impl OpenAiCompatibleAdapter {
                             .get("role")
                             .and_then(|v| v.as_str())
                             .unwrap_or("assistant");
-                        let text = msg.get("content").and_then(|v| v.as_str()).unwrap_or("");
+                        let text = Self::extract_message_text(msg);
                         Some(Choice {
                             index: i as u32,
                             message: Message {
                                 role: role.to_string(),
                                 content: vec![ContentBlock {
                                     block_type: "text".to_string(),
-                                    text: Some(text.to_string()),
+                                    text: Some(text),
                                 }],
                             },
                             finish_reason: c
@@ -666,10 +697,66 @@ impl OpenAiCompatibleAdapter {
 #[cfg(test)]
 mod tests {
     use super::OpenAiCompatibleAdapter;
+    use crate::adapters::llm_types::ProviderConfig;
+    use serde_json::json;
 
     #[test]
     fn join_url_avoids_double_v1_prefix() {
         let joined = OpenAiCompatibleAdapter::join_url("https://api.openai.com/v1", "/v1/models");
         assert_eq!(joined, "https://api.openai.com/v1/models");
+    }
+
+    #[test]
+    fn parse_response_supports_array_message_content() {
+        let adapter = OpenAiCompatibleAdapter::new(ProviderConfig {
+            id: "p1".to_string(),
+            display_name: "P1".to_string(),
+            vendor: "custom".to_string(),
+            protocol: "openai_compatible".to_string(),
+            base_url: "https://example.com/v1".to_string(),
+            endpoint_path: Some("/chat/completions".to_string()),
+            api_key: Some("k".to_string()),
+            auth_mode: "bearer".to_string(),
+            auth_header_name: Some("Authorization".to_string()),
+            anthropic_version: None,
+            beta_headers: None,
+            custom_headers: None,
+            default_model: Some("m1".to_string()),
+            timeout_ms: 15000,
+            connect_timeout_ms: 5000,
+            max_retries: 1,
+            model_refresh_mode: None,
+            models_path: None,
+            last_model_refresh_at: None,
+        });
+        let body = json!({
+            "id": "resp-1",
+            "model": "m1",
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": [
+                            { "type": "text", "text": "第一段建议" },
+                            { "type": "text", "text": "第二段建议" }
+                        ]
+                    },
+                    "finish_reason": "stop"
+                }
+            ]
+        });
+        let req = crate::adapters::llm_types::UnifiedGenerateRequest {
+            model: "m1".to_string(),
+            ..Default::default()
+        };
+
+        let parsed = adapter.parse_response(&body, &req).expect("parse response");
+        let text = parsed
+            .choices
+            .first()
+            .and_then(|c| c.message.content.first())
+            .and_then(|c| c.text.clone())
+            .unwrap_or_default();
+        assert_eq!(text, "第一段建议\n第二段建议");
     }
 }
