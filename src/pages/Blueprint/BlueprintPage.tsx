@@ -405,25 +405,7 @@ export function BlueprintPage() {
 
   function handleApplyAiResult() {
     if (!aiResult) return;
-    const defaults = parseBlueprintContent(cur.key, "");
-    // Try to parse AI result as JSON and merge into form fields
-    try {
-      const parsed = JSON.parse(aiResult);
-      if (typeof parsed === "object" && parsed !== null) {
-        const merged = { ...defaults };
-        for (const key of Object.keys(defaults)) {
-          if (typeof parsed[key] === "string" && parsed[key].trim()) {
-            merged[key] = parsed[key];
-          }
-        }
-        setFormData(merged);
-        setAiResult(null);
-        return;
-      }
-    } catch { /* not JSON, fall through to full-text replace */ }
-    // Fallback: paste AI result into the first field
-    const firstKey = Object.keys(defaults)[0];
-    setFormData((prev) => ({ ...prev, [firstKey]: aiResult }));
+    setFormData(parseBlueprintContent(cur.key, aiResult));
     setAiResult(null);
   }
 

@@ -2,7 +2,7 @@
 id: blueprint.generate_step
 name: 生成蓝图步骤
 description: 基于项目设定为指定蓝图步骤生成可执行方案，支持阻塞诊断与多方案评估
-version: 3
+version: 4
 source: builtin
 category: utility
 tags: [蓝图, 规划, 生成]
@@ -16,14 +16,13 @@ inputSchema:
   required: [stepKey, stepTitle]
 outputSchema:
   type: object
-  properties:
-    suggestion: { type: string }
+  description: 按 stepKey 返回对应蓝图字段的对象（字段值均为字符串）
 requiresUserConfirmation: true
 writesToProject: false
 author: NovelForge
 icon: "🎯"
 createdAt: 2026-04-28
-updatedAt: 2026-04-29
+updatedAt: 2026-04-30
 ---
 
 # 生成蓝图步骤
@@ -109,6 +108,9 @@ updatedAt: 2026-04-29
 [项目上下文]
 {projectContext}
 
+[步骤Key]
+{stepKey}
+
 [步骤标题]
 {stepTitle}
 
@@ -116,19 +118,26 @@ updatedAt: 2026-04-29
 {userInstruction}
 
 执行要求：
-1. 先判断步骤类型（世界/角色/主线/章节/终局）和阻塞类型（选择困难/信息缺口/节奏失衡/风格漂移）。
-2. 输出 2-3 个候选方案，每个包含：核心思路、可直接落库文本、风险点、触发条件。
-3. 按“一致性、推进力、情绪张力、实现成本、复用价值”打分并给总评。
-4. 给出推荐方案与推荐理由，并标注一个备选方案。
-5. 至少补充一个“与当前步骤最接近的场景化示例”。
+1. 必须只输出一个 JSON 对象，不要 Markdown 代码块，不要解释文本，不要前后缀。
+2. 根据 stepKey 选择字段集合，并确保所有字段都输出且为非空字符串。
+3. 内容要可直接写入对应蓝图表单，避免“方案分析/评分表/步骤清单”这类外层描述。
+4. 不允许新增未定义字段。
 
-输出格式：结构化文本，按以下顺序输出：
-- 步骤目标重述
-- 阻塞诊断
-- 方案对比表
-- 推荐方案（含可落库文本）
-- 场景化示例
-- 下一步执行清单
-
-禁止空话和泛化建议。
+字段集合（按 stepKey）：
+- step-01-anchor：
+  coreInspiration, coreProposition, coreEmotion, targetReader, sellingPoint, readerExpectation
+- step-02-genre：
+  mainGenre, subGenre, narrativePov, styleKeywords, rhythmType, bannedStyle
+- step-03-premise：
+  oneLineLogline, threeParagraphSummary, beginning, middle, climax, ending
+- step-04-characters：
+  protagonist, antagonist, supportingCharacters, relationshipSummary, growthArc
+- step-05-world：
+  worldBackground, rules, locations, organizations, inviolableRules
+- step-06-glossary：
+  personNames, placeNames, organizationNames, terms, aliases, bannedTerms
+- step-07-plot：
+  mainGoal, stages, keyConflicts, twists, climax, ending
+- step-08-chapters：
+  volumeStructure, chapterList, chapterGoals, characters, plotNodes
 <!-- PROMPT_TEMPLATE_END -->

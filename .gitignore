@@ -1,52 +1,204 @@
+# =============================================================================
+# NovelForge .gitignore - Windows Desktop AI Novel Writing Tool
+# =============================================================================
+
+# -----------------------------------------------------------------------------
 # Dependencies
+# -----------------------------------------------------------------------------
 /node_modules/
 /.pnpm-store/
 
-# Frontend build artifacts
+# -----------------------------------------------------------------------------
+# Frontend Build Artifacts
+# -----------------------------------------------------------------------------
 /dist/
 /.vite/
 /.cache/
+/.parcel-cache/
 
-# Rust/Tauri build artifacts
+# -----------------------------------------------------------------------------
+# Rust/Tauri Build Artifacts
+# -----------------------------------------------------------------------------
 /src-tauri/target/
 /src-tauri/gen/
 
+# Tauri bundle output
+/src-tauri/release/
+/src-tauri/release_nightly/
+
+# -----------------------------------------------------------------------------
 # Logs
+# -----------------------------------------------------------------------------
 *.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-# Test artifacts
+# -----------------------------------------------------------------------------
+# Test Artifacts
+# -----------------------------------------------------------------------------
 /coverage/
 /.nyc_output/
+/tests/**/output/
 
-# Environment and local machine files
+# -----------------------------------------------------------------------------
+# Environment & Credentials
+# -----------------------------------------------------------------------------
 .env
 .env.*
 !.env.example
+
+# Windows Credential Manager (do not track)
+# API keys stored in Windows Credential Manager - never commit
+
+# -----------------------------------------------------------------------------
+# Windows System Files
+# -----------------------------------------------------------------------------
 .DS_Store
 Thumbs.db
 desktop.ini
+~*
 
-# Editor/IDE
+# -----------------------------------------------------------------------------
+# Editor / IDE
+# -----------------------------------------------------------------------------
 .idea/
 .vscode/
 *.swp
 *.swo
+*.swn
+*.user
+*.suo
+*.otf
+*.ttf
+*.lock
+*.log
 
-# Temp files
+# VS Code specific
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# -----------------------------------------------------------------------------
+# Temporary Files
+# -----------------------------------------------------------------------------
 *.tmp
 *.temp
 *.bak
+*.backup
+*.backup.*
 *.rar
-*.local
-*.user
-.parcel-cache/
-.omc
+*.zip
+*.7z
+*.tar
+*.gz
 
-# Test output
-/tests/**/output/
+# OS temporary files
+~$*
+*.~*
+
+# -----------------------------------------------------------------------------
+# Project Database Files (user data - never commit)
+# -----------------------------------------------------------------------------
+# User app database (stored in %LOCALAPPDATA%\NovelForge\)
+novelforge.db
+novelforge.db-shm
+novelforge.db-wal
+
+# Per-project databases (stored in user's project directory)
+database/*.sqlite
+database/*.sqlite-shm
+database/*.sqlite-wal
+
+# -----------------------------------------------------------------------------
+# Chapter Content (user-generated - typically not committed)
+# -----------------------------------------------------------------------------
+# Draft auto-saves and snapshots
+**/drafts/
+**/snapshots/
+
+# User project content
+**/*.novel.md
+**/chapters/
+
+# -----------------------------------------------------------------------------
+# Backup Directories
+# -----------------------------------------------------------------------------
+/backup/
+/backups/
+**/backup*/
+**/.backup*/
+
+# -----------------------------------------------------------------------------
+# Claude Code / OMC (local development tools)
+# -----------------------------------------------------------------------------
+.omc/
 .claude/
+
+# OMC state files
+.omc/**
+!.omc/.gitkeep
+
+# Session logs
+**/*.session
+**/*.transcript
+
+# -----------------------------------------------------------------------------
+# Build artifacts
+# -----------------------------------------------------------------------------
 11.md
+*.tsbuildinfo
+*.esbuild.config.js
+
+# -----------------------------------------------------------------------------
+# Tauri specific
+# -----------------------------------------------------------------------------
+# WebView2 cache
+/WebView2Cache/
+/EBWebView/
+
+# Bundle installer
+*.msi
+*.exe
+*.dmg
+*.pkg
+*.deb
+*.rpm
+*.AppImage
+
+# -----------------------------------------------------------------------------
+# Misc
+# -----------------------------------------------------------------------------
+*.orig
+*.rej
+*.patch
+*.diff
+*.pyc
+__pycache__/
+*.pyo
+*.pyd
+.Python
+*.so
+*.dylib
+*.a
+*.lib
+*.exe
+*.dll
+*.obj
+*.o
+*.ko
+*.su
+*.mod
+*.modc
+*.sym
+*.elf
+*.bin
+*.out
+*.app
+*.ipa
+*.xpi
+*.crx
+*.xar

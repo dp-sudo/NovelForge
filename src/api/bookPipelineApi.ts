@@ -9,6 +9,11 @@ export type BookStageKey =
   | "blueprint-anchor"
   | "blueprint-genre"
   | "blueprint-premise"
+  | "blueprint-characters"
+  | "blueprint-world"
+  | "blueprint-glossary"
+  | "blueprint-plot"
+  | "blueprint-chapters"
   | "character-seed"
   | "world-seed"
   | "plot-seed"
@@ -18,6 +23,13 @@ export type BookStage = {
   key: BookStageKey;
   label: string;
   request: RunTaskPipelineInput;
+};
+
+type BlueprintStageSpec = {
+  key: BookStageKey;
+  label: string;
+  stepKey: string;
+  stepTitle: string;
 };
 
 export interface RunBookGenerationInput {
@@ -57,52 +69,181 @@ export type BookPipelineEvent =
     message: string;
   };
 
+const BLUEPRINT_STAGES: BlueprintStageSpec[] = [
+  { key: "blueprint-anchor", label: "蓝图: 灵感定锚", stepKey: "step-01-anchor", stepTitle: "灵感定锚" },
+  { key: "blueprint-genre", label: "蓝图: 类型策略", stepKey: "step-02-genre", stepTitle: "类型策略" },
+  { key: "blueprint-premise", label: "蓝图: 故事母题", stepKey: "step-03-premise", stepTitle: "故事母题" },
+  { key: "blueprint-characters", label: "蓝图: 角色工坊", stepKey: "step-04-characters", stepTitle: "角色工坊" },
+  { key: "blueprint-world", label: "蓝图: 世界规则", stepKey: "step-05-world", stepTitle: "世界规则" },
+  { key: "blueprint-glossary", label: "蓝图: 名词锁定", stepKey: "step-06-glossary", stepTitle: "名词锁定" },
+  { key: "blueprint-plot", label: "蓝图: 剧情骨架", stepKey: "step-07-plot", stepTitle: "剧情骨架" },
+  { key: "blueprint-chapters", label: "蓝图: 章节路线", stepKey: "step-08-chapters", stepTitle: "章节路线" },
+];
+
+function buildBlueprintSchemaHint(stepKey: string): string {
+  switch (stepKey) {
+    case "step-01-anchor":
+      return `{
+  "coreInspiration": "",
+  "coreProposition": "",
+  "coreEmotion": "",
+  "targetReader": "",
+  "sellingPoint": "",
+  "readerExpectation": ""
+}`;
+    case "step-02-genre":
+      return `{
+  "mainGenre": "",
+  "subGenre": "",
+  "narrativePov": "",
+  "styleKeywords": "",
+  "rhythmType": "",
+  "bannedStyle": ""
+}`;
+    case "step-03-premise":
+      return `{
+  "oneLineLogline": "",
+  "threeParagraphSummary": "",
+  "beginning": "",
+  "middle": "",
+  "climax": "",
+  "ending": ""
+}`;
+    case "step-04-characters":
+      return `{
+  "protagonist": "",
+  "antagonist": "",
+  "supportingCharacters": "",
+  "relationshipSummary": "",
+  "growthArc": ""
+}`;
+    case "step-05-world":
+      return `{
+  "worldBackground": "",
+  "rules": "",
+  "locations": "",
+  "organizations": "",
+  "inviolableRules": ""
+}`;
+    case "step-06-glossary":
+      return `{
+  "personNames": "",
+  "placeNames": "",
+  "organizationNames": "",
+  "terms": "",
+  "aliases": "",
+  "bannedTerms": ""
+}`;
+    case "step-07-plot":
+      return `{
+  "mainGoal": "",
+  "stages": "",
+  "keyConflicts": "",
+  "twists": "",
+  "climax": "",
+  "ending": ""
+}`;
+    case "step-08-chapters":
+      return `{
+  "volumeStructure": "",
+  "chapterList": "",
+  "chapterGoals": "",
+  "characters": "",
+  "plotNodes": ""
+}`;
+    default:
+      return "{}";
+  }
+}
+
+function buildBlueprintInstruction(baseIdea: string, stepKey: string, stepTitle: string): string {
+  return [
+    `核心创意：${baseIdea}`,
+    `当前步骤：${stepTitle}（${stepKey}）`,
+    "必须只输出一个 JSON 对象，不要 Markdown，不要解释文本。",
+    "JSON 必须完整包含以下字段，所有字段都必须是字符串且不能为空：",
+    buildBlueprintSchemaHint(stepKey),
+  ].join("\n");
+}
+
+function buildCharacterSeedInstruction(baseIdea: string): string {
+  return [
+    `核心创意：${baseIdea}`,
+    "请创建 1 个核心角色，必须只输出 JSON 对象，不要 Markdown，不要解释。",
+    "字段要求：",
+    `{
+  "name": "",
+  "roleType": "主角",
+  "age": "",
+  "gender": "",
+  "identityText": "",
+  "appearance": "",
+  "motivation": "",
+  "desire": "",
+  "fear": "",
+  "flaw": "",
+  "arcStage": "",
+  "notes": ""
+}`,
+  ].join("\n");
+}
+
+function buildWorldSeedInstruction(baseIdea: string): string {
+  return [
+    `核心创意：${baseIdea}`,
+    "请创建 1 条世界规则，必须只输出 JSON 对象，不要 Markdown，不要解释。",
+    "字段要求：",
+    `{
+  "title": "",
+  "category": "世界规则",
+  "description": "",
+  "constraintLevel": "normal",
+  "examples": "",
+  "contradictionPolicy": ""
+}`,
+  ].join("\n");
+}
+
+function buildPlotSeedInstruction(baseIdea: string): string {
+  return [
+    `核心创意：${baseIdea}`,
+    "请创建 1 个主线剧情节点，必须只输出 JSON 对象，不要 Markdown，不要解释。",
+    "字段要求：",
+    `{
+  "title": "",
+  "nodeType": "开端",
+  "goal": "",
+  "conflict": "",
+  "emotionalCurve": "",
+  "status": "规划中",
+  "relatedCharacters": []
+}`,
+  ].join("\n");
+}
+
 export function buildBookStages(input: RunBookGenerationInput): BookStage[] {
   const base = input.ideaPrompt.trim();
-  const stages: BookStage[] = [
-    {
-      key: "blueprint-anchor",
-      label: "蓝图: 灵感定锚",
-      request: {
-        projectRoot: input.projectRoot,
-        taskType: "blueprint.generate_step",
-        userInstruction: base,
-        blueprintStepKey: "step-01-anchor",
-        blueprintStepTitle: "灵感定锚",
-        autoPersist: true,
-      },
+  const stages: BookStage[] = BLUEPRINT_STAGES.map((stage) => ({
+    key: stage.key,
+    label: stage.label,
+    request: {
+      projectRoot: input.projectRoot,
+      taskType: "blueprint.generate_step",
+      userInstruction: buildBlueprintInstruction(base, stage.stepKey, stage.stepTitle),
+      blueprintStepKey: stage.stepKey,
+      blueprintStepTitle: stage.stepTitle,
+      autoPersist: true,
     },
-    {
-      key: "blueprint-genre",
-      label: "蓝图: 类型策略",
-      request: {
-        projectRoot: input.projectRoot,
-        taskType: "blueprint.generate_step",
-        userInstruction: base,
-        blueprintStepKey: "step-02-genre",
-        blueprintStepTitle: "类型策略",
-        autoPersist: true,
-      },
-    },
-    {
-      key: "blueprint-premise",
-      label: "蓝图: 故事母题",
-      request: {
-        projectRoot: input.projectRoot,
-        taskType: "blueprint.generate_step",
-        userInstruction: base,
-        blueprintStepKey: "step-03-premise",
-        blueprintStepTitle: "故事母题",
-        autoPersist: true,
-      },
-    },
+  }));
+
+  stages.push(
     {
       key: "character-seed",
       label: "角色: 核心角色草案",
       request: {
         projectRoot: input.projectRoot,
         taskType: "character.create",
-        userInstruction: base,
+        userInstruction: buildCharacterSeedInstruction(base),
         autoPersist: true,
       },
     },
@@ -112,7 +253,7 @@ export function buildBookStages(input: RunBookGenerationInput): BookStage[] {
       request: {
         projectRoot: input.projectRoot,
         taskType: "world.create_rule",
-        userInstruction: base,
+        userInstruction: buildWorldSeedInstruction(base),
         autoPersist: true,
       },
     },
@@ -122,11 +263,11 @@ export function buildBookStages(input: RunBookGenerationInput): BookStage[] {
       request: {
         projectRoot: input.projectRoot,
         taskType: "plot.create_node",
-        userInstruction: base,
+        userInstruction: buildPlotSeedInstruction(base),
         autoPersist: true,
       },
     },
-  ];
+  );
   if (input.chapterId) {
     stages.push({
       key: "chapter-plan",

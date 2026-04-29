@@ -88,7 +88,7 @@ impl TaskHandlers {
                     project_root,
                     SaveBlueprintStepInput {
                         step_key: step_key.to_string(),
-                        content: Self::normalize_blueprint_content(normalized_output),
+                        content: Self::normalize_blueprint_step_content(step_key, normalized_output),
                         ai_generated: Some(true),
                     },
                 )?;
@@ -499,12 +499,7 @@ impl TaskHandlers {
         nested_key: Option<&str>,
     ) -> Result<serde_json::Map<String, Value>, AppErrorDto> {
         let value = Self::extract_output_value(normalized_output)?;
-        let root_value = if let Some(key) = nested_key {
-            value.get(key).cloned().unwrap_or(value)
-        } else {
-            value
-        };
-        root_value.as_object().cloned().ok_or_else(|| {
+        let root_obj = value.as_object().cloned().ok_or_else(|| {
             AppErrorDto::new(
                 "PIPELINE_PERSIST_PARSE_FAILED",
                 "AI 返回 JSON 结构不是对象",
@@ -514,7 +509,22 @@ impl TaskHandlers {
                 "normalized_output_preview={}",
                 Self::preview_output_for_error(normalized_output, 320)
             ))
-        })
+        })?;
+
+        if let Some(key) = nested_key {
+            if let Some(nested) = Self::pick_value(&root_obj, key).and_then(Value::as_object) {
+                return Ok(nested.clone());
+            }
+        }
+
+        for fallback_key in ["data", "content", "fields", "payload", "result"] {
+            if let Some(nested) = Self::pick_value(&root_obj, fallback_key).and_then(Value::as_object)
+            {
+                return Ok(nested.clone());
+            }
+        }
+
+        Ok(root_obj)
     }
 
     fn preview_output_for_error(raw: &str, max_chars: usize) -> String {
@@ -535,7 +545,7 @@ impl TaskHandlers {
         keys: &[&str],
     ) -> Option<String> {
         for key in keys {
-            if let Some(value) = obj.get(*key) {
+            if let Some(value) = Self::pick_value(obj, key) {
                 match value {
                     Value::String(v) => {
                         let trimmed = v.trim();
@@ -554,7 +564,7 @@ impl TaskHandlers {
 
     fn pick_optional_text(obj: &serde_json::Map<String, Value>, keys: &[&str]) -> Option<String> {
         for key in keys {
-            if let Some(value) = obj.get(*key) {
+            if let Some(value) = Self::pick_value(obj, key) {
                 if let Some(text) = Self::json_value_to_text(value) {
                     return Some(text);
                 }
@@ -568,11 +578,28 @@ impl TaskHandlers {
         keys: &[&str],
     ) -> Option<&'a serde_json::Map<String, Value>> {
         for key in keys {
-            if let Some(value) = obj.get(*key).and_then(Value::as_object) {
+            if let Some(value) = Self::pick_value(obj, key).and_then(Value::as_object) {
                 return Some(value);
             }
         }
         None
+    }
+
+    fn normalize_key(key: &str) -> String {
+        key.to_ascii_lowercase()
+            .chars()
+            .filter(|ch| !matches!(ch, '_' | '-' | ' '))
+            .collect()
+    }
+
+    fn pick_value<'a>(obj: &'a serde_json::Map<String, Value>, key: &str) -> Option<&'a Value> {
+        if let Some(value) = obj.get(key) {
+            return Some(value);
+        }
+        let normalized_key = Self::normalize_key(key);
+        obj.iter()
+            .find(|(candidate, _)| Self::normalize_key(candidate) == normalized_key)
+            .map(|(_, value)| value)
     }
 
     fn json_value_to_text(value: &Value) -> Option<String> {
@@ -665,7 +692,7 @@ impl TaskHandlers {
 
     fn pick_bool(obj: &serde_json::Map<String, Value>, keys: &[&str], fallback: bool) -> bool {
         for key in keys {
-            if let Some(value) = obj.get(*key) {
+            if let Some(value) = Self::pick_value(obj, key) {
                 match value {
                     Value::Bool(v) => return *v,
                     Value::Number(v) => return v.as_i64().unwrap_or(0) != 0,
@@ -687,7 +714,7 @@ impl TaskHandlers {
 
     fn pick_string_array(obj: &serde_json::Map<String, Value>, keys: &[&str]) -> Vec<String> {
         for key in keys {
-            if let Some(value) = obj.get(*key) {
+            if let Some(value) = Self::pick_value(obj, key) {
                 match value {
                     Value::Array(values) => {
                         let list = values
@@ -749,15 +776,191 @@ impl TaskHandlers {
         }
     }
 
-    fn normalize_blueprint_content(normalized_output: &str) -> String {
-        if let Ok(value) = Self::extract_output_value(normalized_output) {
-            if value.is_object() {
-                if let Ok(pretty) = serde_json::to_string_pretty(&value) {
-                    return pretty;
+    fn blueprint_step_fields(step_key: &str) -> &'static [&'static str] {
+        match step_key {
+            "step-01-anchor" => &[
+                "coreInspiration",
+                "coreProposition",
+                "coreEmotion",
+                "targetReader",
+                "sellingPoint",
+                "readerExpectation",
+            ],
+            "step-02-genre" => &[
+                "mainGenre",
+                "subGenre",
+                "narrativePov",
+                "styleKeywords",
+                "rhythmType",
+                "bannedStyle",
+            ],
+            "step-03-premise" => &[
+                "oneLineLogline",
+                "threeParagraphSummary",
+                "beginning",
+                "middle",
+                "climax",
+                "ending",
+            ],
+            "step-04-characters" => &[
+                "protagonist",
+                "antagonist",
+                "supportingCharacters",
+                "relationshipSummary",
+                "growthArc",
+            ],
+            "step-05-world" => &[
+                "worldBackground",
+                "rules",
+                "locations",
+                "organizations",
+                "inviolableRules",
+            ],
+            "step-06-glossary" => &[
+                "personNames",
+                "placeNames",
+                "organizationNames",
+                "terms",
+                "aliases",
+                "bannedTerms",
+            ],
+            "step-07-plot" => &[
+                "mainGoal",
+                "stages",
+                "keyConflicts",
+                "twists",
+                "climax",
+                "ending",
+            ],
+            "step-08-chapters" => &[
+                "volumeStructure",
+                "chapterList",
+                "chapterGoals",
+                "characters",
+                "plotNodes",
+            ],
+            _ => &[],
+        }
+    }
+
+    fn blueprint_field_aliases(field: &str) -> &'static [&'static str] {
+        match field {
+            "coreInspiration" => &["inspiration", "core_inspiration", "核心灵感", "灵感来源"],
+            "coreProposition" => &["proposition", "core_proposition", "核心命题", "主题命题"],
+            "coreEmotion" => &["emotion", "core_emotion", "核心情绪", "情绪基调"],
+            "targetReader" => &["reader", "target_reader", "目标读者"],
+            "sellingPoint" => &["selling_point", "商业卖点", "卖点"],
+            "readerExpectation" => &["reader_expectation", "读者期待", "预期"],
+            "mainGenre" => &["genre", "main_genre", "主类型", "主题材"],
+            "subGenre" => &["sub_genre", "子类型", "子题材"],
+            "narrativePov" => &["pov", "narrative_pov", "叙事视角", "视角"],
+            "styleKeywords" => &["style", "style_keywords", "文风关键词", "风格关键词"],
+            "rhythmType" => &["rhythm", "rhythm_type", "节奏类型", "节奏"],
+            "bannedStyle" => &["banned_style", "禁用风格", "避免风格"],
+            "oneLineLogline" => &["logline", "one_line_logline", "一句话梗概"],
+            "threeParagraphSummary" => &["summary", "three_paragraph_summary", "三段式梗概"],
+            "beginning" => &["start", "opening", "开端"],
+            "middle" => &["mid", "中段"],
+            "climax" => &["高潮"],
+            "ending" => &["结局", "ending_direction"],
+            "protagonist" => &["mainCharacter", "main_character", "主角"],
+            "antagonist" => &["villain", "反派"],
+            "supportingCharacters" => &["supporting_characters", "配角", "关键配角"],
+            "relationshipSummary" => &["relationship_summary", "角色关系", "角色关系摘要"],
+            "growthArc" => &["arc", "growth_arc", "成长弧线", "角色成长"],
+            "worldBackground" => &["background", "world_background", "世界背景"],
+            "rules" => &["rule", "world_rules", "规则", "规则体系"],
+            "locations" => &["places", "地点"],
+            "organizations" => &["factions", "组织", "势力"],
+            "inviolableRules" => &["hard_rules", "inviolable_rules", "不可违反规则", "铁律"],
+            "personNames" => &["person_names", "characters", "人名"],
+            "placeNames" => &["place_names", "地名"],
+            "organizationNames" => &["organization_names", "组织名"],
+            "terms" => &["术语", "glossary_terms"],
+            "aliases" => &["别名", "alias_map"],
+            "bannedTerms" => &["banned_terms", "禁用名词", "禁词"],
+            "mainGoal" => &["goal", "main_goal", "主线目标"],
+            "stages" => &["stage_nodes", "阶段节点"],
+            "keyConflicts" => &["conflicts", "key_conflicts", "关键冲突"],
+            "twists" => &["reversals", "反转"],
+            "volumeStructure" => &["volume_structure", "卷结构"],
+            "chapterList" => &["chapters", "chapter_list", "章节列表"],
+            "chapterGoals" => &["chapter_goals", "章节目标"],
+            "characters" => &["cast", "出场人物"],
+            "plotNodes" => &["plot_nodes", "关联主线节点"],
+            _ => &[],
+        }
+    }
+
+    fn normalize_blueprint_step_content(step_key: &str, normalized_output: &str) -> String {
+        let fields = Self::blueprint_step_fields(step_key);
+        if fields.is_empty() {
+            return normalized_output.to_string();
+        }
+
+        let mut merged = serde_json::Map::new();
+        for field in fields {
+            merged.insert((*field).to_string(), Value::String(String::new()));
+        }
+
+        let value = match Self::extract_output_value(normalized_output) {
+            Ok(value) => value,
+            Err(_) => {
+                let first_key = fields[0];
+                merged.insert(
+                    first_key.to_string(),
+                    Value::String(normalized_output.trim().to_string()),
+                );
+                return serde_json::to_string_pretty(&merged)
+                    .unwrap_or_else(|_| normalized_output.to_string());
+            }
+        };
+
+        let mut candidate_objects = Vec::<serde_json::Map<String, Value>>::new();
+        if let Some(obj) = value.as_object() {
+            candidate_objects.push(obj.clone());
+            for nested_key in [
+                "blueprintStep",
+                "content",
+                "fields",
+                "data",
+                "payload",
+                "result",
+            ] {
+                if let Some(nested_obj) = obj.get(nested_key).and_then(Value::as_object) {
+                    candidate_objects.push(nested_obj.clone());
                 }
             }
         }
-        normalized_output.to_string()
+
+        let mut filled_count = 0usize;
+        for field in fields {
+            let mut aliases = vec![*field];
+            aliases.extend(Self::blueprint_field_aliases(field));
+            let mut picked: Option<String> = None;
+            for candidate in &candidate_objects {
+                picked = Self::pick_optional_text(candidate, &aliases);
+                if picked.is_some() {
+                    break;
+                }
+            }
+            if let Some(text) = picked {
+                merged.insert((*field).to_string(), Value::String(text));
+                filled_count += 1;
+            }
+        }
+
+        if filled_count == 0 {
+            let suggestion = value
+                .as_object()
+                .and_then(|obj| obj.get("suggestion"))
+                .and_then(Self::json_value_to_text)
+                .unwrap_or_else(|| normalized_output.trim().to_string());
+            let first_key = fields[0];
+            merged.insert(first_key.to_string(), Value::String(suggestion));
+        }
+
+        serde_json::to_string_pretty(&merged).unwrap_or_else(|_| normalized_output.to_string())
     }
 
     fn next_plot_sort_order(project_root: &str) -> Result<i64, AppErrorDto> {
@@ -781,6 +984,7 @@ impl TaskHandlers {
 #[cfg(test)]
 mod tests {
     use super::TaskHandlers;
+    use serde_json::Value;
 
     #[test]
     fn build_character_create_input_maps_nested_character_json() {
@@ -830,5 +1034,135 @@ mod tests {
         assert_eq!(input.flaw.as_deref(), Some("被仇恨吞噬"));
         assert_eq!(input.arc_stage.as_deref(), Some("复仇之后学会活下去。"));
         assert_eq!(input.notes.as_deref(), Some("十年前师门覆灭，他背负血仇。"));
+    }
+
+    #[test]
+    fn normalize_blueprint_step_content_maps_nested_step_fields() {
+        let normalized_output = r#"
+        {
+          "data": {
+            "核心灵感": "被废墟文明打动",
+            "核心命题": "秩序与自由的代价",
+            "emotion": "压抑中带希望",
+            "target_reader": "青年幻想读者",
+            "商业卖点": "反乌托邦+修真混搭",
+            "reader_expectation": "高冲突与强反转"
+          }
+        }
+        "#;
+
+        let normalized =
+            TaskHandlers::normalize_blueprint_step_content("step-01-anchor", normalized_output);
+        let parsed: Value =
+            serde_json::from_str(&normalized).expect("normalized blueprint content should be json");
+        let obj = parsed
+            .as_object()
+            .expect("normalized blueprint content should be object");
+
+        assert_eq!(
+            obj.get("coreInspiration").and_then(Value::as_str),
+            Some("被废墟文明打动")
+        );
+        assert_eq!(
+            obj.get("coreProposition").and_then(Value::as_str),
+            Some("秩序与自由的代价")
+        );
+        assert_eq!(
+            obj.get("coreEmotion").and_then(Value::as_str),
+            Some("压抑中带希望")
+        );
+        assert_eq!(
+            obj.get("targetReader").and_then(Value::as_str),
+            Some("青年幻想读者")
+        );
+        assert_eq!(
+            obj.get("sellingPoint").and_then(Value::as_str),
+            Some("反乌托邦+修真混搭")
+        );
+        assert_eq!(
+            obj.get("readerExpectation").and_then(Value::as_str),
+            Some("高冲突与强反转")
+        );
+    }
+
+    #[test]
+    fn normalize_blueprint_step_content_falls_back_to_first_field_on_non_json() {
+        let normalized = TaskHandlers::normalize_blueprint_step_content(
+            "step-03-premise",
+            "这是一段无法解析为 JSON 的建议文本",
+        );
+        let parsed: Value =
+            serde_json::from_str(&normalized).expect("fallback blueprint content should be json");
+        let obj = parsed
+            .as_object()
+            .expect("fallback blueprint content should be object");
+
+        assert_eq!(
+            obj.get("oneLineLogline").and_then(Value::as_str),
+            Some("这是一段无法解析为 JSON 的建议文本")
+        );
+    }
+
+    #[test]
+    fn extract_output_object_prefers_common_nested_payload() {
+        let raw = r#"
+        {
+          "meta": { "traceId": "abc" },
+          "payload": {
+            "title": "灵脉反噬",
+            "desc": "每次越阶施法都会损寿。"
+          }
+        }
+        "#;
+
+        let obj = TaskHandlers::extract_output_object(raw, Some("worldRule"))
+            .expect("should resolve nested payload object");
+        assert_eq!(obj.get("title").and_then(Value::as_str), Some("灵脉反噬"));
+        assert_eq!(
+            obj.get("desc").and_then(Value::as_str),
+            Some("每次越阶施法都会损寿。")
+        );
+    }
+
+    #[test]
+    fn pick_optional_string_supports_normalized_keys() {
+        let mut obj = serde_json::Map::new();
+        obj.insert(
+            "constraint-level".to_string(),
+            Value::String("absolute".to_string()),
+        );
+
+        let picked = TaskHandlers::pick_optional_string(&obj, &["constraint_level"]);
+        assert_eq!(picked.as_deref(), Some("absolute"));
+    }
+
+    #[test]
+    fn build_world_rule_create_input_maps_nested_world_rule_json() {
+        let normalized_output = r#"
+        {
+          "payload": {
+            "设定名": "血契铁律",
+            "类别": "世界规则",
+            "description": "施术者必须支付等价代价。",
+            "constraint-level": "strong",
+            "related_entities": ["血契印", "宗门法典"],
+            "examples": "祭火阵反噬",
+            "contradiction_policy": "冲突时以铁律优先"
+          }
+        }
+        "#;
+
+        let input = TaskHandlers::build_world_rule_create_input(normalized_output, "fallback")
+            .expect("build_world_rule_create_input should parse nested json");
+        assert_eq!(input.title, "血契铁律");
+        assert_eq!(input.category, "世界规则");
+        assert_eq!(input.description, "施术者必须支付等价代价。");
+        assert_eq!(input.constraint_level, "strong");
+        assert_eq!(
+            input.related_entities,
+            Some(vec!["血契印".to_string(), "宗门法典".to_string()])
+        );
+        assert_eq!(input.examples.as_deref(), Some("祭火阵反噬"));
+        assert_eq!(input.contradiction_policy.as_deref(), Some("冲突时以铁律优先"));
     }
 }

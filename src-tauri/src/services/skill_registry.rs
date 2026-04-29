@@ -100,7 +100,18 @@ impl SkillRegistry {
                 }
                 let file_name = path.file_name().unwrap_or_default();
                 let target = self.skills_dir.join(file_name);
-                if !target.exists() {
+                let mut should_copy = !target.exists();
+                if !should_copy {
+                    let src_manifest = Self::parse_file(&path).ok().map(|sf| sf.manifest);
+                    let target_manifest = Self::parse_file(&target).ok().map(|sf| sf.manifest);
+                    if let (Some(src), Some(dst)) = (src_manifest, target_manifest) {
+                        // Builtin template hotfixes should roll forward for existing builtin skills.
+                        if dst.source == "builtin" && src.version > dst.version {
+                            should_copy = true;
+                        }
+                    }
+                }
+                if should_copy {
                     fs::copy(&path, &target).map_err(|e| {
                         AppErrorDto::new("SKILLS_COPY_FAILED", "Cannot copy builtin skill", true)
                             .with_detail(e.to_string())
