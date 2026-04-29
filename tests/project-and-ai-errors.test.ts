@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { AppError } from "../src/errors/app-error.js";
-import { NovelForgeMvp } from "../src/services/novelforge-mvp.js";
+import { NovelForgeMvp } from "./dev-engine-fixtures/services/novelforge-mvp.js";
 import { createTempWorkspace, removeTempWorkspace } from "./helpers/temp-workspace.js";
 
 test("打开无效目录时返回标准错误", async () => {

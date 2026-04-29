@@ -1,4 +1,5 @@
 import { invokeCommand } from "./tauriClient.js";
+import { runModuleAiTask } from "./moduleAiApi.js";
 import type { BlueprintStepKey, BlueprintStepStatus } from "../domain/constants.js";
 
 export interface BlueprintStepRow {
@@ -44,5 +45,13 @@ export interface BlueprintSuggestionInput {
 }
 
 export async function generateBlueprintSuggestion(input: BlueprintSuggestionInput): Promise<string> {
-  return invokeCommand<string>("generate_blueprint_suggestion", { input });
+  return runModuleAiTask({
+    projectRoot: input.projectRoot,
+    taskType: "blueprint.generate_step",
+    userInstruction: input.userInstruction,
+    blueprintStepKey: input.stepKey,
+    blueprintStepTitle: input.stepTitle,
+    autoPersist: true,
+    uiAction: "generate_blueprint_suggestion",
+  });
 }

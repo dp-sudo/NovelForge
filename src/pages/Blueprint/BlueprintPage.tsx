@@ -6,6 +6,7 @@ import { Input } from "../../components/forms/Input.js";
 import { Textarea } from "../../components/forms/Textarea.js";
 import { Select } from "../../components/forms/Select.js";
 import { listBlueprintSteps, saveBlueprintStep, markBlueprintCompleted, resetBlueprintStep, generateBlueprintSuggestion } from "../../api/blueprintApi.js";
+import { streamBookGenerationPipeline } from "../../api/bookPipelineApi.js";
 import { useProjectStore } from "../../stores/projectStore.js";
 import { parseBlueprintContent, serializeBlueprintContent } from "../../domain/types.js";
 import type { BlueprintStepKey } from "../../domain/constants.js";
@@ -311,6 +312,11 @@ export function BlueprintPage() {
   const [saving, setSaving] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiResult, setAiResult] = useState<string | null>(null);
+  const [bookIdeaPrompt, setBookIdeaPrompt] = useState("");
+  const [bookPipelineRunning, setBookPipelineRunning] = useState(false);
+  const [bookPipelineLogs, setBookPipelineLogs] = useState<string[]>([]);
+  const [bookPipelineStatus, setBookPipelineStatus] = useState<string | null>(null);
+  const [bookPipelineAbort, setBookPipelineAbort] = useState<AbortController | null>(null);
   const projectRoot = useProjectStore((s) => s.currentProjectPath);
 
   const cur = STEPS[activeIdx];
@@ -425,6 +431,51 @@ export function BlueprintPage() {
     setFormData(newData);
   }
 
+  async function handleRunBookPipeline() {
+    if (!projectRoot || !bookIdeaPrompt.trim() || bookPipelineRunning) return;
+    const abortController = new AbortController();
+    setBookPipelineAbort(abortController);
+    setBookPipelineRunning(true);
+    setBookPipelineStatus(null);
+    setBookPipelineLogs([]);
+    try {
+      for await (const event of streamBookGenerationPipeline(
+        {
+          projectRoot,
+          ideaPrompt: bookIdeaPrompt.trim(),
+        },
+        abortController.signal,
+      )) {
+        if (event.type === "stage-start") {
+          setBookPipelineLogs((prev) => [...prev, `开始：${event.stageLabel}`]);
+          continue;
+        }
+        if (event.type === "stage-done") {
+          setBookPipelineLogs((prev) => [...prev, `完成：${event.stageLabel}`]);
+          continue;
+        }
+        if (event.type === "stage-error") {
+          setBookPipelineLogs((prev) => [...prev, `失败：${event.stageLabel} - ${event.message}`]);
+          setBookPipelineStatus(event.message);
+          return;
+        }
+      }
+      setBookPipelineStatus("全书生成编排执行完成");
+      await load();
+    } catch (error) {
+      setBookPipelineStatus(error instanceof Error ? error.message : "全书生成编排执行失败");
+    } finally {
+      setBookPipelineRunning(false);
+      setBookPipelineAbort(null);
+    }
+  }
+
+  function handleCancelBookPipeline() {
+    if (!bookPipelineAbort) return;
+    bookPipelineAbort.abort();
+    setBookPipelineStatus("已取消全书生成编排");
+  }
+
   return (
     <div className="max-w-6xl mx-auto">
       <h1 className="text-2xl font-bold text-surface-100 mb-6">创作蓝图</h1>
@@ -515,6 +566,48 @@ export function BlueprintPage() {
               {aiLoading ? "生成中..." : "生成并写入"}
             </Button>
             {!projectRoot && <p className="text-xs text-warning mb-2">请先打开项目</p>}
+          </Card>
+          <Card padding="md" className="mt-3">
+            <h3 className="text-sm font-semibold text-surface-200 mb-3">一键全书生成</h3>
+            <Textarea
+              label="创意提示词"
+              value={bookIdeaPrompt}
+              onChange={(e) => setBookIdeaPrompt(e.target.value)}
+              placeholder="输入核心创意，按阶段自动生成蓝图/角色/设定/剧情"
+            />
+            <div className="mt-3 flex gap-2">
+              <Button
+                variant="primary"
+                size="sm"
+                className="flex-1 justify-center"
+                loading={bookPipelineRunning}
+                onClick={() => void handleRunBookPipeline()}
+                disabled={!bookIdeaPrompt.trim()}
+              >
+                {bookPipelineRunning ? "编排中..." : "开始编排"}
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="justify-center"
+                onClick={handleCancelBookPipeline}
+                disabled={!bookPipelineRunning}
+              >
+                取消
+              </Button>
+            </div>
+            {bookPipelineStatus && (
+              <p className="mt-3 text-xs text-surface-300">{bookPipelineStatus}</p>
+            )}
+            {bookPipelineLogs.length > 0 && (
+              <div className="mt-3 max-h-28 overflow-y-auto rounded-lg border border-surface-700 bg-surface-800/80 p-2">
+                {bookPipelineLogs.map((log, idx) => (
+                  <p key={`${log}-${idx}`} className="text-[11px] text-surface-300">
+                    {log}
+                  </p>
+                ))}
+              </div>
+            )}
           </Card>
         </div>
       </div>

@@ -201,7 +201,7 @@ pub fn run() {
             commands::settings_commands::delete_task_route,
             commands::settings_commands::check_remote_registry,
             commands::settings_commands::apply_registry_update,
-            // 问题4修复(收敛计划): 以下为 compatibility-only 命令，官方调用面统一走 src/api/settingsApi.ts。
+            // 问题6修复(兼容债务收敛): compatibility-only，计划 2026-07-31 后按外部依赖情况移除。
             commands::settings_commands::load_provider_config,
             commands::settings_commands::save_provider_config,
             commands::settings_commands::test_provider_connection,
@@ -209,7 +209,7 @@ pub fn run() {
             commands::settings_commands::save_editor_settings,
             commands::ai_commands::run_ai_task_pipeline,
             commands::ai_commands::cancel_ai_task_pipeline,
-            // 问题4修复(收敛计划): 以下为 compatibility-only 命令，后续将逐步移除。
+            // 问题2修复(命令面收敛): compatibility-only，计划 2026-07-31 后移除。
             commands::ai_commands::register_ai_provider,
             commands::ai_commands::test_ai_connection,
             commands::skill_commands::list_skills,
@@ -221,13 +221,6 @@ pub fn run() {
             commands::skill_commands::import_skill_file,
             commands::skill_commands::reset_builtin_skill,
             commands::skill_commands::refresh_skills,
-            commands::ai_commands::generate_blueprint_suggestion,
-            commands::ai_commands::ai_generate_character,
-            commands::ai_commands::ai_scan_consistency,
-            commands::ai_commands::ai_generate_world_rule,
-            commands::ai_commands::ai_generate_plot_node,
-            commands::ai_commands::ai_generate_glossary_term,
-            commands::ai_commands::ai_generate_narrative_obligation,
             commands::consistency_commands::scan_chapter_consistency,
             commands::consistency_commands::scan_full_consistency,
             commands::consistency_commands::list_consistency_issues,

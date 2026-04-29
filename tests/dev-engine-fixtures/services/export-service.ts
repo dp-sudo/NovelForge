@@ -1,8 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
-import { AppError } from "../errors/app-error.js";
-import type { ExportOptions } from "../domain/types.js";
+import { AppError } from "../../../src/errors/app-error.js";
+import type { ExportOptions } from "../../../src/domain/types.js";
 import { withDatabase } from "./service-context.js";
 import { getProjectId } from "./service-utils.js";
 

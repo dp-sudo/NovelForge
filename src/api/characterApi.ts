@@ -1,4 +1,5 @@
 import { invokeCommand } from "./tauriClient.js";
+import { runModuleAiTask } from "./moduleAiApi.js";
 import type { CharacterInput } from "../domain/types.js";
 
 export interface CharacterRow {
@@ -42,7 +43,13 @@ export async function deleteCharacter(id: string, projectRoot: string): Promise<
 // ── AI Character Creation ──
 
 export async function aiGenerateCharacter(projectRoot: string, userDescription: string): Promise<string> {
-  return invokeCommand<string>("ai_generate_character", { input: { projectRoot, userDescription } });
+  return runModuleAiTask({
+    projectRoot,
+    taskType: "character.create",
+    userInstruction: userDescription,
+    autoPersist: true,
+    uiAction: "ai_generate_character",
+  });
 }
 
 // ── Character Relationships ──

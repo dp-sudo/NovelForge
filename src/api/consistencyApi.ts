@@ -1,4 +1,5 @@
 import { invokeCommand } from "./tauriClient.js";
+import { runModuleAiTask } from "./moduleAiApi.js";
 
 export interface ConsistencyIssueRow {
   id: string;
@@ -40,5 +41,12 @@ export interface AiConsistencyInput {
 }
 
 export async function aiScanConsistency(input: AiConsistencyInput): Promise<string> {
-  return invokeCommand<string>("ai_scan_consistency", { input });
+  return runModuleAiTask({
+    projectRoot: input.projectRoot,
+    taskType: "consistency.scan",
+    chapterId: input.chapterId,
+    chapterContent: input.chapterContent,
+    autoPersist: true,
+    uiAction: "ai_scan_consistency",
+  });
 }

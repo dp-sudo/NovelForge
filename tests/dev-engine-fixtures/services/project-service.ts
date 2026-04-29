@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 
-import { AppError } from "../errors/app-error.js";
+import { AppError } from "../../../src/errors/app-error.js";
 import { initializeDatabase, openDatabase } from "../infra/db.js";
 import { appendProjectLog } from "../infra/logger.js";
 import { sanitizeProjectDirectoryName } from "../infra/path-utils.js";
@@ -10,7 +10,7 @@ import { initializeProjectDirectories, ensurePathExists } from "../infra/project
 import { buildProjectJson, readProjectJson, writeProjectJson } from "../infra/project-json.js";
 import { listRecentProjects, markRecentProject } from "../infra/recent-projects.js";
 import { nowIso } from "../infra/time.js";
-import type { CreateProjectInput, ProjectJson } from "../domain/types.js";
+import type { CreateProjectInput, ProjectJson } from "../../../src/domain/types.js";
 
 export interface ProjectOpenResult {
   projectRoot: string;

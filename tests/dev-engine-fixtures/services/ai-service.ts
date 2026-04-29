@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 
-import { callOpenAiCompatible, type FetchLike } from "../adapters/openai-compatible-adapter.js";
-import { AppError } from "../errors/app-error.js";
-import type { AiPreviewRequest, AiPreviewResponse } from "../domain/types.js";
+import { callOpenAiCompatible, type FetchLike } from "../../../src/adapters/openai-compatible-adapter.js";
+import { AppError } from "../../../src/errors/app-error.js";
+import type { AiPreviewRequest, AiPreviewResponse } from "../../../src/domain/types.js";
 import { appendProjectLog } from "../infra/logger.js";
 import { loadProjectApiKey } from "../infra/secret-store.js";
 import { nowIso } from "../infra/time.js";

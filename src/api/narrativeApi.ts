@@ -1,4 +1,5 @@
 import { invokeCommand } from "./tauriClient.js";
+import { runModuleAiTask } from "./moduleAiApi.js";
 
 export interface NarrativeObligation {
   id: string;
@@ -53,7 +54,11 @@ export async function aiGenerateNarrativeObligation(
   projectRoot: string,
   userDescription: string,
 ): Promise<string> {
-  return invokeCommand<string>("ai_generate_narrative_obligation", {
-    input: { projectRoot, userDescription },
+  return runModuleAiTask({
+    projectRoot,
+    taskType: "narrative.create_obligation",
+    userInstruction: userDescription,
+    autoPersist: true,
+    uiAction: "ai_generate_narrative_obligation",
   });
 }

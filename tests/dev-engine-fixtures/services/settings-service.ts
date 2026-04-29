@@ -1,5 +1,5 @@
-import { AppError } from "../errors/app-error.js";
-import type { ProviderConfigInput } from "../domain/types.js";
+import { AppError } from "../../../src/errors/app-error.js";
+import type { ProviderConfigInput } from "../../../src/domain/types.js";
 import {
   deleteProjectApiKey,
   loadProjectApiKey,

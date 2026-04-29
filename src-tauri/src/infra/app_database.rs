@@ -4,6 +4,7 @@
 //! Located at the per-user app data directory (`%LOCALAPPDATA%\\NovelForge` on Windows).
 
 use std::fs;
+use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -11,6 +12,8 @@ use rusqlite::{params, Connection};
 
 use crate::adapters::llm_types::{ModelRecord, ProviderConfig, TaskRoute};
 use crate::errors::AppErrorDto;
+use crate::services::task_routing;
+use uuid::Uuid;
 
 const SCHEMA_SQL: &str = r#"
 CREATE TABLE IF NOT EXISTS app_settings (
@@ -140,7 +143,108 @@ pub fn open_or_create() -> Result<Connection, AppErrorDto> {
         log::info!("[DB] Applied app migration: {}", v);
     }
     ensure_schema_compatibility(&conn)?;
+    // 问题4修复(单一初始化入口): 默认任务路由仅在 app-db 初始化阶段补齐。
+    ensure_default_task_routes_initialized(&conn)?;
     Ok(conn)
+}
+
+fn normalize_task_routes(routes: Vec<TaskRoute>) -> Vec<TaskRoute> {
+    let mut dedup: BTreeMap<String, (bool, TaskRoute)> = BTreeMap::new();
+    for mut route in routes {
+        let canonical = task_routing::canonical_task_type(&route.task_type).into_owned();
+        let is_exact_canonical = route.task_type == canonical;
+        route.task_type = canonical.clone();
+        let should_replace = match dedup.get(&canonical) {
+            None => true,
+            Some((existing_exact, _)) => is_exact_canonical && !*existing_exact,
+        };
+        if should_replace {
+            dedup.insert(canonical, (is_exact_canonical, route));
+        }
+    }
+    dedup.into_values().map(|(_, route)| route).collect()
+}
+
+fn pick_primary_route_seed(
+    routes: &[TaskRoute],
+    providers: &[ProviderConfig],
+) -> Option<(String, String)> {
+    const PROVIDER_SEED_PRIORITY: &[&str] = &[
+        "deepseek",
+        "kimi",
+        "zhipu",
+        "minimax",
+        "openai",
+        "anthropic",
+        "gemini",
+        "custom",
+    ];
+
+    if let Some(existing) = routes
+        .iter()
+        .find(|route| !route.provider_id.trim().is_empty() && !route.model_id.trim().is_empty())
+    {
+        return Some((
+            existing.provider_id.trim().to_string(),
+            existing.model_id.trim().to_string(),
+        ));
+    }
+
+    for provider_id in PROVIDER_SEED_PRIORITY {
+        if let Some(provider) = providers.iter().find(|provider| provider.id == *provider_id) {
+            let model_id = provider.default_model.as_deref().unwrap_or("").trim();
+            if !model_id.is_empty() {
+                return Some((provider.id.clone(), model_id.to_string()));
+            }
+        }
+    }
+
+    providers.iter().find_map(|provider| {
+        let model_id = provider.default_model.as_deref().unwrap_or("").trim();
+        if provider.id.trim().is_empty() || model_id.is_empty() {
+            None
+        } else {
+            Some((provider.id.clone(), model_id.to_string()))
+        }
+    })
+}
+
+fn ensure_default_task_routes_initialized(conn: &Connection) -> Result<(), AppErrorDto> {
+    let routes = load_task_routes(conn)?;
+    let normalized_routes = normalize_task_routes(routes);
+    if !normalized_routes.is_empty() {
+        return Ok(());
+    }
+
+    let providers = load_all_providers(conn)?;
+    let Some((provider_id, model_id)) = pick_primary_route_seed(&normalized_routes, &providers) else {
+        return Ok(());
+    };
+
+    let existing_task_types: HashSet<String> = normalized_routes
+        .iter()
+        .map(|route| route.task_type.clone())
+        .collect();
+    let now = crate::infra::time::now_iso();
+    for task_type in task_routing::TASK_ROUTE_TYPES_WITH_CUSTOM {
+        if existing_task_types.contains(*task_type) {
+            continue;
+        }
+        let route = TaskRoute {
+            id: Uuid::new_v4().to_string(),
+            task_type: (*task_type).to_string(),
+            provider_id: provider_id.clone(),
+            model_id: model_id.clone(),
+            fallback_provider_id: None,
+            fallback_model_id: None,
+            max_retries: 1,
+            created_at: Some(now.clone()),
+            updated_at: Some(now.clone()),
+        };
+        upsert_task_route(conn, &route, &now)?;
+    }
+
+    Ok(())
 }
 
 /// Read a single provider config from the app database.

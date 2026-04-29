@@ -52,7 +52,7 @@
 1. 点击 9 个固定按钮之一或输入自定义指令。
 2. `EditorPage` 先做前置校验（章节/选区/指令/正文要求）。
 3. 调用 `run_ai_task_pipeline` 得到 `requestId`。
-4. 通过 `streamTaskPipelineByRequestId` 监听 `ai:pipeline:event`。
+4. 通过 `streamTaskPipeline` 监听 `ai:pipeline:event`。
 5. 事件按阶段推进：
    - `validate`
    - `context`
@@ -90,9 +90,10 @@
 ### 4.6 Provider/模型/任务路由
 - 保存 Provider：
   - `save_provider` -> 校验配置 -> 存储 -> 运行时 reload adapter。
-  - 若有默认模型，会自动补齐缺失的任务路由（快速接入主 Provider + 主模型 ID）。
+- 路由初始化：
+  - 问题4修复：默认任务路由仅在 app DB 初始化阶段补齐（单一入口）。
 - 路由读取：
-  - `list_task_routes` 会 canonical 化并在空表时按主种子自动生成默认路由。
+  - 问题4修复：`list_task_routes` 为纯读接口，仅返回 canonical 去重视图。
 - 路由写入：
   - `save_task_route` 做 canonical、字段 trim、重试次数边界控制（1..8）。
 

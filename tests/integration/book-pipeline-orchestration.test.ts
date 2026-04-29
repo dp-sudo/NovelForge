@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import path from "node:path";
 import test from "node:test";
 
 import { buildBookStages } from "../../src/api/bookPipelineApi.js";
@@ -34,4 +36,13 @@ test("问题5编排回归：无章节上下文时不注入 chapter-plan 阶段",
   });
 
   assert.equal(stages.some((stage) => stage.key === "chapter-plan"), false);
+});
+
+test("问题5编排回归：Blueprint 页面存在一键全书生成入口", async () => {
+  const page = await fs.readFile(
+    path.join(process.cwd(), "src/pages/Blueprint/BlueprintPage.tsx"),
+    "utf-8",
+  );
+  assert.match(page, /streamBookGenerationPipeline/);
+  assert.match(page, /一键全书生成/);
 });

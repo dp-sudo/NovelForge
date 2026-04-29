@@ -1,6 +1,5 @@
-use rusqlite::Connection;
 use serde::Serialize;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 use tauri::State;
 use tauri_plugin_updater::UpdaterExt;
 use uuid::Uuid;
@@ -28,102 +27,6 @@ fn normalize_task_routes(routes: Vec<TaskRoute>) -> Vec<TaskRoute> {
         }
     }
     dedup.into_values().map(|(_, route)| route).collect()
-}
-
-fn pick_primary_route_seed(
-    routes: &[TaskRoute],
-    providers: &[ProviderConfig],
-) -> Option<(String, String)> {
-    const PROVIDER_SEED_PRIORITY: &[&str] = &[
-        "deepseek",
-        "kimi",
-        "zhipu",
-        "minimax",
-        "openai",
-        "anthropic",
-        "gemini",
-        "custom",
-    ];
-
-    if let Some(existing) = routes
-        .iter()
-        .find(|route| !route.provider_id.trim().is_empty() && !route.model_id.trim().is_empty())
-    {
-        return Some((
-            existing.provider_id.trim().to_string(),
-            existing.model_id.trim().to_string(),
-        ));
-    }
-
-    for provider_id in PROVIDER_SEED_PRIORITY {
-        if let Some(provider) = providers
-            .iter()
-            .find(|provider| provider.id == *provider_id)
-        {
-            let model_id = provider.default_model.as_deref().unwrap_or("").trim();
-            if !model_id.is_empty() {
-                return Some((provider.id.clone(), model_id.to_string()));
-            }
-        }
-    }
-
-    providers.iter().find_map(|provider| {
-        let model_id = provider.default_model.as_deref().unwrap_or("").trim();
-        if provider.id.trim().is_empty() || model_id.is_empty() {
-            None
-        } else {
-            Some((provider.id.clone(), model_id.to_string()))
-        }
-    })
-}
-
-fn ensure_default_task_routes(
-    conn: &Connection,
-    providers: &[ProviderConfig],
-    routes: Vec<TaskRoute>,
-) -> Result<Vec<TaskRoute>, AppErrorDto> {
-    let normalized_routes = normalize_task_routes(routes);
-    if !normalized_routes.is_empty() {
-        return Ok(normalized_routes);
-    }
-    let existing_task_types: HashSet<String> = normalized_routes
-        .iter()
-        .map(|route| route.task_type.clone())
-        .collect();
-
-    let Some((provider_id, model_id)) = pick_primary_route_seed(&normalized_routes, providers)
-    else {
-        return Ok(normalized_routes);
-    };
-
-    let now = crate::infra::time::now_iso();
-    let mut changed = false;
-    for task_type in task_routing::TASK_ROUTE_TYPES_WITH_CUSTOM {
-        if existing_task_types.contains(*task_type) {
-            continue;
-        }
-
-        let route = TaskRoute {
-            id: Uuid::new_v4().to_string(),
-            task_type: (*task_type).to_string(),
-            provider_id: provider_id.clone(),
-            model_id: model_id.clone(),
-            fallback_provider_id: None,
-            fallback_model_id: None,
-            max_retries: 1,
-            created_at: Some(now.clone()),
-            updated_at: Some(now.clone()),
-        };
-        app_database::upsert_task_route(conn, &route, &now)?;
-        changed = true;
-    }
-
-    if !changed {
-        return Ok(normalized_routes);
-    }
-
-    let refreshed = app_database::load_task_routes(conn)?;
-    Ok(normalize_task_routes(refreshed))
 }
 
 fn ensure_updater_configured() -> Result<(), AppErrorDto> {
@@ -302,35 +205,6 @@ pub async fn save_provider(
     );
     state.ai_service.reload_provider(&saved.id).await?;
 
-    // Auto-create default task routes for every task type if not already configured
-    if let Some(ref default_model) = saved.default_model {
-        if !default_model.is_empty() {
-            let conn = app_database::open_or_create()?;
-            let existing_routes = app_database::load_task_routes(&conn)?;
-            let now = crate::infra::time::now_iso();
-            let task_types = task_routing::TASK_ROUTE_TYPES_WITH_CUSTOM;
-            for tt in task_types {
-                if !existing_routes
-                    .iter()
-                    .any(|r| task_routing::canonical_task_type(&r.task_type).as_ref() == *tt)
-                {
-                    let route = TaskRoute {
-                        id: Uuid::new_v4().to_string(),
-                        task_type: tt.to_string(),
-                        provider_id: saved.id.clone(),
-                        model_id: default_model.clone(),
-                        fallback_provider_id: None,
-                        fallback_model_id: None,
-                        max_retries: 1,
-                        created_at: Some(now.clone()),
-                        updated_at: Some(now.clone()),
-                    };
-                    app_database::upsert_task_route(&conn, &route, &now)?;
-                }
-            }
-        }
-    }
-
     Ok(saved)
 }
 
@@ -397,9 +271,9 @@ pub async fn get_refresh_logs(
 #[tauri::command]
 pub async fn list_task_routes(_state: State<'_, AppState>) -> Result<Vec<TaskRoute>, AppErrorDto> {
     let conn = app_database::open_or_create()?;
-    let providers = app_database::load_all_providers(&conn)?;
     let routes = app_database::load_task_routes(&conn)?;
-    ensure_default_task_routes(&conn, &providers, routes)
+    // 问题4修复(读写分离): list_task_routes 为纯读接口，不再触发默认路由写入。
+    Ok(normalize_task_routes(routes))
 }
 
 #[tauri::command]

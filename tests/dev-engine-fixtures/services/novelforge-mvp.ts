@@ -1,3 +1,4 @@
+// 问题1修复(双运行时收敛): Node 业务实现迁入 tests/dev-engine-fixtures，仅供测试夹具使用。
 import { AiService } from "./ai-service.js";
 import { BlueprintService } from "./blueprint-service.js";
 import { ChapterService } from "./chapter-service.js";

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import type { PlotNodeInput } from "../domain/types.js";
+import type { PlotNodeInput } from "../../../src/domain/types.js";
 import { nowIso } from "../infra/time.js";
 import { withDatabase } from "./service-context.js";
 import { getProjectId, parseJsonList } from "./service-utils.js";

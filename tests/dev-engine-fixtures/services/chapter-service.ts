@@ -2,8 +2,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 
-import { AppError } from "../errors/app-error.js";
-import type { ChapterInput, ChapterRecord } from "../domain/types.js";
+import { AppError } from "../../../src/errors/app-error.js";
+import type { ChapterInput, ChapterRecord } from "../../../src/domain/types.js";
 import { chapterPath, buildChapterMarkdown, readTextIfExists, writeFileAtomic } from "../infra/markdown.js";
 import { chapterFileName, toPosixRelative } from "../infra/path-utils.js";
 import { nowIso } from "../infra/time.js";

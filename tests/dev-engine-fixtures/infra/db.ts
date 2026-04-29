@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
-import { AppError } from "../errors/app-error.js";
+import { AppError } from "../../../src/errors/app-error.js";
 import { nowIso } from "./time.js";
 
 const SCHEMA_SQL = `

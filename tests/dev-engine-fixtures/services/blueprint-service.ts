@@ -2,8 +2,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 
-import { BLUEPRINT_STEP_KEYS, type BlueprintStepKey } from "../domain/constants.js";
-import type { BlueprintStep } from "../domain/types.js";
+import { BLUEPRINT_STEP_KEYS, type BlueprintStepKey } from "../../../src/domain/constants.js";
+import type { BlueprintStep } from "../../../src/domain/types.js";
 import { nowIso } from "../infra/time.js";
 import { withDatabase } from "./service-context.js";
 

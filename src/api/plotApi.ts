@@ -1,4 +1,5 @@
 import { invokeCommand } from "./tauriClient.js";
+import { runModuleAiTask } from "./moduleAiApi.js";
 import type { PlotNodeInput } from "../domain/types.js";
 
 export interface PlotRow {
@@ -29,5 +30,11 @@ export async function reorderPlotNodes(orderedIds: string[], projectRoot: string
 }
 
 export async function aiGeneratePlotNode(projectRoot: string, userDescription: string): Promise<string> {
-  return invokeCommand<string>("ai_generate_plot_node", { input: { projectRoot, userDescription } });
+  return runModuleAiTask({
+    projectRoot,
+    taskType: "plot.create_node",
+    userInstruction: userDescription,
+    autoPersist: true,
+    uiAction: "ai_generate_plot_node",
+  });
 }

@@ -128,8 +128,8 @@
   - `install_app_update() -> AppUpdateInfo`
 - 行为约束：
   - `save_provider` 后自动 reload 运行时 adapter。
-  - 当 provider 有默认模型时，会为缺失任务自动补齐默认任务路由。
-  - `list_task_routes` 会 canonical 化并做去重视图。
+  - 问题4修复：默认任务路由只在 app DB 初始化阶段补齐（单一入口）。
+  - 问题4修复：`list_task_routes` 为纯读接口，会 canonical 化并做去重视图。
 
 ### 4.6 Skills
 - `list_skills() -> SkillManifest[]`
@@ -147,14 +147,16 @@
 - Pipeline：
   - `run_ai_task_pipeline(input) -> requestId`
   - `cancel_ai_task_pipeline(requestId) -> void`
-- AI 功能任务：
-  - `generate_blueprint_suggestion(input) -> string`
-  - `ai_generate_character(input) -> string`
-  - `ai_generate_world_rule(input) -> string`
-  - `ai_generate_plot_node(input) -> string`
-  - `ai_scan_consistency(input) -> string`
-  - 问题4修复：`register_ai_provider(config) -> void`（compatibility-only，deprecated）
-  - 问题4修复：`test_ai_connection(providerId) -> void`（compatibility-only，deprecated）
+  - 前端流式入口：`streamTaskPipeline(input, options)`（监听 `ai:pipeline:event`）。
+- AI 功能任务（前端薄封装，统一走 pipeline）：
+  - `generateBlueprintSuggestion` -> `runModuleAiTask(taskType="blueprint.generate_step")`
+  - `aiGenerateCharacter` -> `runModuleAiTask(taskType="character.create")`
+  - `aiGenerateWorldRule` -> `runModuleAiTask(taskType="world.create_rule")`
+  - `aiGeneratePlotNode` -> `runModuleAiTask(taskType="plot.create_node")`
+  - `aiGenerateGlossaryTerm` -> `runModuleAiTask(taskType="glossary.create_term")`
+  - `aiGenerateNarrativeObligation` -> `runModuleAiTask(taskType="narrative.create_obligation")`
+  - `aiScanConsistency` -> `runModuleAiTask(taskType="consistency.scan")`
+  - compatibility-only：`register_ai_provider(config)`、`test_ai_connection(providerId)`（deprecated）
 - Context：
   - `get_chapter_context(projectRoot, chapterId) -> ChapterContext`
   - `apply_asset_candidate(projectRoot, chapterId, input) -> ApplyAssetCandidateResult`
@@ -186,6 +188,7 @@ interface AppErrorDto {
 - `src/api/*` 当前业务调用均为 invoke-only。
 - 任务路由采用 canonical task type，前后端映射一致。
 - 问题3修复：编辑器 AI 主路径已切换到 pipeline 事件流，legacy AI 命令不再开放。
+- 问题2修复：模块化 AI 命令（`ai_generate_*`、`ai_scan_consistency`、`generate_blueprint_suggestion`）已从 Rust command 面移除。
 - 问题4修复：compatibility-only 命令仅用于历史兼容，不作为官方接入路径。
 - 结构化抽取结果默认仅入草案池，需显式确认命令才落核心资产表。
 
@@ -206,4 +209,4 @@ interface AppErrorDto {
 ## 10. Compatibility 命令收敛计划（问题4修复）
 1. `2026-04-29` 起：`load_provider_config`、`save_provider_config`、`register_ai_provider`、`test_ai_connection` 标记为 compatibility-only，并在后端日志输出 deprecated 警告。
 2. 新功能约束：页面/模块新增调用必须通过 `src/api/settingsApi.ts` 与 `src/api/pipelineApi.ts` 官方调用面。
-3. 后续移除条件：当代码库内与外部适配层不再出现上述命令调用后，从 `src-tauri/src/lib.rs` `invoke_handler` 中移除。
+3. 计划移除日期：`2026-07-31`（若无外部兼容阻塞，届时从 `src-tauri/src/lib.rs` `invoke_handler` 下线）。

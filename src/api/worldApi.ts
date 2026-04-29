@@ -1,4 +1,5 @@
 import { invokeCommand } from "./tauriClient.js";
+import { runModuleAiTask } from "./moduleAiApi.js";
 import type { WorldRuleInput } from "../domain/types.js";
 
 export interface WorldRow {
@@ -29,5 +30,11 @@ export async function deleteWorldRule(id: string, projectRoot: string): Promise<
 }
 
 export async function aiGenerateWorldRule(projectRoot: string, userDescription: string): Promise<string> {
-  return invokeCommand<string>("ai_generate_world_rule", { input: { projectRoot, userDescription } });
+  return runModuleAiTask({
+    projectRoot,
+    taskType: "world.create_rule",
+    userInstruction: userDescription,
+    autoPersist: true,
+    uiAction: "ai_generate_world_rule",
+  });
 }

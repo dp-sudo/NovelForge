@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import type { GlossaryTermInput } from "../domain/types.js";
+import type { GlossaryTermInput } from "../../../src/domain/types.js";
 import { nowIso } from "../infra/time.js";
 import { withDatabase } from "./service-context.js";
 import { getProjectId, parseJsonList } from "./service-utils.js";

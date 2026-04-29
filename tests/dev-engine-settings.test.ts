@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createTempWorkspace, removeTempWorkspace } from "./helpers/temp-workspace.js";
-import { NovelForgeMvp } from "../src/services/novelforge-mvp.js";
+import { NovelForgeMvp } from "./dev-engine-fixtures/services/novelforge-mvp.js";
 
 test("Dev Engine: 蓝图步骤保存和状态切换正确", async () => {
   const workspace = await createTempWorkspace();

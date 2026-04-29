@@ -1,4 +1,5 @@
 import { invokeCommand } from "./tauriClient.js";
+import { runModuleAiTask } from "./moduleAiApi.js";
 import type { GlossaryTermInput } from "../domain/types.js";
 
 export interface GlossaryRow {
@@ -24,5 +25,11 @@ export async function createGlossaryTerm(input: GlossaryTermInput, projectRoot: 
 }
 
 export async function aiGenerateGlossaryTerm(projectRoot: string, userDescription: string): Promise<string> {
-  return invokeCommand<string>("ai_generate_glossary_term", { input: { projectRoot, userDescription } });
+  return runModuleAiTask({
+    projectRoot,
+    taskType: "glossary.create_term",
+    userInstruction: userDescription,
+    autoPersist: true,
+    uiAction: "ai_generate_glossary_term",
+  });
 }

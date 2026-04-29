@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import type { ConsistencyIssue } from "../domain/types.js";
+import type { ConsistencyIssue } from "../../../src/domain/types.js";
 import { nowIso } from "../infra/time.js";
 import { withDatabase } from "./service-context.js";
 import { getProjectId } from "./service-utils.js";

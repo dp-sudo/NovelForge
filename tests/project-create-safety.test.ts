@@ -4,8 +4,8 @@ import path from "node:path";
 import test from "node:test";
 
 import { AppError } from "../src/errors/app-error.js";
-import { sanitizeProjectDirectoryName } from "../src/infra/path-utils.js";
-import { NovelForgeMvp } from "../src/services/novelforge-mvp.js";
+import { sanitizeProjectDirectoryName } from "./dev-engine-fixtures/infra/path-utils.js";
+import { NovelForgeMvp } from "./dev-engine-fixtures/services/novelforge-mvp.js";
 import { createTempWorkspace, removeTempWorkspace } from "./helpers/temp-workspace.js";
 
 test("创建项目失败时不得删除已存在目录", async () => {

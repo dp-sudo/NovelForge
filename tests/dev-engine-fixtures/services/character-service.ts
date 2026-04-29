@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
-import { AppError } from "../errors/app-error.js";
-import type { CharacterInput } from "../domain/types.js";
+import { AppError } from "../../../src/errors/app-error.js";
+import type { CharacterInput } from "../../../src/domain/types.js";
 import { nowIso } from "../infra/time.js";
 import { withDatabase } from "./service-context.js";
 import { getProjectId, parseJsonList } from "./service-utils.js";

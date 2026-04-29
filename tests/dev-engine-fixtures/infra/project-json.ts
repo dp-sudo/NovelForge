@@ -1,8 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
-import { PROJECT_APP_MIN_VERSION, PROJECT_SCHEMA_VERSION } from "../domain/constants.js";
-import type { ProjectJson } from "../domain/types.js";
+import { PROJECT_APP_MIN_VERSION, PROJECT_SCHEMA_VERSION } from "../../../src/domain/constants.js";
+import type { ProjectJson } from "../../../src/domain/types.js";
 import { nowIso } from "./time.js";
 
 export function buildProjectJson(input: {

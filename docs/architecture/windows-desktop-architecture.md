@@ -23,7 +23,7 @@
 ### 4.1 Renderer（`src/`）
 - 页面、交互、状态存储。
 - 通过 `src/api/*` 调用 Tauri command。
-- 编辑器 AI 主链路使用 `pipelineApi`（`runTaskPipeline` + `streamTaskPipelineByRequestId`）。
+- 编辑器 AI 主链路使用 `pipelineApi`（`runTaskPipeline` + `streamTaskPipeline`）。
 - 编辑器右侧上下文面板支持：
   - `assetCandidates` 候选采纳。
   - `relationshipDrafts` / `involvementDrafts` / `sceneDrafts` 人工确认入库。
@@ -90,7 +90,7 @@
 - 兼容补列：
   - `database.rs::ensure_compatible_schema()` 在打开/初始化时补齐 `projects.writing_style` 等历史缺列。
 
-### 5.3 应用级数据库（`~/.novelforge/novelforge.db`）
+### 5.3 应用级数据库（`%LOCALAPPDATA%\\NovelForge\\novelforge.db`）
 - 表：`llm_providers`, `llm_models`, `llm_model_refresh_logs`, `llm_task_routes`, `llm_model_registry_state`, `app_settings`
 - 迁移现状：
   - `app/0001_init.sql`
@@ -99,7 +99,7 @@
 - 编辑器设置通过 `app_settings` 的 `editor_settings` 键持久化。
 
 ### 5.4 应用级本地文件
-- `~/.novelforge/license.json`：授权离线缓存。
+- `%LOCALAPPDATA%\\NovelForge\\license.json`：授权离线缓存。
 
 ## 6. AI 架构（当前）
 ### 6.1 任务路由与 canonical
@@ -132,14 +132,14 @@
 ## 7. 命令面（按域摘要）
 - Project：项目创建/打开/最近项目 + 写作风格保存读取 + Git 仓库与快照。
 - Chapter：章节 CRUD、重排、自动保存/恢复、快照、卷管理。
-- AI：pipeline run/cancel、蓝图/角色/设定/剧情/一致性 AI 任务（legacy stream 命令已移除）。
+- AI：pipeline run/cancel，模块化 AI 任务通过前端 API 薄封装统一转发到 pipeline（legacy stream 命令已移除）。
 - Context：上下文聚合、资产候选采纳、结构化草案确认。
 - Settings：Provider/模型/路由/registry、编辑器设置、授权、更新。
 - Skills：技能列表/详情/内容读取、创建、编辑、删除、导入、重置、重载。
 - Search/Integrity：关键字+语义检索、索引重建、项目完整性检查。
 
 ## 8. 当前过渡态与风险
-- compatibility-only 命令（`load_provider_config`、`save_provider_config`、`register_ai_provider`、`test_ai_connection`）仍保留用于历史调用兼容，不作为新接入路径。
+- compatibility-only 命令（`load_provider_config`、`save_provider_config`、`register_ai_provider`、`test_ai_connection`）仅用于历史调用兼容，计划在 `2026-07-31` 后移除。
 - Pipeline 对模型可用性、API Key、路由配置依赖强，未配置时会在 `route/generate` 阶段显式失败。
 - 结构化抽取为启发式规则，存在误报；当前策略是“先草案、再人工确认入库”。
 - 向量索引与草案池都会随项目规模增长，需持续关注 DB 体积与索引策略。

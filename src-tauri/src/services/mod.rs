@@ -1,3 +1,4 @@
+pub mod ai_pipeline;
 pub mod ai_pipeline_service;
 pub mod ai_service;
 pub mod backup_service;
