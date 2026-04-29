@@ -63,12 +63,10 @@ pub fn canonical_task_type<'a>(task_type: &'a str) -> Cow<'a, str> {
         "glossary_create_term" | "glossary.create" | "glossary.create_term" => {
             Cow::Borrowed("glossary.create_term")
         }
-        "narrative_create_obligation"
-        | "narrative.create"
-        | "narrative.create_obligation" => Cow::Borrowed("narrative.create_obligation"),
-        "timeline_review" | "timeline.scan" | "timeline.review" => {
-            Cow::Borrowed("timeline.review")
+        "narrative_create_obligation" | "narrative.create" | "narrative.create_obligation" => {
+            Cow::Borrowed("narrative.create_obligation")
         }
+        "timeline_review" | "timeline.scan" | "timeline.review" => Cow::Borrowed("timeline.review"),
         "relationship_review" | "relationships.review" | "relationship.review" => {
             Cow::Borrowed("relationship.review")
         }
@@ -107,12 +105,18 @@ mod tests {
             canonical_task_type("generate_blueprint_step"),
             "blueprint.generate_step"
         );
-        assert_eq!(canonical_task_type("glossary.create"), "glossary.create_term");
+        assert_eq!(
+            canonical_task_type("glossary.create"),
+            "glossary.create_term"
+        );
         assert_eq!(
             canonical_task_type("narrative_create_obligation"),
             "narrative.create_obligation"
         );
-        assert_eq!(canonical_task_type("relationships.review"), "relationship.review");
+        assert_eq!(
+            canonical_task_type("relationships.review"),
+            "relationship.review"
+        );
         assert_eq!(canonical_task_type("timeline.scan"), "timeline.review");
         assert_eq!(canonical_task_type("dashboard.analyze"), "dashboard.review");
         assert_eq!(canonical_task_type("export.check"), "export.review");

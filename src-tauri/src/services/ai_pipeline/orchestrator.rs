@@ -52,8 +52,11 @@ pub struct PipelineOrchestrator<'a> {
 
 impl<'a> PipelineOrchestrator<'a> {
     pub async fn run(&self) -> Result<PipelineSuccess, StageError> {
-        self.audit_store
-            .touch_pipeline_phase(&self.input.project_root, self.request_id, PHASE_VALIDATE);
+        self.audit_store.touch_pipeline_phase(
+            &self.input.project_root,
+            self.request_id,
+            PHASE_VALIDATE,
+        );
         self.pipeline_service.emit_event(
             self.app_handle,
             AiPipelineEvent {
@@ -79,8 +82,11 @@ impl<'a> PipelineOrchestrator<'a> {
                 error: err,
             })?;
 
-        self.audit_store
-            .touch_pipeline_phase(&self.input.project_root, self.request_id, PHASE_CONTEXT);
+        self.audit_store.touch_pipeline_phase(
+            &self.input.project_root,
+            self.request_id,
+            PHASE_CONTEXT,
+        );
         self.pipeline_service.emit_event(
             self.app_handle,
             AiPipelineEvent {
@@ -94,7 +100,12 @@ impl<'a> PipelineOrchestrator<'a> {
                 meta: None,
             },
         );
-        let chapter_id = self.input.chapter_id.as_deref().map(str::trim).unwrap_or("");
+        let chapter_id = self
+            .input
+            .chapter_id
+            .as_deref()
+            .map(str::trim)
+            .unwrap_or("");
         let context = if PromptResolver::requires_global_only_context(self.canonical_task) {
             self.context_service
                 .collect_global_context_only(&self.input.project_root)
@@ -117,8 +128,11 @@ impl<'a> PipelineOrchestrator<'a> {
                 error: err,
             })?;
 
-        self.audit_store
-            .touch_pipeline_phase(&self.input.project_root, self.request_id, PHASE_ROUTE);
+        self.audit_store.touch_pipeline_phase(
+            &self.input.project_root,
+            self.request_id,
+            PHASE_ROUTE,
+        );
         self.pipeline_service.emit_event(
             self.app_handle,
             AiPipelineEvent {
@@ -132,10 +146,11 @@ impl<'a> PipelineOrchestrator<'a> {
                 meta: None,
             },
         );
-        let route = AiService::inspect_task_route(self.canonical_task).map_err(|err| StageError {
-            phase: PHASE_ROUTE,
-            error: err,
-        })?;
+        let route =
+            AiService::inspect_task_route(self.canonical_task).map_err(|err| StageError {
+                phase: PHASE_ROUTE,
+                error: err,
+            })?;
         self.pipeline_service.emit_event(
             self.app_handle,
             AiPipelineEvent {
@@ -160,8 +175,11 @@ impl<'a> PipelineOrchestrator<'a> {
                 error: err,
             })?;
 
-        self.audit_store
-            .touch_pipeline_phase(&self.input.project_root, self.request_id, PHASE_PROMPT);
+        self.audit_store.touch_pipeline_phase(
+            &self.input.project_root,
+            self.request_id,
+            PHASE_PROMPT,
+        );
         self.pipeline_service.emit_event(
             self.app_handle,
             AiPipelineEvent {
@@ -194,8 +212,11 @@ impl<'a> PipelineOrchestrator<'a> {
                 error: err,
             })?;
 
-        self.audit_store
-            .touch_pipeline_phase(&self.input.project_root, self.request_id, PHASE_GENERATE);
+        self.audit_store.touch_pipeline_phase(
+            &self.input.project_root,
+            self.request_id,
+            PHASE_GENERATE,
+        );
         self.pipeline_service.emit_event(
             self.app_handle,
             AiPipelineEvent {
@@ -218,7 +239,9 @@ impl<'a> PipelineOrchestrator<'a> {
                 role: "user".to_string(),
                 content: vec![ContentBlock {
                     block_type: "text".to_string(),
-                    text: Some(PromptResolver::generate_user_message(self.canonical_task).to_string()),
+                    text: Some(
+                        PromptResolver::generate_user_message(self.canonical_task).to_string(),
+                    ),
                 }],
             }],
             system_prompt: Some(prompt),
@@ -244,7 +267,9 @@ impl<'a> PipelineOrchestrator<'a> {
                     error: err,
                 })?;
             if let Some(err_msg) = chunk.error {
-                if let Some((error_code, message)) = AiService::decode_pipeline_stream_error(&err_msg) {
+                if let Some((error_code, message)) =
+                    AiService::decode_pipeline_stream_error(&err_msg)
+                {
                     return Err(StageError {
                         phase: PHASE_GENERATE,
                         error: AppErrorDto::new(&error_code, &message, true),
@@ -273,8 +298,11 @@ impl<'a> PipelineOrchestrator<'a> {
             }
         }
 
-        self.audit_store
-            .touch_pipeline_phase(&self.input.project_root, self.request_id, PHASE_POSTPROCESS);
+        self.audit_store.touch_pipeline_phase(
+            &self.input.project_root,
+            self.request_id,
+            PHASE_POSTPROCESS,
+        );
         self.pipeline_service.emit_event(
             self.app_handle,
             AiPipelineEvent {
@@ -288,13 +316,18 @@ impl<'a> PipelineOrchestrator<'a> {
                 meta: None,
             },
         );
-        let normalized = self.normalize_output(&generated).map_err(|err| StageError {
-            phase: PHASE_POSTPROCESS,
-            error: err,
-        })?;
+        let normalized = self
+            .normalize_output(&generated)
+            .map_err(|err| StageError {
+                phase: PHASE_POSTPROCESS,
+                error: err,
+            })?;
 
-        self.audit_store
-            .touch_pipeline_phase(&self.input.project_root, self.request_id, PHASE_PERSIST);
+        self.audit_store.touch_pipeline_phase(
+            &self.input.project_root,
+            self.request_id,
+            PHASE_PERSIST,
+        );
         self.pipeline_service.emit_event(
             self.app_handle,
             AiPipelineEvent {

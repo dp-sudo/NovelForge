@@ -153,6 +153,13 @@ impl TaskHandlers {
         fallback_instruction: &str,
     ) -> Result<CreateCharacterInput, AppErrorDto> {
         let root = Self::extract_output_object(normalized_output, Some("character"))?;
+        let basic_info = Self::pick_object(&root, &["basicInfo", "basic_info", "basic"]);
+        let appearance_obj = Self::pick_object(&root, &["appearance", "looks_detail"]);
+        let personality_obj = Self::pick_object(
+            &root,
+            &["personality", "personalityProfile", "personality_profile"],
+        );
+        let arc_obj = Self::pick_object(&root, &["arc", "growthArc", "growth_arc"]);
         let name = Self::pick_string(
             &root,
             &["name", "characterName", "角色名", "title"],
@@ -166,24 +173,75 @@ impl TaskHandlers {
         let aliases = Self::pick_string_array(&root, &["aliases", "alias", "别名"]);
         Ok(CreateCharacterInput {
             name,
-            aliases: if aliases.is_empty() { None } else { Some(aliases) },
+            aliases: if aliases.is_empty() {
+                None
+            } else {
+                Some(aliases)
+            },
             role_type,
-            age: None,
-            gender: None,
+            age: Self::pick_optional_text(&root, &["age", "年龄"]).or_else(|| {
+                basic_info.and_then(|obj| Self::pick_optional_text(obj, &["age", "年龄"]))
+            }),
+            gender: Self::pick_optional_text(&root, &["gender", "性别"]).or_else(|| {
+                basic_info.and_then(|obj| Self::pick_optional_text(obj, &["gender", "性别"]))
+            }),
             identity_text: Self::pick_optional_string(
                 &root,
                 &["identityText", "identity_text", "identity", "身份"],
-            ),
-            appearance: Self::pick_optional_string(&root, &["appearance", "looks", "外貌"]),
-            motivation: Self::pick_optional_string(&root, &["motivation", "核心动机", "drive"]),
-            desire: Self::pick_optional_string(&root, &["desire", "欲望"]),
-            fear: Self::pick_optional_string(&root, &["fear", "恐惧"]),
-            flaw: Self::pick_optional_string(&root, &["flaw", "缺陷"]),
-            arc_stage: Self::pick_optional_string(&root, &["arcStage", "arc_stage", "成长弧线"]),
-            locked_fields: None,
-            notes: Self::pick_optional_string(&root, &["notes", "remark", "备注"]).or_else(|| {
-                (!fallback_instruction.trim().is_empty()).then(|| fallback_instruction.to_string())
+            )
+            .or_else(|| {
+                basic_info.and_then(|obj| {
+                    Self::compose_identity_text(
+                        Self::pick_optional_text(obj, &["occupation", "职业"]),
+                        Self::pick_optional_text(obj, &["status", "身份", "状态"]),
+                    )
+                })
             }),
+            appearance: Self::pick_optional_string(&root, &["appearance", "looks", "外貌"])
+                .or_else(|| Self::compose_appearance_text(appearance_obj)),
+            motivation: Self::pick_optional_string(&root, &["motivation", "核心动机", "drive"])
+                .or_else(|| {
+                    personality_obj.and_then(|obj| {
+                        Self::pick_optional_text(obj, &["desires", "desire", "愿望", "诉求"])
+                    })
+                }),
+            desire: Self::pick_optional_string(&root, &["desire", "欲望"]).or_else(|| {
+                personality_obj.and_then(|obj| {
+                    Self::pick_optional_text(obj, &["desires", "desire", "愿望", "诉求"])
+                })
+            }),
+            fear: Self::pick_optional_string(&root, &["fear", "恐惧"]).or_else(|| {
+                personality_obj
+                    .and_then(|obj| Self::pick_optional_text(obj, &["fears", "fear", "恐惧"]))
+            }),
+            flaw: Self::pick_optional_string(&root, &["flaw", "缺陷"]).or_else(|| {
+                personality_obj
+                    .and_then(|obj| Self::pick_optional_text(obj, &["flaws", "flaw", "缺陷"]))
+            }),
+            arc_stage: Self::pick_optional_string(&root, &["arcStage", "arc_stage", "成长弧线"])
+                .or_else(|| {
+                    arc_obj.and_then(|obj| {
+                        Self::pick_optional_text(
+                            obj,
+                            &["potentialGrowth", "potential_growth", "成长", "成长方向"],
+                        )
+                    })
+                }),
+            locked_fields: None,
+            notes: Self::pick_optional_string(&root, &["notes", "remark", "备注"])
+                .or_else(|| Self::pick_optional_text(&root, &["background", "背景", "经历"]))
+                .or_else(|| {
+                    personality_obj.and_then(|obj| {
+                        Self::pick_optional_text(
+                            obj,
+                            &["contradictions", "contradiction", "矛盾", "内在矛盾"],
+                        )
+                    })
+                })
+                .or_else(|| {
+                    (!fallback_instruction.trim().is_empty())
+                        .then(|| fallback_instruction.to_string())
+                }),
         })
     }
 
@@ -429,7 +487,11 @@ impl TaskHandlers {
             "PIPELINE_PERSIST_PARSE_FAILED",
             "AI 返回结果无法解析为 JSON",
             true,
-        ))
+        )
+        .with_detail(format!(
+            "normalized_output_preview={}",
+            Self::preview_output_for_error(normalized_output, 320)
+        )))
     }
 
     fn extract_output_object(
@@ -448,7 +510,24 @@ impl TaskHandlers {
                 "AI 返回 JSON 结构不是对象",
                 true,
             )
+            .with_detail(format!(
+                "normalized_output_preview={}",
+                Self::preview_output_for_error(normalized_output, 320)
+            ))
         })
+    }
+
+    fn preview_output_for_error(raw: &str, max_chars: usize) -> String {
+        let normalized = raw.split_whitespace().collect::<Vec<_>>().join(" ");
+        if normalized.is_empty() {
+            return "<empty>".to_string();
+        }
+        let chars = normalized.chars().collect::<Vec<_>>();
+        if chars.len() <= max_chars {
+            return normalized;
+        }
+        let preview = chars[..max_chars].iter().collect::<String>();
+        format!("{preview}...(truncated,total_chars={})", chars.len())
     }
 
     fn pick_optional_string(
@@ -471,6 +550,107 @@ impl TaskHandlers {
             }
         }
         None
+    }
+
+    fn pick_optional_text(obj: &serde_json::Map<String, Value>, keys: &[&str]) -> Option<String> {
+        for key in keys {
+            if let Some(value) = obj.get(*key) {
+                if let Some(text) = Self::json_value_to_text(value) {
+                    return Some(text);
+                }
+            }
+        }
+        None
+    }
+
+    fn pick_object<'a>(
+        obj: &'a serde_json::Map<String, Value>,
+        keys: &[&str],
+    ) -> Option<&'a serde_json::Map<String, Value>> {
+        for key in keys {
+            if let Some(value) = obj.get(*key).and_then(Value::as_object) {
+                return Some(value);
+            }
+        }
+        None
+    }
+
+    fn json_value_to_text(value: &Value) -> Option<String> {
+        match value {
+            Value::String(v) => {
+                let trimmed = v.trim();
+                if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(trimmed.to_string())
+                }
+            }
+            Value::Number(v) => Some(v.to_string()),
+            Value::Bool(v) => Some(v.to_string()),
+            Value::Array(values) => {
+                let list = values
+                    .iter()
+                    .filter_map(Self::json_value_to_text)
+                    .collect::<Vec<_>>();
+                if list.is_empty() {
+                    None
+                } else {
+                    Some(list.join("；"))
+                }
+            }
+            _ => None,
+        }
+    }
+
+    fn compose_identity_text(occupation: Option<String>, status: Option<String>) -> Option<String> {
+        let mut parts = Vec::new();
+        if let Some(value) = occupation {
+            if !value.trim().is_empty() {
+                parts.push(value);
+            }
+        }
+        if let Some(value) = status {
+            if !value.trim().is_empty() {
+                parts.push(value);
+            }
+        }
+        if parts.is_empty() {
+            None
+        } else {
+            Some(parts.join("；"))
+        }
+    }
+
+    fn compose_appearance_text(
+        appearance_obj: Option<&serde_json::Map<String, Value>>,
+    ) -> Option<String> {
+        let obj = appearance_obj?;
+        let overview = Self::pick_optional_text(obj, &["overview", "概述"]);
+        let distinctive = Self::pick_optional_text(
+            obj,
+            &[
+                "distinctiveFeatures",
+                "distinctive_features",
+                "特征",
+                "细节",
+            ],
+        );
+        let style = Self::pick_optional_text(obj, &["style", "风格", "穿着"]);
+        let mut parts = Vec::new();
+        if let Some(value) = overview {
+            parts.push(value);
+        }
+        if let Some(value) = distinctive {
+            parts.push(format!("特征：{value}"));
+        }
+        if let Some(value) = style {
+            parts.push(format!("风格：{value}"));
+        }
+        if parts.is_empty() {
+            None
+        } else {
+            Some(parts.join("\n"))
+        }
     }
 
     fn pick_string(
@@ -595,5 +775,60 @@ impl TaskHandlers {
             AppErrorDto::new("PIPELINE_DB_QUERY_FAILED", "读取剧情节点顺序失败", true)
                 .with_detail(err.to_string())
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TaskHandlers;
+
+    #[test]
+    fn build_character_create_input_maps_nested_character_json() {
+        let normalized_output = r#"
+        {
+          "name": "沈惊寒",
+          "aliases": ["寒剑", "冷面修罗"],
+          "basicInfo": {
+            "age": "二十七岁",
+            "gender": "男",
+            "occupation": "游历剑客",
+            "status": "背负灭门之仇的孤行侠客"
+          },
+          "appearance": {
+            "overview": "身形修长而精瘦",
+            "distinctiveFeatures": ["左手小指少一截", "右眼眼尾有淡痣"],
+            "style": "终年一身灰黑色劲装"
+          },
+          "personality": {
+            "desires": ["手刃仇人", "渴望被人理解"],
+            "fears": ["永远找不到仇人"],
+            "flaws": ["被仇恨吞噬"]
+          },
+          "background": "十年前师门覆灭，他背负血仇。",
+          "arc": {
+            "potentialGrowth": "复仇之后学会活下去。"
+          }
+        }
+        "#;
+
+        let input = TaskHandlers::build_character_create_input(normalized_output, "fallback")
+            .expect("build_character_create_input should parse nested json");
+
+        assert_eq!(input.name, "沈惊寒");
+        assert_eq!(input.age.as_deref(), Some("二十七岁"));
+        assert_eq!(input.gender.as_deref(), Some("男"));
+        assert_eq!(
+            input.identity_text.as_deref(),
+            Some("游历剑客；背负灭门之仇的孤行侠客")
+        );
+        assert!(input
+            .appearance
+            .as_deref()
+            .is_some_and(|value| value.contains("特征：左手小指少一截；右眼眼尾有淡痣")));
+        assert_eq!(input.desire.as_deref(), Some("手刃仇人；渴望被人理解"));
+        assert_eq!(input.fear.as_deref(), Some("永远找不到仇人"));
+        assert_eq!(input.flaw.as_deref(), Some("被仇恨吞噬"));
+        assert_eq!(input.arc_stage.as_deref(), Some("复仇之后学会活下去。"));
+        assert_eq!(input.notes.as_deref(), Some("十年前师门覆灭，他背负血仇。"));
     }
 }

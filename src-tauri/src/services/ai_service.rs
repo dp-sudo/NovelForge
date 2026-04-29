@@ -412,7 +412,6 @@ impl AiService {
         })?;
         adapter.test_connection().await.map_err(Into::into)
     }
-
 }
 
 #[cfg(test)]
