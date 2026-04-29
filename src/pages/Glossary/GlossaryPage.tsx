@@ -25,13 +25,18 @@ const termTypeColors: Record<string, BadgeVariant> = {
 
 type BadgeVariant = "default" | "success" | "warning" | "error" | "info";
 
+type AiCreateResult = {
+  status: "success" | "error";
+  message: string;
+};
+
 export function GlossaryPage() {
   const [terms, setTerms] = useState<GlossaryRow[]>([]);
   const [showNew, setShowNew] = useState(false);
   const [showAiCreate, setShowAiCreate] = useState(false);
   const [form, setForm] = useState({ term: "", termType: "术语" as string, description: "", locked: false, banned: false });
   const [aiDescription, setAiDescription] = useState("");
-  const [aiResult, setAiResult] = useState<string | null>(null);
+  const [aiResult, setAiResult] = useState<AiCreateResult | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
   const projectRoot = useProjectStore((s) => s.currentProjectPath);
 
@@ -148,11 +153,14 @@ export function GlossaryPage() {
             onClick={async () => {
               if (!projectRoot) return;
               setAiLoading(true);
+              setAiResult(null);
               try {
-                setAiResult(await aiGenerateGlossaryTerm(projectRoot, aiDescription));
+                const result = await aiGenerateGlossaryTerm(projectRoot, aiDescription);
+                setAiResult({ status: "success", message: result || "AI 已完成生成并自动入库。" });
                 await load();
-              } catch {
-                setAiResult("AI 生成失败。请检查 AI 供应商配置。");
+              } catch (error) {
+                const message = error instanceof Error ? error.message : "AI 生成失败";
+                setAiResult({ status: "error", message });
               } finally {
                 setAiLoading(false);
               }
@@ -162,11 +170,15 @@ export function GlossaryPage() {
             {aiLoading ? "生成中..." : "生成并入库"}
           </Button>
           {aiResult && (
-            <div className="p-4 bg-primary/5 border border-primary/20 rounded-xl">
-              <p className="text-xs text-success mb-2">AI 结果已自动写入名词库。</p>
-              <pre className="text-sm text-surface-200 whitespace-pre-wrap font-sans leading-relaxed max-h-64 overflow-y-auto">{aiResult}</pre>
+            <div className={`p-4 rounded-xl ${aiResult.status === "success" ? "bg-primary/5 border border-primary/20" : "bg-error/10 border border-error/30"}`}>
+              <p className={`text-xs mb-2 ${aiResult.status === "success" ? "text-success" : "text-error-light"}`}>
+                {aiResult.status === "success" ? "AI 结果已自动写入名词库。" : "AI 生成失败，未写入名词库。"}
+              </p>
+              <pre className="text-sm text-surface-200 whitespace-pre-wrap font-sans leading-relaxed max-h-64 overflow-y-auto">{aiResult.message}</pre>
               <div className="flex gap-2 mt-3">
-                <Button variant="ghost" size="sm" onClick={() => setAiResult(null)}>重新生成</Button>
+                <Button variant="ghost" size="sm" onClick={() => setAiResult(null)}>
+                  {aiResult.status === "success" ? "重新生成" : "重试"}
+                </Button>
                 <Button variant="primary" size="sm" onClick={() => { setAiResult(null); setAiDescription(""); setShowAiCreate(false); }}>关闭</Button>
               </div>
             </div>

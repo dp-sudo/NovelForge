@@ -115,7 +115,17 @@ fn pick_primary_route_seed(
 fn ensure_default_task_routes_initialized(conn: &Connection) -> Result<(), AppErrorDto> {
     let routes = load_task_routes(conn)?;
     let normalized_routes = normalize_task_routes(routes);
-    if !normalized_routes.is_empty() {
+
+    let existing_task_types: HashSet<String> = normalized_routes
+        .iter()
+        .map(|route| route.task_type.clone())
+        .collect();
+    let missing_task_types = task_routing::TASK_ROUTE_TYPES_WITH_CUSTOM
+        .iter()
+        .copied()
+        .filter(|task_type| !existing_task_types.contains(*task_type))
+        .collect::<Vec<_>>();
+    if missing_task_types.is_empty() {
         return Ok(());
     }
 
@@ -125,18 +135,11 @@ fn ensure_default_task_routes_initialized(conn: &Connection) -> Result<(), AppEr
         return Ok(());
     };
 
-    let existing_task_types: HashSet<String> = normalized_routes
-        .iter()
-        .map(|route| route.task_type.clone())
-        .collect();
     let now = crate::infra::time::now_iso();
-    for task_type in task_routing::TASK_ROUTE_TYPES_WITH_CUSTOM {
-        if existing_task_types.contains(*task_type) {
-            continue;
-        }
+    for task_type in missing_task_types {
         let route = TaskRoute {
             id: Uuid::new_v4().to_string(),
-            task_type: (*task_type).to_string(),
+            task_type: task_type.to_string(),
             provider_id: provider_id.clone(),
             model_id: model_id.clone(),
             fallback_provider_id: None,
@@ -782,4 +785,82 @@ fn migrate_legacy_database_if_needed(target_db_path: &Path) -> Result<(), AppErr
     );
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+
+    use rusqlite::Connection;
+    use uuid::Uuid;
+
+    use super::*;
+    use crate::adapters::llm_types::ProviderConfig;
+
+    fn setup_app_conn() -> Connection {
+        let conn = Connection::open_in_memory().expect("open in-memory app db");
+        crate::infra::migrator::run_app_pending(&conn).expect("run app migrations");
+        ensure_schema_compatibility(&conn).expect("ensure schema compatibility");
+        conn
+    }
+
+    fn sample_provider(default_model: &str) -> ProviderConfig {
+        ProviderConfig {
+            id: "deepseek".to_string(),
+            display_name: "DeepSeek".to_string(),
+            vendor: "openai".to_string(),
+            protocol: "openai_responses".to_string(),
+            base_url: "https://api.deepseek.com".to_string(),
+            endpoint_path: None,
+            api_key: None,
+            auth_mode: "bearer".to_string(),
+            auth_header_name: None,
+            anthropic_version: None,
+            beta_headers: None,
+            custom_headers: None,
+            default_model: Some(default_model.to_string()),
+            timeout_ms: 120_000,
+            connect_timeout_ms: 15_000,
+            max_retries: 2,
+            model_refresh_mode: Some("registry".to_string()),
+            models_path: None,
+            last_model_refresh_at: None,
+        }
+    }
+
+    #[test]
+    fn ensure_default_task_routes_backfills_missing_core_routes() {
+        let conn = setup_app_conn();
+        let now = crate::infra::time::now_iso();
+        upsert_provider(&conn, &sample_provider("deepseek-chat"), &now)
+            .expect("upsert provider should succeed");
+
+        let chapter_route = TaskRoute {
+            id: Uuid::new_v4().to_string(),
+            task_type: "chapter.draft".to_string(),
+            provider_id: "deepseek".to_string(),
+            model_id: "deepseek-chat".to_string(),
+            fallback_provider_id: None,
+            fallback_model_id: None,
+            max_retries: 1,
+            created_at: Some(now.clone()),
+            updated_at: Some(now.clone()),
+        };
+        upsert_task_route(&conn, &chapter_route, &now).expect("upsert route should succeed");
+
+        ensure_default_task_routes_initialized(&conn).expect("backfill routes should succeed");
+
+        let routes = load_task_routes(&conn).expect("load routes");
+        let route_types = routes
+            .iter()
+            .map(|route| route.task_type.clone())
+            .collect::<HashSet<_>>();
+        for task_type in task_routing::TASK_ROUTE_TYPES_WITH_CUSTOM {
+            assert!(
+                route_types.contains(*task_type),
+                "missing task route {}",
+                task_type
+            );
+        }
+    }
 }
