@@ -110,10 +110,7 @@ impl PromptResolver {
         render.set_input("precedingText", preceding_text);
         render.set_input("chapterContent", chapter_content.clone());
         render.set_input("content", chapter_content);
-        render.set_input(
-            "chapterId",
-            normalize_optional(input.chapter_id.as_deref()),
-        );
+        render.set_input("chapterId", normalize_optional(input.chapter_id.as_deref()));
         render.set_input(
             "stepTitle",
             normalize_optional(input.blueprint_step_title.as_deref()),
@@ -401,7 +398,11 @@ fn tail_chars(value: &str, max_chars: usize) -> String {
         .collect::<String>()
 }
 
-fn load_chapter_tail(project_root: &str, chapter_id: &str, max_chars: usize) -> Result<String, AppErrorDto> {
+fn load_chapter_tail(
+    project_root: &str,
+    chapter_id: &str,
+    max_chars: usize,
+) -> Result<String, AppErrorDto> {
     let root = project_root.trim();
     let chapter_id = chapter_id.trim();
     if root.is_empty() || chapter_id.is_empty() {
@@ -420,13 +421,15 @@ fn load_chapter_tail(project_root: &str, chapter_id: &str, max_chars: usize) -> 
             |row| row.get::<_, String>(0),
         )
         .map_err(|err| {
-            AppErrorDto::new("DB_QUERY_FAILED", "无法读取章节前文", false).with_detail(err.to_string())
+            AppErrorDto::new("DB_QUERY_FAILED", "无法读取章节前文", false)
+                .with_detail(err.to_string())
         })?;
 
     let chapter_file = resolve_project_relative_path(project_root_path, &content_path)
         .map_err(|detail| AppErrorDto::new("PROJECT_PATH_INVALID_ENTRY", &detail, false))?;
     let content = fs::read_to_string(&chapter_file).map_err(|err| {
-        AppErrorDto::new("CHAPTER_READ_FAILED", "无法读取章节正文", false).with_detail(err.to_string())
+        AppErrorDto::new("CHAPTER_READ_FAILED", "无法读取章节正文", false)
+            .with_detail(err.to_string())
     })?;
     Ok(tail_chars(&content, max_chars))
 }
@@ -650,7 +653,9 @@ mod tests {
             let input = sample_input(task);
             let rendered = resolver
                 .resolve_or_build_prompt(&registry, &context, task, &input)
-                .unwrap_or_else(|err| panic!("task {} render failed: {} {}", task, err.code, err.message));
+                .unwrap_or_else(|err| {
+                    panic!("task {} render failed: {} {}", task, err.code, err.message)
+                });
             assert!(
                 extract_placeholders(&rendered).is_empty(),
                 "task {} still has placeholders: {:?}",

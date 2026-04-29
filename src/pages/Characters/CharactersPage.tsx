@@ -35,6 +35,11 @@ interface CharacterRow {
   flaw: string | null; arc_stage: string | null; notes: string | null;
 }
 
+type AiCreateResult = {
+  status: "success" | "error";
+  message: string;
+};
+
 const emptyForm = {
   name: "", roleType: "配角" as const, age: "", gender: "",
   identityText: "", appearance: "", motivation: "", desire: "",
@@ -51,7 +56,7 @@ export function CharactersPage() {
   const [showAiCreate, setShowAiCreate] = useState(false);
   const [aiDescription, setAiDescription] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
-  const [aiResult, setAiResult] = useState<string | null>(null);
+  const [aiResult, setAiResult] = useState<AiCreateResult | null>(null);
   const [showNewRel, setShowNewRel] = useState(false);
   const [relForm, setRelForm] = useState({ targetId: "", relType: "盟友", description: "" });
   const projectRoot = useProjectStore((s) => s.currentProjectPath);
@@ -105,9 +110,12 @@ export function CharactersPage() {
     setAiLoading(true); setAiResult(null);
     try {
       const result = await aiGenerateCharacter(projectRoot, aiDescription);
-      setAiResult(result || "AI 已完成生成并自动入库。");
+      setAiResult({ status: "success", message: result || "AI 已完成生成并自动入库。" });
       await load();
-    } catch { setAiResult("AI 生成失败"); }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "AI 生成失败";
+      setAiResult({ status: "error", message });
+    }
     finally { setAiLoading(false); }
   }
 
@@ -267,11 +275,15 @@ export function CharactersPage() {
             {aiLoading ? "生成中..." : "生成并入库"}
           </Button>
           {aiResult && (
-            <div className="p-4 bg-surface-800 rounded-xl">
-              <p className="text-xs text-success mb-2">AI 结果已自动写入角色库。</p>
-              <pre className="text-sm text-surface-200 whitespace-pre-wrap font-sans">{aiResult}</pre>
+            <div className={`p-4 rounded-xl ${aiResult.status === "success" ? "bg-surface-800" : "bg-error/10 border border-error/30"}`}>
+              <p className={`text-xs mb-2 ${aiResult.status === "success" ? "text-success" : "text-error-light"}`}>
+                {aiResult.status === "success" ? "AI 结果已自动写入角色库。" : "AI 生成失败，未写入角色库。"}
+              </p>
+              <pre className="text-sm text-surface-200 whitespace-pre-wrap font-sans">{aiResult.message}</pre>
               <div className="flex gap-2 mt-3">
-                <Button variant="ghost" size="sm" onClick={() => setAiResult(null)}>重新生成</Button>
+                <Button variant="ghost" size="sm" onClick={() => setAiResult(null)}>
+                  {aiResult.status === "success" ? "重新生成" : "重试"}
+                </Button>
                 <Button variant="primary" size="sm" onClick={() => { setShowAiCreate(false); setAiDescription(""); setAiResult(null); }}>关闭</Button>
               </div>
             </div>

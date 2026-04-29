@@ -150,9 +150,7 @@ fn run_pending(
             label,
             applied_versions.len()
         );
-        return Ok(MigrationResult {
-            applied: vec![],
-        });
+        return Ok(MigrationResult { applied: vec![] });
     }
 
     // Apply each pending migration within a transaction

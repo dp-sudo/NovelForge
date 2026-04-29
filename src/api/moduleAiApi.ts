@@ -9,7 +9,12 @@ export async function runModuleAiTask(input: RunTaskPipelineInput): Promise<stri
       continue;
     }
     if (event.type === "error") {
-      throw new Error(event.message || event.errorCode || "AI 任务执行失败");
+      const message = event.message?.trim();
+      const errorCode = event.errorCode?.trim();
+      if (errorCode && message) {
+        throw new Error(`[${errorCode}] ${message}`);
+      }
+      throw new Error(message || errorCode || "AI 任务执行失败");
     }
   }
   return output.trim();

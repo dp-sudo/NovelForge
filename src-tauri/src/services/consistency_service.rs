@@ -11,12 +11,7 @@ use crate::infra::path_utils::resolve_project_relative_path;
 use crate::infra::time::now_iso;
 use crate::services::project_service::get_project_id;
 
-const AI_STYLE_PATTERNS: &[&str] = &[
-    "命运的齿轮",
-    "这一刻，他明白了",
-    "不禁让人",
-    "仿佛一切都",
-];
+const AI_STYLE_PATTERNS: &[&str] = &["命运的齿轮", "这一刻，他明白了", "不禁让人", "仿佛一切都"];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -78,11 +73,7 @@ impl ConsistencyService {
         let mut issues = Vec::new();
         for chapter in chapters {
             let chapter_content = self.read_chapter_content(project_root_path, &chapter)?;
-            issues.extend(self.build_chapter_issues(
-                &chapter.id,
-                &chapter_content,
-                &banned_terms,
-            ));
+            issues.extend(self.build_chapter_issues(&chapter.id, &chapter_content, &banned_terms));
         }
 
         self.replace_project_issues(&conn, &project_id, &issues)?;
@@ -224,8 +215,8 @@ impl ConsistencyService {
     ) -> Result<String, AppErrorDto> {
         let chapter_file = resolve_project_relative_path(project_root_path, &chapter.content_path)
             .map_err(|detail| {
-            AppErrorDto::new("CHAPTER_PATH_INVALID", "章节路径无效", true).with_detail(detail)
-        })?;
+                AppErrorDto::new("CHAPTER_PATH_INVALID", "章节路径无效", true).with_detail(detail)
+            })?;
         fs::read_to_string(&chapter_file).map_err(|e| {
             AppErrorDto::new("CHAPTER_READ_FAILED", "读取章节正文失败", true)
                 .with_detail(e.to_string())

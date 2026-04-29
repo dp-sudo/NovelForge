@@ -3,8 +3,8 @@
 //! Stores provider configurations, model registry, task routes, and app settings.
 //! Located at the per-user app data directory (`%LOCALAPPDATA%\\NovelForge` on Windows).
 
-use std::fs;
 use std::collections::{BTreeMap, HashSet};
+use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -91,7 +91,10 @@ fn pick_primary_route_seed(
     }
 
     for provider_id in PROVIDER_SEED_PRIORITY {
-        if let Some(provider) = providers.iter().find(|provider| provider.id == *provider_id) {
+        if let Some(provider) = providers
+            .iter()
+            .find(|provider| provider.id == *provider_id)
+        {
             let model_id = provider.default_model.as_deref().unwrap_or("").trim();
             if !model_id.is_empty() {
                 return Some((provider.id.clone(), model_id.to_string()));
@@ -117,7 +120,8 @@ fn ensure_default_task_routes_initialized(conn: &Connection) -> Result<(), AppEr
     }
 
     let providers = load_all_providers(conn)?;
-    let Some((provider_id, model_id)) = pick_primary_route_seed(&normalized_routes, &providers) else {
+    let Some((provider_id, model_id)) = pick_primary_route_seed(&normalized_routes, &providers)
+    else {
         return Ok(());
     };
 

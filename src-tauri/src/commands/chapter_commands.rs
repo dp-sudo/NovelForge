@@ -127,10 +127,11 @@ pub async fn autosave_draft(
         "autosave.start",
         &format!("requestId={}, chapter={}", request_id, input.chapter_id),
     );
-    match state
-        .chapter_service
-        .autosave_draft(&input.project_root, &input.chapter_id, &input.content)
-    {
+    match state.chapter_service.autosave_draft(
+        &input.project_root,
+        &input.chapter_id,
+        &input.content,
+    ) {
         Ok(draft_path) => {
             crate::infra::logger::log_user_action(
                 "autosave.done",
