@@ -1,7 +1,7 @@
 ---
 id: context.collect
 name: 收集上下文
-description: 内部服务技能 — 在生成或检查前自动收集当前章节相关的项目资产上下文，供 LLM 调用填充模板变量
+description: 内部服务技能，在生成或审阅前收集章节相关上下文，保障Prompt有足够信息密度
 version: 3
 source: builtin
 category: utility
@@ -20,37 +20,70 @@ writesToProject: false
 author: NovelForge
 icon: "📚"
 createdAt: 2026-04-28
-updatedAt: 2026-04-28
+updatedAt: 2026-04-29
 ---
 
 # 收集上下文
 
 ## 说明
 
-内部服务技能，由 ContextService 自动调用。不会出现在 AI Command Bar 中向用户展示，也不消耗 LLM 调用配额。
+内部服务技能，由 ContextService 自动调用。目标是减少“AI凭空补设定”的概率，提高一键生成质量。
 
-## 采集范围
+## 收集策略
 
-根据当前章节 ID 和 scope 参数，从项目数据库中采集：
+1. current_chapter：优先当前章相关资产，降低噪声。
+2. full：全量收集，适用于一致性审阅和终检。
 
-| 上下文类型 | 数据来源 | 填充变量 |
-|------------|----------|----------|
-| 项目元数据 | project.json | {projectContext} |
-| 当前章节信息 | chapters 表 | {chapterContext} |
-| 本章涉及的角色 | characters 表 | — |
-| 世界观规则 | world_rules 表 | — |
-| 当前剧情节点 | plot_nodes 表 | — |
-| 前 N 章概要 | chapters 表 | — |
+## 必收字段
 
-## scope 参数行为
+1. 项目层：题材、叙事视角、写作风格、蓝图摘要。
+2. 章节层：章节目标、当前摘要、前章摘要。
+3. 资产层：角色、世界规则、剧情节点、关系边。
 
-- `current_chapter` — 只收集与本章直接相关的上下文（角色、地点、当前剧情弧）
-- `full` — 收集所有项目资产的完整列表
+## 变量覆盖说明（新增）
 
-## 使用场景
+### 标准输出变量
 
-```
-生成章节草稿  → collect(chapterId, current_chapter) → 填充 {projectContext} + {chapterContext}
-一致性扫描    → collect(chapterId, full)             → 填充 {projectContext} + {chapterContext}
-续写          → collect(chapterId, current_chapter)  → 填充 {projectContext}
-```
+1. projectContext：项目全局上下文拼接文本。
+2. chapterContext：当前章节上下文拼接文本。
+
+### 输入别名映射（由运行时注入）
+
+1. userInstruction -> userDescription（创建类任务别名）
+2. selectedText -> precedingText（续写任务回退别名）
+3. chapterContent -> content（导入/扫描兼容别名）
+4. blueprint_step_title -> stepTitle（蓝图任务别名）
+5. blueprint_step_key -> stepKey（蓝图任务别名）
+
+### 任务-变量覆盖矩阵
+
+1. chapter.draft / chapter.plan：projectContext + chapterContext + userInstruction + targetWords。
+2. chapter.continue：projectContext + chapterContext + precedingText + userInstruction。
+3. consistency.scan：projectContext + chapterContext + chapterContent。
+4. character/world/plot/glossary/narrative.create：projectContext + userDescription。
+5. review类（timeline/relationship/dashboard/export）：projectContext + userInstruction。
+
+## 质量要求
+
+1. 信息可追溯：每条上下文应有来源表或来源文件。
+2. 信息有边界：避免把历史噪声混入当前章生成。
+3. 信息可压缩：优先提取“可驱动生成”的关键事实。
+4. 变量可落地：必须能映射到任务模板中的占位符。
+
+<!-- PROMPT_TEMPLATE_START -->
+你是上下文收集服务。根据输入参数输出本次AI任务所需上下文采集计划。
+
+[章节ID]
+{chapterId}
+
+[收集范围]
+{scope}
+
+执行要求：
+1. 指定要收集的项目层、章节层、资产层数据清单。
+2. 对每类数据给出来源与过滤规则。
+3. 标注结果将填充到哪些标准变量（projectContext/chapterContext等）。
+4. 明确本次任务需要的别名映射与覆盖变量。
+
+输出格式：结构化文本，不要生成小说内容。
+<!-- PROMPT_TEMPLATE_END -->
