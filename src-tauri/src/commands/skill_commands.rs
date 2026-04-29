@@ -1,7 +1,5 @@
 use tauri::State;
-use uuid::Uuid;
 
-use crate::adapters::llm_types::ProviderConfig;
 use crate::errors::AppErrorDto;
 use crate::services::skill_registry::SkillManifest;
 use crate::state::AppState;

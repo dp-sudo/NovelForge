@@ -279,7 +279,7 @@ pub async fn list_task_routes(_state: State<'_, AppState>) -> Result<Vec<TaskRou
 #[tauri::command]
 pub async fn save_task_route(
     route: TaskRoute,
-    state: State<'_, AppState>,
+    _state: State<'_, AppState>,
 ) -> Result<TaskRoute, AppErrorDto> {
     let now = crate::infra::time::now_iso();
     let conn = app_database::open_or_create()?;
@@ -343,7 +343,7 @@ pub async fn save_task_route(
 #[tauri::command]
 pub async fn delete_task_route(
     route_id: String,
-    state: State<'_, AppState>,
+    _state: State<'_, AppState>,
 ) -> Result<(), AppErrorDto> {
     let conn = app_database::open_or_create()?;
     let routes = app_database::load_task_routes(&conn)?;

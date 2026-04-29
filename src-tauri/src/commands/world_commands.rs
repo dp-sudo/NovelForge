@@ -1,7 +1,7 @@
 use tauri::State;
 
 use crate::errors::AppErrorDto;
-use crate::services::world_service::{CreateWorldRuleInput, WorldService};
+use crate::services::world_service::CreateWorldRuleInput;
 use crate::state::AppState;
 
 #[tauri::command]

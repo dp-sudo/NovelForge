@@ -2,17 +2,14 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use tokio::sync::{mpsc, RwLock};
-use uuid::Uuid;
 
 use crate::adapters::{
     anthropic::AnthropicAdapter, gemini::GeminiAdapter, llm_service::LlmService, llm_types::*,
     openai_compatible::OpenAiCompatibleAdapter,
 };
 use crate::errors::AppErrorDto;
-use crate::infra::database::open_database;
-use crate::infra::time::now_iso;
 use crate::infra::{app_database, credential_manager};
-use crate::services::skill_registry::{SkillRegistry, SkillTaskRouteOverride};
+use crate::services::skill_registry::SkillRegistry;
 use crate::services::task_routing;
 
 const PIPELINE_STREAM_ERROR_PREFIX: &str = "__NF_PIPELINE_ERROR__:";
@@ -299,64 +296,6 @@ impl AiService {
         Self::resolve_request_target(req)
     }
 
-    /// Execute text generation with task routing + fallback.
-    /// Optionally accepts a SkillRegistry for skill taskRoute override support.
-    pub async fn generate_text(
-        &self,
-        req: UnifiedGenerateRequest,
-        skill_registry: Option<&SkillRegistry>,
-    ) -> Result<UnifiedGenerateResponse, AppErrorDto> {
-        let (provider_id, model, route) = match skill_registry {
-            Some(reg) => Self::resolve_with_skill_override(&req, reg)?,
-            None => Self::resolve_request_target(&req)?,
-        };
-
-        let attempts = Self::build_attempt_chain(&provider_id, &model, route.as_ref());
-
-        let mut last_error = None;
-        for (attempt_provider, attempt_model_hint) in attempts {
-            let resolved_model =
-                match Self::resolve_request_model(&attempt_provider, &attempt_model_hint) {
-                    Ok(model_id) => model_id,
-                    Err(_) => {
-                        last_error = Some(LlmError::ModelNotFound);
-                        continue;
-                    }
-                };
-
-            if self
-                .ensure_provider_registered(&attempt_provider)
-                .await
-                .is_err()
-            {
-                last_error = Some(LlmError::ModelNotFound);
-                continue;
-            }
-
-            let guard = self.adapters.read().await;
-            if let Some(adapter) = guard.get(&attempt_provider) {
-                let mut attempt_req = req.clone();
-                attempt_req.provider_id = Some(attempt_provider.clone());
-                attempt_req.model = resolved_model;
-                match adapter.generate_text(attempt_req).await {
-                    Ok(resp) => return Ok(resp),
-                    Err(e) => {
-                        last_error = Some(e);
-                        continue;
-                    }
-                }
-            } else {
-                last_error = Some(LlmError::ModelNotFound);
-                continue;
-            }
-        }
-
-        Err(match last_error {
-            Some(e) => AppErrorDto::from(e),
-            None => AppErrorDto::new("LLM_GENERATE_FAILED", "All providers failed", false),
-        })
-    }
-
     fn encode_pipeline_stream_error(error: &AppErrorDto) -> String {
         format!(
             "{}{}::{}",
@@ -372,17 +311,6 @@ impl AiService {
             return None;
         }
         Some((code.to_string(), message.to_string()))
-    }
-
-    /// Start streaming generation with task routing.
-    /// Returns an mpsc receiver that yields StreamChunks.
-    /// Optionally accepts a SkillRegistry for skill taskRoute override support.
-    pub async fn stream_generate(
-        &self,
-        req: UnifiedGenerateRequest,
-        skill_registry: Option<&SkillRegistry>,
-    ) -> Result<mpsc::Receiver<StreamChunk>, AppErrorDto> {
-        self.stream_generate_inner(req, skill_registry, false).await
     }
 
     /// Start streaming generation with diagnostic error envelope for pipeline consumers.
@@ -485,77 +413,6 @@ impl AiService {
         adapter.test_connection().await.map_err(Into::into)
     }
 
-    // ── AI request logging ──
-
-    /// Record an AI request in the project database for traceability.
-    pub fn log_ai_request(
-        &self,
-        project_root: &str,
-        task_type: &str,
-        provider: Option<&str>,
-        model: Option<&str>,
-        prompt_preview: &str,
-        status: &str,
-    ) -> Result<String, AppErrorDto> {
-        let conn = open_database(std::path::Path::new(project_root)).map_err(|err| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(err.to_string())
-        })?;
-
-        let project_id = crate::services::project_service::get_project_id(&conn)?;
-        let request_id = Uuid::new_v4().to_string();
-        let now = now_iso();
-
-        // Truncate prompt preview for logging
-        let preview: String = prompt_preview.chars().take(240).collect();
-
-        conn.execute(
-            "INSERT INTO ai_requests(id, project_id, task_type, provider, model, prompt_preview, status, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            rusqlite::params![request_id, project_id, task_type, provider, model, preview, status, now],
-        ).map_err(|err| {
-            AppErrorDto::new("AI_LOG_FAILED", "记录 AI 请求失败", false)
-                .with_detail(err.to_string())
-        })?;
-
-        Ok(request_id)
-    }
-
-    /// Update an AI request record with completion info.
-    pub fn complete_ai_request(
-        &self,
-        project_root: &str,
-        request_id: &str,
-        status: &str,
-        error_code: Option<&str>,
-        error_message: Option<&str>,
-    ) {
-        if let Ok(conn) = open_database(std::path::Path::new(project_root)) {
-            let now = now_iso();
-            let _ = conn.execute(
-                "UPDATE ai_requests SET status = ?1, error_code = ?2, error_message = ?3, completed_at = ?4 WHERE id = ?5",
-                rusqlite::params![status, error_code, error_message, now, request_id],
-            );
-        }
-    }
-}
-
-// ── Legacy preview types (kept for backward compatibility) ──
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AiPreviewResult {
-    pub request_id: String,
-    pub preview: String,
-    pub used_context: Vec<String>,
-    pub risks: Vec<String>,
-}
-
-#[derive(Debug, Clone, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GeneratePreviewInput {
-    pub task_type: String,
-    pub user_instruction: String,
-    pub chapter_id: Option<String>,
-    pub selected_text: Option<String>,
 }
 
 #[cfg(test)]

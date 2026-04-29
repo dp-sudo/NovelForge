@@ -1,6 +1,5 @@
 mod adapters;
 mod commands;
-mod domain;
 mod errors;
 mod infra;
 mod services;

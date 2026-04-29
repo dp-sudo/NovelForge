@@ -23,6 +23,5 @@ pub mod search_service;
 pub mod settings_service;
 pub mod skill_registry;
 pub mod task_routing;
-pub mod token_budget;
 pub mod vector_service;
 pub mod world_service;

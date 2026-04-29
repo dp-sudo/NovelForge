@@ -5,7 +5,6 @@ use std::time::Instant;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tauri::Emitter;
-use uuid::Uuid;
 
 use crate::errors::AppErrorDto;
 use crate::services::ai_pipeline::audit_store::PipelineAuditStore;
@@ -85,26 +84,6 @@ pub struct AiPipelineService {
 }
 
 impl AiPipelineService {
-    pub async fn run_ai_task_pipeline(
-        &self,
-        app_handle: &tauri::AppHandle,
-        ai_service: &AiService,
-        context_service: &ContextService,
-        skill_registry: &Arc<RwLock<SkillRegistry>>,
-        input: RunAiTaskPipelineInput,
-    ) -> Result<RunAiTaskPipelineResult, AppErrorDto> {
-        let request_id = Uuid::new_v4().to_string();
-        self.run_ai_task_pipeline_with_request_id(
-            app_handle,
-            ai_service,
-            context_service,
-            skill_registry,
-            request_id,
-            input,
-        )
-        .await
-    }
-
     pub async fn run_ai_task_pipeline_with_request_id(
         &self,
         app_handle: &tauri::AppHandle,

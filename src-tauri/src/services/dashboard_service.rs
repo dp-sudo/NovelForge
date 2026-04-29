@@ -3,7 +3,6 @@ use serde::Serialize;
 
 use crate::errors::AppErrorDto;
 use crate::infra::database::open_database;
-use crate::infra::time::now_iso;
 use crate::services::project_service::get_project_id;
 use std::path::Path;
 

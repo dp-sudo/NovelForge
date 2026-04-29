@@ -304,17 +304,3 @@ pub struct TaskRoute {
     pub created_at: Option<String>,
     pub updated_at: Option<String>,
 }
-
-// ── ModelInfo (registry) ──
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ModelInfo {
-    pub model_id: String,
-    pub provider: String,
-    pub display_name: String,
-    pub context_window: u32,
-    pub max_output_tokens: u32,
-    pub supports_streaming: bool,
-    pub supports_tools: bool,
-}

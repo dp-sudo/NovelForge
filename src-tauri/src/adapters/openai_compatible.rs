@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use async_trait::async_trait;
 use futures_util::StreamExt;
 use reqwest::Client;
@@ -599,7 +597,7 @@ impl OpenAiCompatibleAdapter {
         }
     }
 
-    async fn test_json_object(&self, model: &str, provider_id: &str) -> Result<bool, LlmError> {
+    async fn test_json_object(&self, model: &str, _provider_id: &str) -> Result<bool, LlmError> {
         // Build a raw request with response_format
         let url = self.endpoint_url();
         let (header_name, header_value) = match self.auth_header() {
@@ -639,7 +637,7 @@ impl OpenAiCompatibleAdapter {
         }
     }
 
-    async fn test_tools(&self, model: &str, provider_id: &str) -> Result<bool, LlmError> {
+    async fn test_tools(&self, model: &str, _provider_id: &str) -> Result<bool, LlmError> {
         let url = self.endpoint_url();
         let (header_name, header_value) = match self.auth_header() {
             Ok(v) => v,

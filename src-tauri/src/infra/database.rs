@@ -4,13 +4,11 @@ use std::path::{Path, PathBuf};
 use log::info;
 use rusqlite::{Connection, Result as SqlResult};
 
-use crate::errors::AppErrorDto;
-
 pub fn get_database_path(project_root: &Path) -> PathBuf {
     project_root.join("database").join("project.sqlite")
 }
 
-pub fn initialize_database(project_root: &Path, now: &str) -> SqlResult<()> {
+pub fn initialize_database(project_root: &Path) -> SqlResult<()> {
     let db_path = get_database_path(project_root);
     if let Some(parent) = db_path.parent() {
         let _ = fs::create_dir_all(parent);

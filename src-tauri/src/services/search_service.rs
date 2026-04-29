@@ -20,56 +20,6 @@ pub struct SearchResult {
 pub struct SearchService;
 
 impl SearchService {
-    /// Index a single entity into the FTS5 search index.
-    pub fn index_entity(
-        &self,
-        project_root: &str,
-        entity_type: &str,
-        entity_id: &str,
-        title: &str,
-        body: &str,
-    ) -> Result<(), AppErrorDto> {
-        let conn = open_database(Path::new(project_root)).map_err(|e| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
-        })?;
-        conn.execute(
-            "DELETE FROM search_index WHERE entity_type = ?1 AND entity_id = ?2",
-            params![entity_type, entity_id],
-        )
-        .map_err(|e| {
-            AppErrorDto::new("SEARCH_INDEX_FAILED", "索引写入失败", true).with_detail(e.to_string())
-        })?;
-        conn.execute(
-            "INSERT INTO search_index(entity_type, entity_id, title, body) VALUES (?1, ?2, ?3, ?4)",
-            params![entity_type, entity_id, title, body],
-        )
-        .map_err(|e| {
-            AppErrorDto::new("SEARCH_INDEX_FAILED", "索引写入失败", true).with_detail(e.to_string())
-        })?;
-        Ok(())
-    }
-
-    /// Delete an entity from the search index.
-    pub fn delete_entity(
-        &self,
-        project_root: &str,
-        entity_type: &str,
-        entity_id: &str,
-    ) -> Result<(), AppErrorDto> {
-        let conn = open_database(Path::new(project_root)).map_err(|e| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
-        })?;
-        conn.execute(
-            "DELETE FROM search_index WHERE entity_type = ?1 AND entity_id = ?2",
-            params![entity_type, entity_id],
-        )
-        .map_err(|e| {
-            AppErrorDto::new("SEARCH_DELETE_FAILED", "索引删除失败", true)
-                .with_detail(e.to_string())
-        })?;
-        Ok(())
-    }
-
     /// Search across all indexed entities. Returns results ranked by relevance.
     pub fn search(
         &self,
