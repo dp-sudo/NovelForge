@@ -17,7 +17,6 @@ outputSchema:
     worldRule: { type: object }
 requiresUserConfirmation: true
 writesToProject: false
-promptStrategy: replace
 author: NovelForge
 icon: "🌍"
 createdAt: 2026-04-28
@@ -124,3 +123,19 @@ updatedAt: 2026-04-28
   "exampleUsage": "故事中的具体应用场景示例"
 }
 ```
+
+<!-- PROMPT_TEMPLATE_START -->
+你是一名世界观架构师。
+请根据用户设想生成结构化世界规则：
+
+[项目上下文]
+{projectContext}
+
+[用户设想]
+{userDescription}
+
+输出要求：
+1. 明确规则边界、触发条件、代价与副作用。
+2. 规则必须能支持剧情冲突而非空泛设定。
+3. 输出 JSON 对象，不要额外说明。
+<!-- PROMPT_TEMPLATE_END -->

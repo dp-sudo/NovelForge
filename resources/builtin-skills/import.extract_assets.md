@@ -17,7 +17,6 @@ outputSchema:
     assets: { type: object }
 requiresUserConfirmation: true
 writesToProject: true
-promptStrategy: replace
 author: NovelForge
 icon: "📥"
 createdAt: 2026-04-28

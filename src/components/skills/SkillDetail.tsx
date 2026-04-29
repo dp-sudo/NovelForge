@@ -132,7 +132,6 @@ export function SkillDetail({ skill, onDeleted, onUpdated }: SkillDetailProps) {
       <div className="flex flex-wrap gap-3 mb-4 shrink-0 text-xs text-surface-400">
         <span>{skill.requiresUserConfirmation ? "需要确认" : "自动执行"}</span>
         <span>{skill.writesToProject ? "写入项目" : "不写入"}</span>
-        <span>策略: {skill.promptStrategy}</span>
       </div>
 
       {/* Content preview */}

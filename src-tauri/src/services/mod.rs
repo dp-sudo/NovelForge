@@ -18,7 +18,6 @@ pub mod model_registry_service;
 pub mod narrative_service;
 pub mod plot_service;
 pub mod project_service;
-pub mod prompt_builder;
 pub mod search_service;
 pub mod settings_service;
 pub mod skill_registry;

@@ -19,7 +19,6 @@ outputSchema:
     continuation: { type: string }
 requiresUserConfirmation: true
 writesToProject: false
-promptStrategy: append
 author: NovelForge
 icon: "📝"
 createdAt: 2026-04-28
@@ -110,3 +109,23 @@ updatedAt: 2026-04-28
 - 续写的前 50 字读起来应像是原文本的自然延伸
 - 每 300-500 字检查一次节奏，需要时切换叙述焦点
 - 不写以下段落开头："接着"、"然后"、"接下来"、"与此同时"（除非前文已经使用了这类时间标记）
+
+<!-- PROMPT_TEMPLATE_START -->
+你是一名续写作者。
+请在不重复前文信息的前提下，紧接已有文本继续写作：
+
+[项目上下文]
+{projectContext}
+
+[前文]
+{precedingText}
+
+[用户指令]
+{userInstruction}
+
+要求：
+1. 续写内容要和前文语气、视角、时态一致。
+2. 第一段必须与前文最后状态直接衔接。
+3. 避免重复陈述已发生情节。
+4. 仅输出续写正文。
+<!-- PROMPT_TEMPLATE_END -->

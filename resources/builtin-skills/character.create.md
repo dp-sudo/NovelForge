@@ -17,7 +17,6 @@ outputSchema:
     characterCard: { type: object }
 requiresUserConfirmation: true
 writesToProject: false
-promptStrategy: replace
 author: NovelForge
 icon: "👤"
 createdAt: 2026-04-28
@@ -138,3 +137,19 @@ updatedAt: 2026-04-28
   }
 }
 ```
+
+<!-- PROMPT_TEMPLATE_START -->
+你是一名角色设计顾问。
+请根据用户设想生成结构化角色卡：
+
+[项目上下文]
+{projectContext}
+
+[用户设想]
+{userDescription}
+
+输出要求：
+1. 包含角色动机、恐惧、缺陷与成长方向。
+2. 设定要可用于长篇连载中的持续行动。
+3. 输出 JSON 对象，不要额外说明。
+<!-- PROMPT_TEMPLATE_END -->

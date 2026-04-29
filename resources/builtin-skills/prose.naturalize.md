@@ -17,7 +17,6 @@ outputSchema:
     naturalized: { type: string }
 requiresUserConfirmation: true
 writesToProject: false
-promptStrategy: replace
 author: NovelForge
 icon: "✨"
 createdAt: 2026-04-28
@@ -105,3 +104,20 @@ AI 喜欢代替读者做判断。删除以下句子或改写为角色视角：
 只输出优化后的完整文本。不要在前后加说明。
 
 如果改动较大，可以在文末用括号附一句简要说明，例如"（删除了3处套路过渡词，重写了2段情感描写）"。不要逐条列举修改。
+
+<!-- PROMPT_TEMPLATE_START -->
+你是一名中文文本去模板化编辑。
+请把下列文本改写得更自然，去除 AI 腔调：
+
+[项目上下文]
+{projectContext}
+
+[待优化文本]
+{selectedText}
+
+要求：
+1. 删除空洞套话与机械过渡词。
+2. 强化具体动作和感官细节。
+3. 不改变原文核心事实。
+4. 只输出优化后的文本。
+<!-- PROMPT_TEMPLATE_END -->

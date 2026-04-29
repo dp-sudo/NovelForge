@@ -17,7 +17,8 @@ use crate::infra::time::now_iso;
 const PROJECT_SCHEMA_VERSION: &str = "1.0.0";
 const PROJECT_APP_MIN_VERSION: &str = "0.1.0";
 
-const REQUIRED_DIRS: [&str; 15] = [
+// 问题2修复: 移除未接入的 prompts 目录初始化残留。
+const REQUIRED_DIRS: [&str; 14] = [
     "database",
     "database/backups",
     "manuscript",
@@ -30,7 +31,6 @@ const REQUIRED_DIRS: [&str; 15] = [
     "assets/attachments",
     "exports",
     "backups",
-    "prompts",
     "workflows",
     "logs",
 ];

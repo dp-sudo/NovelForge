@@ -14,7 +14,6 @@ export interface SkillManifest {
   outputSchema: Record<string, unknown>;
   requiresUserConfirmation: boolean;
   writesToProject: boolean;
-  promptStrategy: string;
   author?: string;
   icon?: string;
   createdAt: string;

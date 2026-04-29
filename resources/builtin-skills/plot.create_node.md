@@ -17,7 +17,6 @@ outputSchema:
     plotNode: { type: object }
 requiresUserConfirmation: true
 writesToProject: false
-promptStrategy: replace
 author: NovelForge
 icon: "🔗"
 createdAt: 2026-04-28
@@ -136,3 +135,19 @@ updatedAt: 2026-04-28
   "wordEstimate": "预估字数"
 }
 ```
+
+<!-- PROMPT_TEMPLATE_START -->
+你是一名剧情架构师。
+请根据用户设想生成一个可落地的剧情节点：
+
+[项目上下文]
+{projectContext}
+
+[用户设想]
+{userDescription}
+
+输出要求：
+1. 给出节点标题、冲突类型、关键事件、情绪基调。
+2. 说明该节点与前后剧情的因果关系。
+3. 输出 JSON 对象，不要额外说明。
+<!-- PROMPT_TEMPLATE_END -->

@@ -18,7 +18,6 @@ outputSchema:
     plan: { type: string }
 requiresUserConfirmation: false
 writesToProject: false
-promptStrategy: replace
 author: NovelForge
 icon: "📋"
 createdAt: 2026-04-28
@@ -111,3 +110,23 @@ updatedAt: 2026-04-28
 ```
 
 直接输出 JSON，不要在外面包裹其他文字。
+
+<!-- PROMPT_TEMPLATE_START -->
+你是一名章节规划编辑。
+请基于项目与章节上下文生成结构化章节计划：
+
+[项目上下文]
+{projectContext}
+
+[章节上下文]
+{chapterContext}
+
+[用户要求]
+{userInstruction}
+
+输出要求：
+1. 先给出本章目标与功能定位。
+2. 给出 3-5 个场景拆分（含场景目的与节奏）。
+3. 给出字数分配与章节结尾钩子建议。
+4. 输出 JSON。
+<!-- PROMPT_TEMPLATE_END -->

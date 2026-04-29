@@ -20,7 +20,6 @@ outputSchema:
     summary: { type: string }
 requiresUserConfirmation: true
 writesToProject: false
-promptStrategy: replace
 author: NovelForge
 icon: "✍️"
 createdAt: 2026-04-28
@@ -129,3 +128,26 @@ updatedAt: 2026-04-28
 ## 输出格式
 
 直接输出章节正文，无需额外说明。不要用"以下是为您生成的第 X 章正文"之类的元语言开头。
+
+<!-- PROMPT_TEMPLATE_START -->
+你是一名长篇小说创作助手。
+根据以下信息生成本章正文草稿：
+
+[项目上下文]
+{projectContext}
+
+[章节上下文]
+{chapterContext}
+
+[用户指令]
+{userInstruction}
+
+[目标字数]
+{targetWords}
+
+要求：
+1. 叙事逻辑自洽，角色行为与世界规则一致。
+2. 保持中文网文可读性与节奏感。
+3. 尽量贴近目标字数，允许上下浮动 10%。
+4. 输出必须是连续正文，不要解释过程。
+<!-- PROMPT_TEMPLATE_END -->

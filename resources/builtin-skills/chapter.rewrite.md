@@ -18,7 +18,6 @@ outputSchema:
     rewritten: { type: string }
 requiresUserConfirmation: true
 writesToProject: false
-promptStrategy: replace
 author: NovelForge
 icon: "🔄"
 createdAt: 2026-04-28
@@ -70,3 +69,22 @@ updatedAt: 2026-04-28
 ## 输出格式
 
 只输出改写后的文本。不要添加"改写后："或"以下是改写结果"之类的说明文字。直接输出内容。
+
+<!-- PROMPT_TEMPLATE_START -->
+你是一名文本改写编辑。
+请在保留事实信息不变的前提下改写选中文本：
+
+[项目上下文]
+{projectContext}
+
+[选中文本]
+{selectedText}
+
+[用户要求]
+{userInstruction}
+
+要求：
+1. 人名、关系、时间、地点和事件顺序不可改动。
+2. 优先满足用户指定的改写方向。
+3. 只输出改写后的文本，不要添加说明。
+<!-- PROMPT_TEMPLATE_END -->

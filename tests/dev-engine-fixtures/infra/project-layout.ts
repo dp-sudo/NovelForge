@@ -14,7 +14,6 @@ const REQUIRED_DIRS = [
   "assets/attachments",
   "exports",
   "backups",
-  "prompts",
   "workflows",
   "logs"
 ];

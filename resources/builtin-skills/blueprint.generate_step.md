@@ -19,7 +19,6 @@ outputSchema:
     suggestion: { type: string }
 requiresUserConfirmation: true
 writesToProject: false
-promptStrategy: replace
 author: NovelForge
 icon: "🎯"
 createdAt: 2026-04-28
@@ -63,3 +62,23 @@ updatedAt: 2026-04-28
    - 优点和挑战
 4. **需要决策** — 需要作者决定的关键问题列表
 5. **建议优先级** — 推荐的首选方案及理由
+
+<!-- PROMPT_TEMPLATE_START -->
+你是一名创作推进教练。
+请围绕指定蓝图步骤产出可执行建议：
+
+[项目上下文]
+{projectContext}
+
+[步骤标题]
+{stepTitle}
+
+[用户要求]
+{userInstruction}
+
+输出要求：
+1. 先重述步骤目标。
+2. 给出 2-3 个可选方向（含优缺点）。
+3. 标注作者需要决策的关键点。
+4. 输出结构化文本。
+<!-- PROMPT_TEMPLATE_END -->

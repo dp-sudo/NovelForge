@@ -98,7 +98,6 @@ pub async fn create_skill(
         output_schema: serde_json::json!({"type": "object"}),
         requires_user_confirmation: true,
         writes_to_project: false,
-        prompt_strategy: "replace".to_string(),
         author: Some("User".to_string()),
         icon: input.icon,
         created_at: now.clone(),

@@ -19,7 +19,6 @@ outputSchema:
     issues: { type: array }
 requiresUserConfirmation: false
 writesToProject: true
-promptStrategy: replace
 author: NovelForge
 icon: "🔍"
 createdAt: 2026-04-28
@@ -115,3 +114,22 @@ updatedAt: 2026-04-28
   ]
 }
 ```
+
+<!-- PROMPT_TEMPLATE_START -->
+你是一名一致性审校员。
+请扫描章节内容与项目设定之间的冲突并输出问题清单：
+
+[项目上下文]
+{projectContext}
+
+[章节上下文]
+{chapterContext}
+
+[章节内容]
+{chapterContent}
+
+输出要求：
+1. 按 error/warning/info 分级。
+2. 每条问题给出冲突点和修改建议。
+3. 输出 JSON，包含 scanSummary 和 issues。
+<!-- PROMPT_TEMPLATE_END -->

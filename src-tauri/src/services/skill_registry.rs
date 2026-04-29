@@ -24,8 +24,6 @@ pub struct SkillManifest {
     #[serde(default = "default_true")]
     pub requires_user_confirmation: bool,
     pub writes_to_project: bool,
-    #[serde(default = "default_strategy")]
-    pub prompt_strategy: String,
     pub author: Option<String>,
     pub icon: Option<String>,
     pub created_at: String,
@@ -47,9 +45,6 @@ pub struct SkillTaskRouteOverride {
 
 fn default_true() -> bool {
     true
-}
-fn default_strategy() -> String {
-    "replace".to_string()
 }
 
 /// Parsed skill file: metadata + body text.
@@ -203,6 +198,15 @@ impl SkillRegistry {
             AppErrorDto::new("SKILLS_READ_FAILED", "Cannot read skill file", true)
                 .with_detail(e.to_string())
         })
+    }
+
+    /// Read prompt template body for runtime rendering.
+    pub fn read_skill_prompt_template(&self, id: &str) -> Result<Option<String>, AppErrorDto> {
+        let Some(content) = self.read_skill_content(id)? else {
+            return Ok(None);
+        };
+        let (_frontmatter, body) = split_frontmatter(&content)?;
+        Ok(Some(extract_prompt_template_body(body)))
     }
 
     /// Create a new skill from manifest + body content.
@@ -444,6 +448,21 @@ fn split_frontmatter(content: &str) -> Result<(&str, &str), AppErrorDto> {
             true,
         ))
     }
+}
+
+const PROMPT_TEMPLATE_START: &str = "<!-- PROMPT_TEMPLATE_START -->";
+const PROMPT_TEMPLATE_END: &str = "<!-- PROMPT_TEMPLATE_END -->";
+
+// 问题4修复: 运行时仅提取模板正文，不再把 frontmatter/说明文档直接发送给 LLM。
+fn extract_prompt_template_body(body: &str) -> String {
+    let trimmed = body.trim();
+    if let Some(start) = trimmed.find(PROMPT_TEMPLATE_START) {
+        let after_start = &trimmed[start + PROMPT_TEMPLATE_START.len()..];
+        if let Some(end) = after_start.find(PROMPT_TEMPLATE_END) {
+            return after_start[..end].trim().to_string();
+        }
+    }
+    trimmed.to_string()
 }
 
 /// Render manifest to YAML frontmatter + body = complete .md file.
