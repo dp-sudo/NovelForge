@@ -56,6 +56,7 @@ pub struct CreateCharacterInput {
 pub struct UpdateCharacterInput {
     pub id: String,
     pub name: Option<String>,
+    pub aliases: Option<Vec<String>>,
     pub role_type: Option<String>,
     pub age: Option<String>,
     pub gender: Option<String>,
@@ -65,6 +66,8 @@ pub struct UpdateCharacterInput {
     pub desire: Option<String>,
     pub fear: Option<String>,
     pub flaw: Option<String>,
+    pub arc_stage: Option<String>,
+    pub locked_fields: Option<Vec<String>>,
     pub notes: Option<String>,
 }
 
@@ -167,6 +170,111 @@ impl CharacterService {
             conn.execute(
                 "UPDATE characters SET age = ?1, updated_at = ?2 WHERE id = ?3",
                 params![age, now, input.id],
+            )
+            .map_err(|e| {
+                AppErrorDto::new("UPDATE_FAILED", "更新角色失败", true).with_detail(e.to_string())
+            })?;
+        }
+        if let Some(aliases) = &input.aliases {
+            let aliases_json = serde_json::to_string(aliases).map_err(|e| {
+                AppErrorDto::new("UPDATE_FAILED", "更新角色失败", true).with_detail(e.to_string())
+            })?;
+            conn.execute(
+                "UPDATE characters SET aliases = ?1, updated_at = ?2 WHERE id = ?3",
+                params![aliases_json, now, input.id],
+            )
+            .map_err(|e| {
+                AppErrorDto::new("UPDATE_FAILED", "更新角色失败", true).with_detail(e.to_string())
+            })?;
+        }
+        if let Some(gender) = &input.gender {
+            conn.execute(
+                "UPDATE characters SET gender = ?1, updated_at = ?2 WHERE id = ?3",
+                params![gender, now, input.id],
+            )
+            .map_err(|e| {
+                AppErrorDto::new("UPDATE_FAILED", "更新角色失败", true).with_detail(e.to_string())
+            })?;
+        }
+        if let Some(identity_text) = &input.identity_text {
+            conn.execute(
+                "UPDATE characters SET identity_text = ?1, updated_at = ?2 WHERE id = ?3",
+                params![identity_text, now, input.id],
+            )
+            .map_err(|e| {
+                AppErrorDto::new("UPDATE_FAILED", "更新角色失败", true).with_detail(e.to_string())
+            })?;
+        }
+        if let Some(appearance) = &input.appearance {
+            conn.execute(
+                "UPDATE characters SET appearance = ?1, updated_at = ?2 WHERE id = ?3",
+                params![appearance, now, input.id],
+            )
+            .map_err(|e| {
+                AppErrorDto::new("UPDATE_FAILED", "更新角色失败", true).with_detail(e.to_string())
+            })?;
+        }
+        if let Some(motivation) = &input.motivation {
+            conn.execute(
+                "UPDATE characters SET motivation = ?1, updated_at = ?2 WHERE id = ?3",
+                params![motivation, now, input.id],
+            )
+            .map_err(|e| {
+                AppErrorDto::new("UPDATE_FAILED", "更新角色失败", true).with_detail(e.to_string())
+            })?;
+        }
+        if let Some(desire) = &input.desire {
+            conn.execute(
+                "UPDATE characters SET desire = ?1, updated_at = ?2 WHERE id = ?3",
+                params![desire, now, input.id],
+            )
+            .map_err(|e| {
+                AppErrorDto::new("UPDATE_FAILED", "更新角色失败", true).with_detail(e.to_string())
+            })?;
+        }
+        if let Some(fear) = &input.fear {
+            conn.execute(
+                "UPDATE characters SET fear = ?1, updated_at = ?2 WHERE id = ?3",
+                params![fear, now, input.id],
+            )
+            .map_err(|e| {
+                AppErrorDto::new("UPDATE_FAILED", "更新角色失败", true).with_detail(e.to_string())
+            })?;
+        }
+        if let Some(flaw) = &input.flaw {
+            conn.execute(
+                "UPDATE characters SET flaw = ?1, updated_at = ?2 WHERE id = ?3",
+                params![flaw, now, input.id],
+            )
+            .map_err(|e| {
+                AppErrorDto::new("UPDATE_FAILED", "更新角色失败", true).with_detail(e.to_string())
+            })?;
+        }
+        if let Some(arc_stage) = &input.arc_stage {
+            conn.execute(
+                "UPDATE characters SET arc_stage = ?1, updated_at = ?2 WHERE id = ?3",
+                params![arc_stage, now, input.id],
+            )
+            .map_err(|e| {
+                AppErrorDto::new("UPDATE_FAILED", "更新角色失败", true).with_detail(e.to_string())
+            })?;
+        }
+        if let Some(locked_fields) = &input.locked_fields {
+            let locked_json = serde_json::to_string(locked_fields).map_err(|e| {
+                AppErrorDto::new("UPDATE_FAILED", "更新角色失败", true).with_detail(e.to_string())
+            })?;
+            conn.execute(
+                "UPDATE characters SET locked_fields = ?1, updated_at = ?2 WHERE id = ?3",
+                params![locked_json, now, input.id],
+            )
+            .map_err(|e| {
+                AppErrorDto::new("UPDATE_FAILED", "更新角色失败", true).with_detail(e.to_string())
+            })?;
+        }
+        if let Some(notes) = &input.notes {
+            conn.execute(
+                "UPDATE characters SET notes = ?1, updated_at = ?2 WHERE id = ?3",
+                params![notes, now, input.id],
             )
             .map_err(|e| {
                 AppErrorDto::new("UPDATE_FAILED", "更新角色失败", true).with_detail(e.to_string())

@@ -22,6 +22,10 @@ export async function scanChapterConsistency(
 }
 
 export async function scanFullConsistency(projectRoot: string): Promise<ConsistencyIssueRow[]> {
+  return invokeCommand<ConsistencyIssueRow[]>("scan_full_consistency", { projectRoot });
+}
+
+export async function listConsistencyIssues(projectRoot: string): Promise<ConsistencyIssueRow[]> {
   return invokeCommand<ConsistencyIssueRow[]>("list_consistency_issues", { projectRoot });
 }
 

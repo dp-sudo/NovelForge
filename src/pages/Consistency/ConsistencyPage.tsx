@@ -4,7 +4,14 @@ import { Button } from "../../components/ui/Button";
 import { Badge } from "../../components/ui/Badge";
 import { useEditorStore } from "../../stores/editorStore";
 import { readChapterContent } from "../../api/chapterApi";
-import { aiScanConsistency, scanChapterConsistency, scanFullConsistency, updateIssueStatus, type ConsistencyIssueRow } from "../../api/consistencyApi";
+import {
+  aiScanConsistency,
+  listConsistencyIssues,
+  scanChapterConsistency,
+  scanFullConsistency,
+  updateIssueStatus,
+  type ConsistencyIssueRow,
+} from "../../api/consistencyApi";
 import { useProjectStore } from "../../stores/projectStore";
 
 const severityColors: Record<string, "error" | "warning" | "info" | "default"> = {
@@ -53,7 +60,7 @@ export function ConsistencyPage() {
       setIssues([]);
       return;
     }
-    const data = await scanFullConsistency(projectRoot);
+    const data = await listConsistencyIssues(projectRoot);
     setIssues(data);
   }, [projectRoot]);
 
@@ -79,7 +86,7 @@ export function ConsistencyPage() {
             chapterId: activeChapterId,
             chapterContent: contentForAi,
           });
-          data = await scanFullConsistency(projectRoot);
+          data = await listConsistencyIssues(projectRoot);
         } else {
           data = await scanChapterConsistency(activeChapterId, projectRoot);
         }

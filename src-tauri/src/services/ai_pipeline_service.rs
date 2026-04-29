@@ -1347,6 +1347,18 @@ impl AiPipelineService {
         for ch in &related.characters {
             parts.push(format!("角色：{}", ch.name));
         }
+        for edge in &related.relationship_edges {
+            let mut line = format!(
+                "关系：{} -> {} [{}]",
+                edge.source_name, edge.target_name, edge.relationship_type
+            );
+            if let Some(ref description) = edge.description {
+                if !description.trim().is_empty() {
+                    line.push_str(&format!("：{}", description.trim()));
+                }
+            }
+            parts.push(line);
+        }
         for rule in &related.world_rules {
             let preview: String = rule.description.chars().take(120).collect();
             parts.push(format!("世界规则：{}", preview));

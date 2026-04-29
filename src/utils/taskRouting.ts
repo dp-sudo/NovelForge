@@ -42,42 +42,6 @@ export const EDITOR_AI_ACTIONS: EditorAiAction[] = [
 export const EDITOR_AI_TASK_TYPES = EDITOR_AI_ACTIONS.map((action) => action.taskType);
 export const EDITOR_AI_TASK_SET = new Set(EDITOR_AI_TASK_TYPES);
 
-const TASK_TYPE_ALIAS_MAP: Record<string, string> = {
-  chapter_draft: "chapter.draft",
-  generate_chapter_draft: "chapter.draft",
-  draft: "chapter.draft",
-  chapter_continue: "chapter.continue",
-  continue_chapter: "chapter.continue",
-  continue_draft: "chapter.continue",
-  chapter_rewrite: "chapter.rewrite",
-  rewrite_selection: "chapter.rewrite",
-  chapter_plan: "chapter.plan",
-  plan_chapter: "chapter.plan",
-  prose_naturalize: "prose.naturalize",
-  deai_text: "prose.naturalize",
-  character_create: "character.create",
-  "world.generate": "world.create_rule",
-  world_create_rule: "world.create_rule",
-  "plot.generate": "plot.create_node",
-  plot_create_node: "plot.create_node",
-  scan_consistency: "consistency.scan",
-  consistency_scan: "consistency.scan",
-  generate_blueprint_step: "blueprint.generate_step",
-  blueprint_generate: "blueprint.generate_step",
-  glossary_create_term: "glossary.create_term",
-  "glossary.create": "glossary.create_term",
-  narrative_create_obligation: "narrative.create_obligation",
-  "narrative.create": "narrative.create_obligation",
-  timeline_review: "timeline.review",
-  "timeline.scan": "timeline.review",
-  relationship_review: "relationship.review",
-  "relationships.review": "relationship.review",
-  dashboard_review: "dashboard.review",
-  "dashboard.analyze": "dashboard.review",
-  export_review: "export.review",
-  "export.check": "export.review",
-};
-
 export const TASK_TYPE_LABELS: Record<string, string> = {
   "chapter.draft": "生成草稿",
   "chapter.continue": "续写",
@@ -199,8 +163,8 @@ const TASK_REQUIREMENT_MAP: Record<string, {
 };
 
 export function canonicalTaskType(taskType: string): string {
-  const normalized = taskType.trim();
-  return TASK_TYPE_ALIAS_MAP[normalized] || normalized;
+  // Task alias compatibility is handled by Rust task_routing::canonical_task_type.
+  return taskType.trim();
 }
 
 export function getTaskRequirements(taskType: string) {

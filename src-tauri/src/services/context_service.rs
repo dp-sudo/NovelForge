@@ -42,6 +42,7 @@ pub struct RelatedContext {
     pub characters: Vec<CharacterSummary>,
     pub world_rules: Vec<WorldRuleSummary>,
     pub plot_nodes: Vec<PlotNodeSummary>,
+    pub relationship_edges: Vec<CharacterRelationshipEdge>,
     pub previous_chapter_summary: Option<String>,
 }
 
@@ -93,6 +94,18 @@ pub struct PlotNodeSummary {
     pub goal: Option<String>,
     pub conflict: Option<String>,
     pub sort_order: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CharacterRelationshipEdge {
+    pub id: String,
+    pub source_character_id: String,
+    pub source_name: String,
+    pub target_character_id: String,
+    pub target_name: String,
+    pub relationship_type: String,
+    pub description: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -374,6 +387,7 @@ impl ContextService {
                 characters: vec![],
                 world_rules: vec![],
                 plot_nodes: vec![],
+                relationship_edges: vec![],
                 previous_chapter_summary: None,
             },
         })
@@ -1785,6 +1799,40 @@ impl ContextService {
             .filter_map(|r| r.ok())
             .collect();
 
+        let relationship_edges: Vec<CharacterRelationshipEdge> = conn
+            .prepare(
+                r#"
+                SELECT r.id,
+                       r.source_character_id,
+                       COALESCE(sc.name, ''),
+                       r.target_character_id,
+                       COALESCE(tc.name, ''),
+                       r.relationship_type,
+                       r.description
+                FROM character_relationships r
+                LEFT JOIN characters sc ON sc.id = r.source_character_id
+                LEFT JOIN characters tc ON tc.id = r.target_character_id
+                WHERE r.project_id = ?1
+                ORDER BY r.updated_at DESC, r.created_at DESC
+                LIMIT 80
+                "#,
+            )
+            .map_err(|_| AppErrorDto::new("DB_QUERY_FAILED", "查询角色关系失败", true))?
+            .query_map(params![project_id], |row| {
+                Ok(CharacterRelationshipEdge {
+                    id: row.get(0)?,
+                    source_character_id: row.get(1)?,
+                    source_name: row.get(2)?,
+                    target_character_id: row.get(3)?,
+                    target_name: row.get(4)?,
+                    relationship_type: row.get(5)?,
+                    description: row.get(6)?,
+                })
+            })
+            .map_err(|_| AppErrorDto::new("DB_QUERY_FAILED", "查询角色关系失败", true))?
+            .filter_map(|r| r.ok())
+            .collect();
+
         // Previous chapter summary
         let previous_chapter_summary: Option<String> = chapter.as_ref().and_then(|ch| {
             let prev_index = ch.chapter_index - 1;
@@ -1805,6 +1853,7 @@ impl ContextService {
             characters,
             world_rules,
             plot_nodes,
+            relationship_edges,
             previous_chapter_summary,
         })
     }

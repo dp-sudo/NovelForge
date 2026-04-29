@@ -803,6 +803,21 @@ impl PromptBuilder {
                 parts.push(format!("- 角色：{}（{}）", ch.name, ch.role_type));
             }
         }
+        if !context.related_context.relationship_edges.is_empty() {
+            parts.push("关系边：".to_string());
+            for edge in &context.related_context.relationship_edges {
+                let mut line = format!(
+                    "- {} -> {} [{}]",
+                    edge.source_name, edge.target_name, edge.relationship_type
+                );
+                if let Some(ref description) = edge.description {
+                    if !description.trim().is_empty() {
+                        line.push_str(&format!("：{}", description.trim()));
+                    }
+                }
+                parts.push(line);
+            }
+        }
         parts.push(String::new());
         parts.push("# 输出".to_string());
         parts.push("输出 Markdown，包含：关系风险、缺口、建议补强方式。".to_string());
@@ -882,6 +897,7 @@ mod tests {
                 characters: vec![],
                 world_rules: vec![],
                 plot_nodes: vec![],
+                relationship_edges: vec![],
                 previous_chapter_summary: None,
             },
         }

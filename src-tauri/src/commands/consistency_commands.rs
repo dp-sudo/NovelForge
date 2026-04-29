@@ -1,7 +1,7 @@
 use tauri::State;
 
 use crate::errors::AppErrorDto;
-use crate::services::consistency_service::{ConsistencyService, ScanChapterInput};
+use crate::services::consistency_service::ScanChapterInput;
 use crate::state::AppState;
 
 #[tauri::command]
@@ -15,6 +15,15 @@ pub async fn scan_chapter_consistency(
         &format!("chapter={}", input.chapter_id),
     );
     state.consistency_service.scan_chapter(&project_root, input)
+}
+
+#[tauri::command]
+pub async fn scan_full_consistency(
+    project_root: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::services::consistency_service::ConsistencyIssue>, AppErrorDto> {
+    crate::infra::logger::log_user_action("consistency_scan_full", "scope=project");
+    state.consistency_service.scan_full(&project_root)
 }
 
 #[tauri::command]
