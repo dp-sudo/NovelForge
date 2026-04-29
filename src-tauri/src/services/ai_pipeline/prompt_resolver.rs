@@ -61,10 +61,17 @@ impl PromptResolver {
                 .with_detail(err.to_string())
         })?;
 
-        // 问题2修复: Prompt 真相源收敛到 skills markdown，缺失模板时显式报错。
-        let template = guard
-            .read_skill_prompt_template(canonical_task)?
-            .ok_or_else(|| Self::template_not_found_error(canonical_task))?;
+        // 问题2修复: Prompt 真相源收敛到 skills markdown；custom 在无模板时走后端兜底模板。
+        let template = match guard.read_skill_prompt_template(canonical_task)? {
+            Some(template) => template,
+            None if canonical_task == "custom" => {
+                log::warn!(
+                    "[PROMPT_FALLBACK] task=custom template missing, using backend fallback prompt"
+                );
+                Self::custom_fallback_template()
+            }
+            None => return Err(Self::template_not_found_error(canonical_task)),
+        };
 
         let render_context = self.build_render_context(context, canonical_task, input);
         Self::validate_required_inputs(canonical_task, &render_context)?;
@@ -78,6 +85,23 @@ impl PromptResolver {
             true,
         )
         .with_suggested_action("请为该任务创建对应的 Skill 模板")
+    }
+
+    fn custom_fallback_template() -> String {
+        [
+            "你是一个专业的创意写作助手。",
+            "",
+            "请优先遵循项目上下文与既有设定，避免与已知角色、世界观、剧情冲突。",
+            "如果需求不清晰，先给出合理假设，再提供可执行的创作建议。",
+            "",
+            "用户请求：{customUserQuery}",
+            "",
+            "输出要求：",
+            "1. 直接给出可用结果；",
+            "2. 涉及续写时保持叙事连贯与风格一致；",
+            "3. 如存在多种可行方案，提供 2-3 个备选并简述取舍。",
+        ]
+        .join("\n")
     }
 
     fn build_render_context(
@@ -106,6 +130,7 @@ impl PromptResolver {
 
         render.set_input("userInstruction", user_instruction.clone());
         render.set_input("userDescription", user_instruction.clone());
+        render.set_input("customUserQuery", sanitize_custom_instruction(&user_instruction));
         render.set_input("selectedText", selected_text);
         render.set_input("precedingText", preceding_text);
         render.set_input("chapterContent", chapter_content.clone());
@@ -388,6 +413,20 @@ fn normalize_optional(value: Option<&str>) -> String {
     value.unwrap_or("").trim().to_string()
 }
 
+fn sanitize_custom_instruction(value: &str) -> String {
+    let cleaned: String = value
+        .chars()
+        .filter(|ch| !ch.is_control() || matches!(ch, '\n' | '\r' | '\t'))
+        .take(4000)
+        .collect();
+    let trimmed = cleaned.trim();
+    if trimmed.is_empty() {
+        "（未提供具体请求，请先澄清目标再输出）".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
 fn tail_chars(value: &str, max_chars: usize) -> String {
     let chars: Vec<char> = value.chars().collect();
     if chars.len() <= max_chars {
@@ -626,6 +665,18 @@ mod tests {
                     auto_persist: false,
                 }
             }
+            "custom" => RunAiTaskPipelineInput {
+                project_root: "F:\\NovelForge".to_string(),
+                task_type: task_type.to_string(),
+                chapter_id: None,
+                ui_action: Some("test.custom".to_string()),
+                user_instruction: "请帮我设计一段高潮戏并提供两个版本".to_string(),
+                selected_text: None,
+                chapter_content: None,
+                blueprint_step_key: None,
+                blueprint_step_title: None,
+                auto_persist: false,
+            },
             _ => panic!("unexpected task type: {}", task_type),
         }
     }
@@ -706,5 +757,29 @@ mod tests {
             .resolve_or_build_prompt(&registry, &context, "unknown.task", &input)
             .expect_err("unknown task must fail");
         assert_eq!(err.code, "PROMPT_TEMPLATE_NOT_FOUND");
+    }
+
+    #[test]
+    fn custom_task_uses_fallback_when_template_missing() {
+        let resolver = PromptResolver;
+        let context = sample_context();
+        let registry = create_registry_with_builtin_templates();
+        let input = sample_input("custom");
+
+        {
+            let guard = registry.read().expect("lock registry");
+            let template = guard
+                .read_skill_prompt_template("custom")
+                .expect("read template");
+            assert!(template.is_none(), "fixture expects no builtin custom template");
+        }
+
+        let rendered = resolver
+            .resolve_or_build_prompt(&registry, &context, "custom", &input)
+            .expect("custom should fallback instead of failing");
+
+        assert!(rendered.contains("专业的创意写作助手"));
+        assert!(rendered.contains("用户请求："));
+        assert!(!rendered.contains("{customUserQuery}"));
     }
 }

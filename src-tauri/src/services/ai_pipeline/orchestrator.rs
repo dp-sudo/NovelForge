@@ -349,6 +349,16 @@ impl<'a> PipelineOrchestrator<'a> {
             })?;
 
         let persisted_records = if self.input.auto_persist {
+            if let Err(err) = self.pipeline_service.check_cancelled(self.request_id) {
+                log::info!(
+                    "pipeline request {} cancelled before persistence, skip writing task output",
+                    self.request_id
+                );
+                return Err(StageError {
+                    phase: PHASE_PERSIST,
+                    error: err,
+                });
+            }
             self.task_handlers
                 .persist_task_output(
                     self.canonical_task,

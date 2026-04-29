@@ -63,8 +63,16 @@ export async function searchProject(projectRoot: string, query: string, limit?: 
   return invokeCommand<SearchResult[]>("search_project", { projectRoot, query, limit });
 }
 
+export async function searchProjectSemantic(projectRoot: string, query: string, limit?: number): Promise<SearchResult[]> {
+  return invokeCommand<SearchResult[]>("search_project_semantic", { projectRoot, query, limit });
+}
+
 export async function rebuildSearchIndex(projectRoot: string): Promise<number> {
   return invokeCommand<number>("rebuild_search_index", { projectRoot });
+}
+
+export async function rebuildVectorIndex(projectRoot: string): Promise<number> {
+  return invokeCommand<number>("rebuild_vector_index", { projectRoot });
 }
 
 // ── Integrity (no dev-engine fallback needed) ──
@@ -128,6 +136,10 @@ function createClientRequestId(prefix: string): string {
 
 export async function listChapters(projectRoot: string): Promise<ChapterRecord[]> {
   return invokeCommand<ChapterRecord[]>("list_chapters", { projectRoot });
+}
+
+export async function reorderChapters(projectRoot: string, chapterIds: string[]): Promise<void> {
+  return invokeCommand<void>("reorder_chapters", { projectRoot, orderedIds: chapterIds });
 }
 
 export async function createChapter(input: ChapterInput, projectRoot: string): Promise<ChapterRecord> {

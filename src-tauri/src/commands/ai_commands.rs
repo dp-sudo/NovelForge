@@ -98,10 +98,14 @@ fn spawn_pipeline_run(
 #[tauri::command]
 pub async fn register_ai_provider(
     config: ProviderConfig,
+    source: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<(), AppErrorDto> {
     // 问题2修复(命令面收敛): compatibility-only，计划在 2026-07-31 后移除。
-    log::warn!("[DEPRECATED_COMMAND] register_ai_provider is compatibility-only");
+    log::warn!(
+        "[DEPRECATED_COMMAND] register_ai_provider is compatibility-only source={}",
+        source.as_deref().unwrap_or("unknown")
+    );
     state.ai_service.register_provider(config).await;
     Ok(())
 }
@@ -109,9 +113,13 @@ pub async fn register_ai_provider(
 #[tauri::command]
 pub async fn test_ai_connection(
     provider_id: String,
+    source: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<(), AppErrorDto> {
     // 问题2修复(命令面收敛): compatibility-only，计划在 2026-07-31 后移除。
-    log::warn!("[DEPRECATED_COMMAND] test_ai_connection is compatibility-only");
+    log::warn!(
+        "[DEPRECATED_COMMAND] test_ai_connection is compatibility-only source={}",
+        source.as_deref().unwrap_or("unknown")
+    );
     state.ai_service.test_connection(&provider_id).await
 }

@@ -18,6 +18,7 @@ import {
   deleteVolume,
   importChapterFiles,
   listChapters,
+  reorderChapters,
   listVolumes,
   type ChapterRecord,
   type VolumeRecord,
@@ -45,6 +46,9 @@ type VolumeFilter = "all" | "unassigned" | string;
 export function ChaptersPage() {
   const [chapters, setChapters] = useState<ChapterRecord[]>([]);
   const [volumes, setVolumes] = useState<VolumeRecord[]>([]);
+  const [reordering, setReordering] = useState(false);
+  const [draggingChapterId, setDraggingChapterId] = useState<string | null>(null);
+  const [dragOverChapterId, setDragOverChapterId] = useState<string | null>(null);
   const [showNew, setShowNew] = useState(false);
   const [showDelete, setShowDelete] = useState<string | null>(null);
   const [showCreateVolume, setShowCreateVolume] = useState(false);
@@ -64,6 +68,7 @@ export function ChaptersPage() {
   const setActiveRoute = useUiStore((s) => s.setActiveRoute);
   const setActiveChapter = useEditorStore((s) => s.setActiveChapter);
   const projectRoot = useProjectStore((s) => s.currentProjectPath);
+  const dragInProgressRef = useRef(false);
 
   const visibleChapters = useMemo(() => {
     if (volumeFilter === "all") return chapters;
@@ -72,6 +77,19 @@ export function ChaptersPage() {
     }
     return chapters.filter((chapter) => chapter.volumeId === volumeFilter);
   }, [chapters, volumeFilter]);
+  const canDragSort = volumeFilter === "all" && chapters.length > 1;
+
+  function reorderChapterList(source: ChapterRecord[], fromId: string, toId: string): ChapterRecord[] {
+    const fromIndex = source.findIndex((chapter) => chapter.id === fromId);
+    const toIndex = source.findIndex((chapter) => chapter.id === toId);
+    if (fromIndex === -1 || toIndex === -1 || fromIndex === toIndex) {
+      return source;
+    }
+    const next = [...source];
+    const [moved] = next.splice(fromIndex, 1);
+    next.splice(toIndex, 0, moved);
+    return next;
+  }
 
   const load = useCallback(async () => {
     if (!projectRoot) {
@@ -154,7 +172,78 @@ export function ChaptersPage() {
     }
   }
 
+  function handleDragStart(event: React.DragEvent<HTMLButtonElement>, chapterId: string) {
+    if (!canDragSort || reordering) {
+      event.preventDefault();
+      return;
+    }
+    dragInProgressRef.current = true;
+    setDraggingChapterId(chapterId);
+    setDragOverChapterId(chapterId);
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", chapterId);
+  }
+
+  function handleDragOver(event: React.DragEvent<HTMLTableRowElement>, chapterId: string) {
+    if (!draggingChapterId || draggingChapterId === chapterId || !canDragSort || reordering) {
+      return;
+    }
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    if (dragOverChapterId !== chapterId) {
+      setDragOverChapterId(chapterId);
+    }
+  }
+
+  function handleDragLeave(chapterId: string) {
+    if (dragOverChapterId === chapterId) {
+      setDragOverChapterId(null);
+    }
+  }
+
+  function handleDragEnd() {
+    setDraggingChapterId(null);
+    setDragOverChapterId(null);
+    window.setTimeout(() => {
+      dragInProgressRef.current = false;
+    }, 0);
+  }
+
+  async function handleDrop(event: React.DragEvent<HTMLTableRowElement>, targetChapterId: string) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!projectRoot || !draggingChapterId || draggingChapterId === targetChapterId || !canDragSort || reordering) {
+      handleDragEnd();
+      return;
+    }
+
+    const previous = chapters;
+    const next = reorderChapterList(previous, draggingChapterId, targetChapterId);
+    handleDragEnd();
+    if (next === previous) {
+      return;
+    }
+
+    setError(null);
+    setMessage(null);
+    setReordering(true);
+    setChapters(next);
+    try {
+      await reorderChapters(projectRoot, next.map((chapter) => chapter.id));
+      await load();
+      setMessage("章节顺序已更新");
+    } catch (err) {
+      setChapters(previous);
+      setError(err instanceof Error ? err.message : "章节重排失败");
+    } finally {
+      setReordering(false);
+    }
+  }
+
   function handleOpenEditor(chapter: ChapterRecord) {
+    if (dragInProgressRef.current) {
+      return;
+    }
     // 问题1修复(链路入口): 这里只切路由与章节，不主动改写正文；正文加载统一由 EditorPage 处理。
     setActiveChapter(chapter.id, chapter.title);
     setActiveRoute("editor");
@@ -297,10 +386,18 @@ export function ChaptersPage() {
         </Card>
       ) : (
         <Card padding="none">
+          <div className="px-4 py-2 border-b border-surface-700/60 text-xs text-surface-500">
+            {canDragSort
+              ? reordering
+                ? "正在保存章节顺序..."
+                : "可拖拽左侧“≡”手柄调整章节顺序"
+              : "仅在“全部章节”视图可拖拽排序"}
+          </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-surface-700 text-surface-400 text-xs uppercase">
+                  <th className="text-left px-4 py-3 font-medium w-12">拖拽</th>
                   <th className="text-left px-4 py-3 font-medium w-16">序号</th>
                   <th className="text-left px-4 py-3 font-medium">标题</th>
                   <th className="text-left px-4 py-3 font-medium w-24">状态</th>
@@ -315,9 +412,34 @@ export function ChaptersPage() {
                 {visibleChapters.map((chapter) => (
                   <tr
                     key={chapter.id}
-                    className="border-b border-surface-700/50 hover:bg-surface-800/50 cursor-pointer"
+                    className={`border-b border-surface-700/50 cursor-pointer ${
+                      dragOverChapterId === chapter.id && draggingChapterId !== chapter.id
+                        ? "bg-primary/10"
+                        : "hover:bg-surface-800/50"
+                    }`}
                     onClick={() => handleOpenEditor(chapter)}
+                    onDragOver={(event) => handleDragOver(event, chapter.id)}
+                    onDrop={(event) => void handleDrop(event, chapter.id)}
+                    onDragLeave={() => handleDragLeave(chapter.id)}
                   >
+                    <td className="px-4 py-3 text-surface-500">
+                      <button
+                        type="button"
+                        draggable={canDragSort && !reordering}
+                        onDragStart={(event) => handleDragStart(event, chapter.id)}
+                        onDragEnd={handleDragEnd}
+                        onClick={(event) => event.stopPropagation()}
+                        disabled={!canDragSort || reordering}
+                        title={canDragSort ? "拖拽调整顺序" : "仅在“全部章节”视图可排序"}
+                        className={`inline-flex h-6 w-6 items-center justify-center rounded text-sm transition-colors ${
+                          canDragSort && !reordering
+                            ? "hover:bg-surface-700 text-surface-400 cursor-grab active:cursor-grabbing"
+                            : "text-surface-600 cursor-not-allowed"
+                        }`}
+                      >
+                        ≡
+                      </button>
+                    </td>
                     <td className="px-4 py-3 text-surface-400">#{chapter.chapterIndex}</td>
                     <td className="px-4 py-3 text-surface-100 font-medium">{chapter.title}</td>
                     <td className="px-4 py-3">
@@ -363,7 +485,7 @@ export function ChaptersPage() {
                 ))}
                 {visibleChapters.length === 0 && (
                   <tr>
-                    <td colSpan={8} className="px-4 py-8 text-center text-sm text-surface-500">
+                    <td colSpan={9} className="px-4 py-8 text-center text-sm text-surface-500">
                       当前筛选下没有章节
                     </td>
                   </tr>

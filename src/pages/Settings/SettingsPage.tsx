@@ -40,9 +40,12 @@ import {
   checkProjectIntegrity,
   createBackup,
   listBackups,
+  rebuildVectorIndex,
   restoreBackup,
+  searchProjectSemantic,
   type BackupResult,
   type IntegrityReport,
+  type SearchResult,
 } from "../../api/chapterApi";
 import { useProjectStore } from "../../stores/projectStore";
 import {
@@ -146,6 +149,11 @@ export function SettingsPage() {
   const [backupMessage, setBackupMessage] = useState<string | null>(null);
   const [integrityChecking, setIntegrityChecking] = useState(false);
   const [integrityReport, setIntegrityReport] = useState<IntegrityReport | null>(null);
+  const [semanticQuery, setSemanticQuery] = useState("");
+  const [semanticSearching, setSemanticSearching] = useState(false);
+  const [semanticRebuilding, setSemanticRebuilding] = useState(false);
+  const [semanticResults, setSemanticResults] = useState<SearchResult[]>([]);
+  const [semanticMessage, setSemanticMessage] = useState<string | null>(null);
   const [gitStatus, setGitStatus] = useState<GitRepositoryStatus | null>(null);
   const [gitHistory, setGitHistory] = useState<GitCommitRecord[]>([]);
   const [gitBusy, setGitBusy] = useState(false);
@@ -208,6 +216,46 @@ export function SettingsPage() {
       setBackupMessage(`完整性检查失败：${typeof e === "object" && e && "message" in e ? String((e as {message:string}).message) : String(e)}`);
     } finally {
       setIntegrityChecking(false);
+    }
+  }
+
+  async function handleSemanticSearch() {
+    if (!projectRoot) {
+      setSemanticMessage("请先打开项目");
+      return;
+    }
+    const query = semanticQuery.trim();
+    if (!query) {
+      setSemanticMessage("请输入检索关键词");
+      return;
+    }
+    setSemanticSearching(true);
+    setSemanticMessage(null);
+    try {
+      const rows = await searchProjectSemantic(projectRoot, query, 20);
+      setSemanticResults(rows);
+      setSemanticMessage(`语义检索完成：命中 ${rows.length} 条`);
+    } catch (e: unknown) {
+      setSemanticMessage(`语义检索失败：${typeof e === "object" && e && "message" in e ? String((e as {message:string}).message) : String(e)}`);
+    } finally {
+      setSemanticSearching(false);
+    }
+  }
+
+  async function handleRebuildVector() {
+    if (!projectRoot) {
+      setSemanticMessage("请先打开项目");
+      return;
+    }
+    setSemanticRebuilding(true);
+    setSemanticMessage(null);
+    try {
+      const count = await rebuildVectorIndex(projectRoot);
+      setSemanticMessage(`向量索引重建完成：${count} 条`);
+    } catch (e: unknown) {
+      setSemanticMessage(`向量索引重建失败：${typeof e === "object" && e && "message" in e ? String((e as {message:string}).message) : String(e)}`);
+    } finally {
+      setSemanticRebuilding(false);
     }
   }
 
@@ -1612,6 +1660,56 @@ export function SettingsPage() {
               )}
             </div>
           )}
+          <div className="pt-4 border-t border-surface-700 space-y-3">
+            <h3 className="text-sm font-semibold text-surface-200">高级检索诊断</h3>
+            <p className="text-xs text-surface-400">
+              该入口直接调用语义检索与向量重建命令，仅用于排查检索链路，不影响默认聚合搜索行为。
+            </p>
+            <Input
+              label="语义检索关键词"
+              value={semanticQuery}
+              onChange={(e) => setSemanticQuery(e.target.value)}
+              placeholder="例如：主角身世伏笔"
+            />
+            <div className="flex gap-2">
+              <Button
+                variant="secondary"
+                loading={semanticSearching}
+                onClick={() => void handleSemanticSearch()}
+                disabled={!projectRoot}
+              >
+                {semanticSearching ? "检索中..." : "语义检索"}
+              </Button>
+              <Button
+                variant="ghost"
+                loading={semanticRebuilding}
+                onClick={() => void handleRebuildVector()}
+                disabled={!projectRoot}
+              >
+                {semanticRebuilding ? "重建中..." : "重建向量索引"}
+              </Button>
+            </div>
+            {semanticMessage && (
+              <div className="px-3 py-2 rounded-lg text-xs bg-info/10 text-info border border-info/20">
+                {semanticMessage}
+              </div>
+            )}
+            {semanticResults.length > 0 && (
+              <div className="max-h-40 overflow-y-auto space-y-2 pr-1">
+                {semanticResults.map((item) => (
+                  <div
+                    key={`${item.entityType}:${item.entityId}`}
+                    className="text-xs px-3 py-2 rounded-lg bg-surface-800 border border-surface-700"
+                  >
+                    <div className="text-surface-200">
+                      [{item.entityType}] {item.title}
+                    </div>
+                    <div className="text-surface-500 mt-1">{item.bodySnippet}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
           {!projectRoot && (
             <p className="text-xs text-warning">请先打开项目以使用备份功能</p>
           )}

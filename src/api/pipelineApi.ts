@@ -6,6 +6,8 @@ const DEFAULT_EVENT_TIMEOUT_MS = 120000;
 const MIN_EVENT_TIMEOUT_MS = 1000;
 const DEFAULT_START_TIMEOUT_MS = 15000;
 const DEFAULT_FIRST_EVENT_TIMEOUT_MS = 15000;
+const CLIENT_TIMEOUT_CANCEL_WAIT_MS = 2000;
+const CLIENT_TIMEOUT_CANCEL_POLL_MS = 80;
 
 const activeRequestIds = new Set<string>();
 let unloadCleanupBound = false;
@@ -214,6 +216,52 @@ export async function* streamTaskPipeline(
     }
   };
 
+  const hasPendingTerminalEvent = () =>
+    pending.some((event) => event.type === "done" || event.type === "error");
+
+  const waitForPendingTerminalEvent = async (timeoutMs: number): Promise<boolean> => {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (hasPendingTerminalEvent()) {
+        return true;
+      }
+      await new Promise((resolve) => setTimeout(resolve, CLIENT_TIMEOUT_CANCEL_POLL_MS));
+    }
+    return hasPendingTerminalEvent();
+  };
+
+  const tryCancelForClientTimeout = async (errorCode: string): Promise<boolean> => {
+    if (!requestId) {
+      return false;
+    }
+    logUI(
+      "PIPELINE.CANCEL_PENDING",
+      `requestId=${requestId} reason=client_timeout errorCode=${errorCode}`,
+    );
+    try {
+      await cancelTaskPipeline(requestId, "client_timeout");
+    } catch (error) {
+      logUI(
+        "PIPELINE.CANCEL_ERROR",
+        `requestId=${requestId} reason=client_timeout detail=${String(error)}`,
+      );
+      return false;
+    }
+    const confirmed = await waitForPendingTerminalEvent(CLIENT_TIMEOUT_CANCEL_WAIT_MS);
+    if (confirmed) {
+      logUI(
+        "PIPELINE.CANCEL_CONFIRMED",
+        `requestId=${requestId} reason=client_timeout waitMs=${CLIENT_TIMEOUT_CANCEL_WAIT_MS}`,
+      );
+      return true;
+    }
+    logUI(
+      "PIPELINE.CANCEL_CONFIRM_TIMEOUT",
+      `requestId=${requestId} reason=client_timeout waitMs=${CLIENT_TIMEOUT_CANCEL_WAIT_MS}`,
+    );
+    return false;
+  };
+
   const unlisten = await listen<unknown>(PIPELINE_EVENT_NAME, (event) => {
     const parsed = parsePipelineEvent(event.payload);
     if (!parsed) {
@@ -264,9 +312,13 @@ export async function* streamTaskPipeline(
       const waitBaseline = firstBackendEventSeen ? lastEventTime : runAcceptedAt;
       const remaining = activeTimeout - (Date.now() - waitBaseline);
       if (remaining <= 0) {
+        const code = firstBackendEventSeen ? "PIPELINE_EVENT_TIMEOUT" : "PIPELINE_FIRST_EVENT_TIMEOUT";
+        const cancelConfirmed = await tryCancelForClientTimeout(code);
+        if (cancelConfirmed) {
+          continue;
+        }
         done = true;
         if (!terminalLogged) {
-          const code = firstBackendEventSeen ? "PIPELINE_EVENT_TIMEOUT" : "PIPELINE_FIRST_EVENT_TIMEOUT";
           logUI("PIPELINE.ERROR", `requestId=${requestId} phase=done errorCode=${code}`);
           terminalLogged = true;
         }
@@ -274,12 +326,12 @@ export async function* streamTaskPipeline(
           requestId,
           phase: "done",
           type: "error",
-          errorCode: firstBackendEventSeen ? "PIPELINE_EVENT_TIMEOUT" : "PIPELINE_FIRST_EVENT_TIMEOUT",
+          errorCode: code,
           message: firstBackendEventSeen
             ? "AI 响应超时，请检查网络连接"
             : "AI 启动后未收到事件，请重试",
           recoverable: true,
-          meta: null,
+          meta: requestId ? { cancelPending: true } : null,
         };
         break;
       }
@@ -302,9 +354,13 @@ export async function* streamTaskPipeline(
         }
       } catch {
         resolveWaiter = null;
+        const code = firstBackendEventSeen ? "PIPELINE_EVENT_TIMEOUT" : "PIPELINE_FIRST_EVENT_TIMEOUT";
+        const cancelConfirmed = await tryCancelForClientTimeout(code);
+        if (cancelConfirmed) {
+          continue;
+        }
         done = true;
         if (!terminalLogged) {
-          const code = firstBackendEventSeen ? "PIPELINE_EVENT_TIMEOUT" : "PIPELINE_FIRST_EVENT_TIMEOUT";
           logUI("PIPELINE.ERROR", `requestId=${requestId} phase=done errorCode=${code}`);
           terminalLogged = true;
         }
@@ -312,12 +368,12 @@ export async function* streamTaskPipeline(
           requestId,
           phase: "done",
           type: "error",
-          errorCode: firstBackendEventSeen ? "PIPELINE_EVENT_TIMEOUT" : "PIPELINE_FIRST_EVENT_TIMEOUT",
+          errorCode: code,
           message: firstBackendEventSeen
             ? "AI 响应超时，请检查网络连接"
             : "AI 启动后未收到事件，请重试",
           recoverable: true,
-          meta: null,
+          meta: requestId ? { cancelPending: true } : null,
         };
         break;
       }
