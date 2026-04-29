@@ -2,7 +2,7 @@
 id: plot.create_node
 name: 创建剧情节点
 description: 根据用户描述生成结构化剧情节点，强调因果驱动、冲突强度与节点网络可扩展性
-version: 3
+version: 4
 source: builtin
 category: plot
 tags: [剧情, 主线, 节点]
@@ -21,7 +21,7 @@ writesToProject: false
 author: NovelForge
 icon: "🔗"
 createdAt: 2026-04-28
-updatedAt: 2026-04-29
+updatedAt: 2026-04-30
 ---
 
 # 创建剧情节点
@@ -93,11 +93,16 @@ updatedAt: 2026-04-29
 {userDescription}
 
 执行要求：
-1. 输出节点标题、冲突类型、关键事件、情绪基调与因果关系。
-2. 标注该节点在网络中的层级（A主干/B支撑/C缓冲）。
-3. 给出入边与出边类型（因果/信息/情感/伏笔）。
-4. 标注伏笔种植/回收状态与回收窗口。
-5. 给出该节点的网络风险提示（如孤岛风险、回收断裂风险）。
-
-输出格式：仅输出 JSON 对象，不要额外说明，不要Markdown代码块。
+1. 必须只输出一个 JSON 对象，不要 Markdown 代码块，不要解释文本，不要前后缀。
+2. 字段必须使用以下命名（不要新增字段）：
+   - title
+   - nodeType
+   - goal
+   - conflict
+   - emotionalCurve
+   - status
+   - relatedCharacters (array of string)
+3. status 建议使用：planning / drafted / active / resolved。
+4. 若你生成了 layer/incomingEdges/outgoingEdges/payoffWindow 等扩展信息，必须同时汇总进 goal/conflict 中，保证可直接入库展示。
+5. 不要输出“步骤说明/网络分析报告”，仅输出可入库字段。
 <!-- PROMPT_TEMPLATE_END -->

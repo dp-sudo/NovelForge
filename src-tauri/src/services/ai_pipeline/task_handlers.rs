@@ -253,20 +253,57 @@ impl TaskHandlers {
         let title = Self::pick_string(&root, &["title", "name", "设定名"], Some("未命名设定"));
         let category =
             Self::pick_string(&root, &["category", "type", "类别"], Some("世界规则"));
-        let description = Self::pick_string(
-            &root,
-            &["description", "summary", "desc", "描述"],
-            Some(fallback_instruction),
-        );
+        let mut description_parts = Vec::new();
+        if let Some(value) = Self::pick_optional_text(&root, &["description", "summary", "desc", "描述"]) {
+            description_parts.push(value);
+        }
+        if let Some(value) =
+            Self::pick_optional_text(&root, &["boundary", "scopeBoundary", "hardBoundary", "边界"])
+        {
+            description_parts.push(format!("边界：{value}"));
+        }
+        if let Some(value) = Self::pick_optional_text(&root, &["cost", "代价"]) {
+            description_parts.push(format!("代价：{value}"));
+        }
+        if let Some(value) =
+            Self::pick_optional_text(&root, &["failureConditions", "failure_conditions", "失效条件"])
+        {
+            description_parts.push(format!("失效条件：{value}"));
+        }
+        if let Some(value) =
+            Self::pick_optional_text(&root, &["pitfalls", "riskHints", "风险提示"])
+        {
+            description_parts.push(format!("风险提示：{value}"));
+        }
+        let description = if description_parts.is_empty() {
+            fallback_instruction.to_string()
+        } else {
+            description_parts.join("\n")
+        };
         let constraint_level = Self::normalize_constraint_level(
             Self::pick_optional_string(
                 &root,
-                &["constraintLevel", "constraint_level", "strictness", "约束等级"],
+                &[
+                    "constraintLevel",
+                    "constraint_level",
+                    "strictness",
+                    "约束等级",
+                    "constraintLevelHint",
+                ],
             )
             .as_deref(),
         );
-        let related_entities =
-            Self::pick_string_array(&root, &["relatedEntities", "related_entities", "entities"]);
+        let related_entities = Self::pick_string_array(
+            &root,
+            &[
+                "relatedEntities",
+                "related_entities",
+                "entities",
+                "conflictMechanisms",
+                "conflict_mechanisms",
+                "interactions",
+            ],
+        );
         Ok(CreateWorldRuleInput {
             title,
             category,
@@ -277,10 +314,21 @@ impl TaskHandlers {
             } else {
                 Some(related_entities)
             },
-            examples: Self::pick_optional_string(&root, &["examples", "示例"]),
+            examples: Self::pick_optional_text(
+                &root,
+                &["examples", "示例", "narrativeUsage", "narrative_usage"],
+            ),
             contradiction_policy: Self::pick_optional_string(
                 &root,
-                &["contradictionPolicy", "contradiction_policy", "冲突策略"],
+                &[
+                    "contradictionPolicy",
+                    "contradiction_policy",
+                    "冲突策略",
+                    "interactionRule",
+                    "interaction_rule",
+                    "priorityRule",
+                    "priority_rule",
+                ],
             ),
         })
     }
@@ -293,25 +341,59 @@ impl TaskHandlers {
         let root = Self::extract_output_object(normalized_output, Some("plotNode"))?;
         let sort_order = Self::next_plot_sort_order(project_root)?;
         Ok(CreatePlotNodeInput {
-            title: Self::pick_string(&root, &["title", "name", "节点标题"], Some("未命名节点")),
+            title: Self::pick_string(
+                &root,
+                &["title", "name", "nodeTitle", "eventTitle", "keyEvent", "节点标题", "核心事件"],
+                Some("未命名节点"),
+            ),
             node_type: Self::pick_string(
                 &root,
-                &["nodeType", "node_type", "type", "节点类型"],
+                &["nodeType", "node_type", "type", "layer", "conflictType", "节点类型", "冲突类型"],
                 Some("开端"),
             ),
             sort_order,
-            goal: Self::pick_optional_string(&root, &["goal", "objective", "目标"]).or_else(|| {
+            goal: Self::pick_optional_text(
+                &root,
+                &[
+                    "goal",
+                    "objective",
+                    "目标",
+                    "keyEvent",
+                    "关键事件",
+                    "triggerCondition",
+                    "payoffWindow",
+                ],
+            )
+            .or_else(|| {
                 (!fallback_instruction.trim().is_empty()).then(|| fallback_instruction.to_string())
             }),
-            conflict: Self::pick_optional_string(&root, &["conflict", "冲突"]),
-            emotional_curve: Self::pick_optional_string(
+            conflict: Self::pick_optional_text(
                 &root,
-                &["emotionalCurve", "emotional_curve", "情绪曲线"],
+                &[
+                    "conflict",
+                    "冲突",
+                    "conflictType",
+                    "networkRisk",
+                    "riskHints",
+                    "风险提示",
+                ],
+            ),
+            emotional_curve: Self::pick_optional_text(
+                &root,
+                &["emotionalCurve", "emotional_curve", "emotionalTone", "tone", "情绪曲线", "情绪基调"],
             ),
             status: Self::pick_optional_string(&root, &["status", "状态"]),
             related_characters: {
-                let related =
-                    Self::pick_string_array(&root, &["relatedCharacters", "related_characters"]);
+                let related = Self::pick_string_array(
+                    &root,
+                    &[
+                        "relatedCharacters",
+                        "related_characters",
+                        "characters",
+                        "linkedCharacterArc",
+                        "linked_character_arc",
+                    ],
+                );
                 if related.is_empty() {
                     None
                 } else {
@@ -326,18 +408,68 @@ impl TaskHandlers {
         fallback_instruction: &str,
     ) -> Result<CreateGlossaryTermInput, AppErrorDto> {
         let root = Self::extract_output_object(normalized_output, Some("glossaryTerm"))?;
-        let term = Self::pick_string(&root, &["term", "name", "词条"], Some("未命名名词"));
-        let term_type = Self::pick_string(&root, &["termType", "term_type", "type", "类型"], Some("术语"));
-        let aliases = Self::pick_string_array(&root, &["aliases", "alias", "别名"]);
+        let term = Self::pick_string(
+            &root,
+            &["term", "name", "canonicalName", "canonical_name", "词条", "规范名"],
+            Some("未命名名词"),
+        );
+        let term_type = Self::pick_string(
+            &root,
+            &["termType", "term_type", "type", "category", "类型", "分类"],
+            Some("术语"),
+        );
+        let aliases =
+            Self::pick_string_array(&root, &["aliases", "alias", "aliasMap", "别名"]);
+        let mut description_parts = Vec::new();
+        if let Some(value) = Self::pick_optional_text(
+            &root,
+            &[
+                "description",
+                "summary",
+                "desc",
+                "描述",
+                "oneLineDefinition",
+                "one_line_definition",
+            ],
+        ) {
+            description_parts.push(value);
+        }
+        if let Some(value) =
+            Self::pick_optional_text(&root, &["scopeBoundary", "scope_boundary", "适用边界"])
+        {
+            description_parts.push(format!("适用边界：{value}"));
+        }
+        if let Some(value) =
+            Self::pick_optional_text(&root, &["firstUseContext", "first_use_context", "首次语境"])
+        {
+            description_parts.push(format!("首次语境：{value}"));
+        }
+        if let Some(value) = Self::pick_optional_text(
+            &root,
+            &["forbiddenMisuse", "forbidden_misuse", "常见误用", "禁用用法"],
+        ) {
+            description_parts.push(format!("禁用用法：{value}"));
+        }
+        if let Some(value) =
+            Self::pick_optional_text(&root, &["usageGuidelines", "usage_guidelines", "用法建议"])
+        {
+            description_parts.push(format!("用法建议：{value}"));
+        }
+        if let Some(value) = Self::pick_optional_text(
+            &root,
+            &["conflictCheck", "conflict_check", "resolution", "冲突检测", "整合建议"],
+        ) {
+            description_parts.push(format!("冲突与整合：{value}"));
+        }
         Ok(CreateGlossaryTermInput {
             term,
             term_type,
             aliases: if aliases.is_empty() { None } else { Some(aliases) },
-            description: Self::pick_optional_string(
-                &root,
-                &["description", "summary", "desc", "描述"],
-            )
-            .or_else(|| (!fallback_instruction.trim().is_empty()).then(|| fallback_instruction.to_string())),
+            description: if description_parts.is_empty() {
+                (!fallback_instruction.trim().is_empty()).then(|| fallback_instruction.to_string())
+            } else {
+                Some(description_parts.join("\n"))
+            },
             locked: Some(Self::pick_bool(&root, &["locked"], false)),
             banned: Some(Self::pick_bool(&root, &["banned"], false)),
         })
@@ -348,19 +480,51 @@ impl TaskHandlers {
         fallback_instruction: &str,
     ) -> Result<CreateObligationInput, AppErrorDto> {
         let root = Self::extract_output_object(normalized_output, Some("obligation"))?;
-        let related_entities =
-            Self::pick_string_array(&root, &["relatedEntities", "related_entities", "entities"]);
+        let related_entities = Self::pick_string_array(
+            &root,
+            &[
+                "relatedEntities",
+                "related_entities",
+                "entities",
+                "linkedPlotNode",
+                "linked_plot_node",
+                "linkedCharacterArc",
+                "linked_character_arc",
+                "relations",
+            ],
+        );
+        let mut description_parts = Vec::new();
+        if let Some(value) = Self::pick_optional_text(&root, &["description", "summary", "desc", "notes", "说明"]) {
+            description_parts.push(value);
+        }
+        if let Some(value) = Self::pick_optional_text(&root, &["seedSignal", "seed_signal", "伏笔埋点"]) {
+            description_parts.push(format!("埋点信号：{value}"));
+        }
+        if let Some(value) = Self::pick_optional_text(
+            &root,
+            &["triggerCondition", "trigger_condition", "触发条件"],
+        ) {
+            description_parts.push(format!("触发条件：{value}"));
+        }
+        if let Some(value) =
+            Self::pick_optional_text(&root, &["payoffWindow", "payoff_window", "回收窗口"])
+        {
+            description_parts.push(format!("回收窗口：{value}"));
+        }
+        if let Some(value) = Self::pick_optional_text(&root, &["fallbackPlan", "fallback_plan", "补救方案"]) {
+            description_parts.push(format!("延期补救：{value}"));
+        }
         Ok(CreateObligationInput {
             obligation_type: Self::pick_string(
                 &root,
-                &["obligationType", "obligation_type", "type"],
+                &["obligationType", "obligation_type", "type", "obligationKind", "伏笔类型"],
                 Some("foreshadowing"),
             ),
-            description: Self::pick_string(
-                &root,
-                &["description", "summary", "desc"],
-                Some(fallback_instruction),
-            ),
+            description: if description_parts.is_empty() {
+                fallback_instruction.to_string()
+            } else {
+                description_parts.join("\n")
+            },
             planted_chapter_id: Self::pick_optional_string(
                 &root,
                 &["plantedChapterId", "planted_chapter_id"],
@@ -377,7 +541,10 @@ impl TaskHandlers {
                 &root,
                 &["payoffStatus", "payoff_status", "status"],
             ),
-            severity: Self::pick_optional_string(&root, &["severity", "priority"]),
+            severity: Self::pick_optional_string(
+                &root,
+                &["severity", "priority", "riskLevel", "risk_level"],
+            ),
             related_entities: if related_entities.is_empty() {
                 None
             } else {
@@ -719,13 +886,48 @@ impl TaskHandlers {
                     Value::Array(values) => {
                         let list = values
                             .iter()
-                            .filter_map(|item| item.as_str())
-                            .map(str::trim)
-                            .filter(|item| !item.is_empty())
-                            .map(str::to_string)
+                            .filter_map(|item| match item {
+                                Value::String(v) => {
+                                    let trimmed = v.trim();
+                                    (!trimmed.is_empty()).then(|| trimmed.to_string())
+                                }
+                                Value::Number(v) => Some(v.to_string()),
+                                Value::Bool(v) => Some(v.to_string()),
+                                Value::Object(obj) => Self::pick_optional_text(
+                                    obj,
+                                    &[
+                                        "name",
+                                        "label",
+                                        "title",
+                                        "id",
+                                        "value",
+                                        "target",
+                                        "node",
+                                        "character",
+                                    ],
+                                ),
+                                _ => None,
+                            })
                             .collect::<Vec<_>>();
                         if !list.is_empty() {
                             return list;
+                        }
+                    }
+                    Value::Object(obj) => {
+                        if let Some(text) = Self::pick_optional_text(
+                            obj,
+                            &[
+                                "name",
+                                "label",
+                                "title",
+                                "id",
+                                "value",
+                                "target",
+                                "node",
+                                "character",
+                            ],
+                        ) {
+                            return vec![text];
                         }
                     }
                     Value::String(v) => {
@@ -983,8 +1185,23 @@ impl TaskHandlers {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+    use std::path::PathBuf;
+
     use super::TaskHandlers;
+    use crate::services::project_service::{CreateProjectInput, ProjectService};
     use serde_json::Value;
+    use uuid::Uuid;
+
+    fn create_temp_workspace() -> PathBuf {
+        let workspace = std::env::temp_dir().join(format!("novelforge-task-handlers-{}", Uuid::new_v4()));
+        fs::create_dir_all(&workspace).expect("create temp workspace");
+        workspace
+    }
+
+    fn remove_temp_workspace(path: &PathBuf) {
+        let _ = fs::remove_dir_all(path);
+    }
 
     #[test]
     fn build_character_create_input_maps_nested_character_json() {
@@ -1164,5 +1381,130 @@ mod tests {
         );
         assert_eq!(input.examples.as_deref(), Some("祭火阵反噬"));
         assert_eq!(input.contradiction_policy.as_deref(), Some("冲突时以铁律优先"));
+    }
+
+    #[test]
+    fn build_glossary_term_create_input_maps_canonical_schema_json() {
+        let normalized_output = r#"
+        {
+          "content": {
+            "canonicalName": "逆命印",
+            "category": "法则名",
+            "aliases": ["逆印", "命印"],
+            "oneLineDefinition": "以寿元换取逆转瞬间因果的禁术标记。",
+            "scopeBoundary": "仅用于生死决断场景，日常不可用。",
+            "firstUseContext": "第12章祭典审判前夜。",
+            "forbiddenMisuse": "不可与治疗术混用。",
+            "resolution": "与既有术语无冲突，可直接入库。"
+          }
+        }
+        "#;
+
+        let input = TaskHandlers::build_glossary_term_create_input(normalized_output, "fallback")
+            .expect("build_glossary_term_create_input should parse canonical schema");
+        assert_eq!(input.term, "逆命印");
+        assert_eq!(input.term_type, "法则名");
+        assert_eq!(
+            input.aliases,
+            Some(vec!["逆印".to_string(), "命印".to_string()])
+        );
+        let description = input.description.unwrap_or_default();
+        assert!(description.contains("以寿元换取逆转瞬间因果"));
+        assert!(description.contains("适用边界"));
+        assert!(description.contains("首次语境"));
+        assert!(description.contains("禁用用法"));
+        assert!(description.contains("冲突与整合"));
+    }
+
+    #[test]
+    fn build_narrative_obligation_create_input_maps_tracking_schema_json() {
+        let normalized_output = r#"
+        {
+          "data": {
+            "obligationType": "明线伏笔",
+            "seedSignal": "她拇指在怀表裂痕上停了一秒。",
+            "triggerCondition": "旧案卷宗重启调查",
+            "payoffWindow": "第12-14章",
+            "fallbackPlan": "若延迟回收，则在第10章追加线索重提。",
+            "payoffStatus": "open",
+            "riskLevel": "high",
+            "relatedEntities": [
+              {"target": "旧案真凶浮出"},
+              {"name": "沈惊寒角色弧-抉择"}
+            ]
+          }
+        }
+        "#;
+
+        let input =
+            TaskHandlers::build_narrative_obligation_create_input(normalized_output, "fallback")
+                .expect("build_narrative_obligation_create_input should parse tracking schema");
+
+        assert_eq!(input.obligation_type, "明线伏笔");
+        assert_eq!(input.payoff_status.as_deref(), Some("open"));
+        assert_eq!(input.severity.as_deref(), Some("high"));
+        assert!(input.description.contains("埋点信号"));
+        assert!(input.description.contains("触发条件"));
+        assert!(input.description.contains("回收窗口"));
+        assert!(input.description.contains("延期补救"));
+        let related = input
+            .related_entities
+            .as_deref()
+            .expect("related_entities should be serialized");
+        let related_items: Vec<String> =
+            serde_json::from_str(related).expect("related_entities should be json array");
+        assert!(related_items.contains(&"旧案真凶浮出".to_string()));
+        assert!(related_items.contains(&"沈惊寒角色弧-抉择".to_string()));
+    }
+
+    #[test]
+    fn build_plot_node_create_input_maps_network_schema_json() {
+        let workspace = create_temp_workspace();
+        let project_service = ProjectService;
+        let project = project_service
+            .create_project(CreateProjectInput {
+                name: "剧情映射测试".to_string(),
+                author: None,
+                genre: "玄幻".to_string(),
+                target_words: None,
+                save_directory: workspace.to_string_lossy().to_string(),
+            })
+            .expect("project should be created");
+
+        let normalized_output = r#"
+        {
+          "payload": {
+            "nodeTitle": "祭典审判",
+            "layer": "A",
+            "keyEvent": "主角在祭典上公开指证仇首。",
+            "conflictType": "人物 vs 社会",
+            "emotionalTone": "压抑转爆发",
+            "status": "planning",
+            "relatedCharacters": [
+              {"name": "沈惊寒"},
+              {"name": "玄霄宗主"}
+            ]
+          }
+        }
+        "#;
+
+        let input = TaskHandlers::build_plot_node_create_input(
+            &project.project_root,
+            normalized_output,
+            "fallback",
+        )
+        .expect("build_plot_node_create_input should parse network schema");
+        assert_eq!(input.title, "祭典审判");
+        assert_eq!(input.node_type, "A");
+        assert_eq!(input.goal.as_deref(), Some("主角在祭典上公开指证仇首。"));
+        assert_eq!(input.conflict.as_deref(), Some("人物 vs 社会"));
+        assert_eq!(input.emotional_curve.as_deref(), Some("压抑转爆发"));
+        assert_eq!(input.status.as_deref(), Some("planning"));
+        assert_eq!(
+            input.related_characters,
+            Some(vec!["沈惊寒".to_string(), "玄霄宗主".to_string()])
+        );
+
+        remove_temp_workspace(&workspace);
     }
 }

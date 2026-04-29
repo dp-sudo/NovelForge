@@ -2,7 +2,7 @@
 id: glossary.create_term
 name: 创建术语条目
 description: 根据用户描述生成可落库术语，覆盖分类、最小完整定义、冲突检测与跨类关联
-version: 1
+version: 2
 source: builtin
 category: glossary
 tags: [术语, 词条, 一致性]
@@ -21,7 +21,7 @@ writesToProject: false
 author: NovelForge
 icon: "📘"
 createdAt: 2026-04-29
-updatedAt: 2026-04-29
+updatedAt: 2026-04-30
 ---
 
 # 创建术语条目
@@ -139,26 +139,15 @@ relations=[depends_on:聚灵阵, conflicts_with:禁灵结界]。
 {userDescription}
 
 执行要求：
-1. 先判定一级分类：人名/地名/组织名/能力名/物品名/概念名/法则名。
-2. 满足最小完整性原则：canonicalName, category, oneLineDefinition, scopeBoundary, firstUseContext, forbiddenMisuse。
-3. 完成冲突检测：同名、近形、同义、规则冲突，并给出resolution。
-4. 给出整合建议：保留/合并/改名/重定义，并说明依据的优先级。
-5. 至少建立1条跨类别关系（is_part_of/depends_on/conflicts_with/alias_of/evolves_to）。
-
-输出格式：仅输出 JSON 对象，字段必须包含：
-- canonicalName
-- aliases
-- category
-- secondaryTags
-- oneLineDefinition
-- scopeBoundary
-- firstUseContext
-- forbiddenMisuse
-- conflictCheck
-- resolution
-- usageGuidelines
-- relations
-- evidence
-
-禁止输出解释性前言、禁止Markdown代码块。
+1. 必须只输出一个 JSON 对象，不要 Markdown 代码块，不要解释文本，不要前后缀。
+2. 字段必须使用以下命名（不要新增字段）：
+   - term
+   - termType
+   - aliases (array of string)
+   - description
+   - locked
+   - banned
+3. description 中必须包含：一句话定义、适用边界、首次语境、禁用误用、冲突结论与整合建议。
+4. termType 只能取：人名 / 地名 / 组织名 / 能力名 / 物品名 / 概念名 / 法则名 / 术语。
+5. 内容需可直接入库并在名词库展示，禁止输出“流程说明/分析报告”。
 <!-- PROMPT_TEMPLATE_END -->

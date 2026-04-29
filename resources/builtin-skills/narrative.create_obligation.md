@@ -2,7 +2,7 @@
 id: narrative.create_obligation
 name: 创建叙事义务
 description: 根据用户描述生成可追踪的叙事义务，覆盖伏笔类型、种植策略、回收计划与风险评估
-version: 1
+version: 2
 source: builtin
 category: narrative
 tags: [叙事, 伏笔, 回收]
@@ -21,7 +21,7 @@ writesToProject: false
 author: NovelForge
 icon: "🧵"
 createdAt: 2026-04-29
-updatedAt: 2026-04-29
+updatedAt: 2026-04-30
 ---
 
 # 创建叙事义务
@@ -133,26 +133,17 @@ After：
 {userDescription}
 
 执行要求：
-1. 必须先判定伏笔类型：明线/暗线/反讽/双关。
-2. 明确种植策略：位置、显隐程度、暗示强度(1-5)。
-3. 产出回收计划：触发条件、回收窗口、回收方式、关联剧情节点与角色弧。
-4. 使用风险模型评估“未回收风险”：风险分=影响范围x读者记忆度x延迟系数，并给出riskLevel。
-5. 如存在高风险延期，给出fallbackPlan。
-
-输出格式：仅输出 JSON 对象，字段必须包含：
-- obligationId
-- obligationType
-- seedLocation
-- seedSignal
-- triggerCondition
-- payoffWindow
-- payoffMode
-- linkedPlotNode
-- linkedCharacterArc
-- riskScore
-- riskLevel
-- fallbackPlan
-- notes
-
-禁止输出解释性前言、禁止Markdown代码块。
+1. 必须只输出一个 JSON 对象，不要 Markdown 代码块，不要解释文本，不要前后缀。
+2. 字段必须使用以下命名（不要新增字段）：
+   - obligationType
+   - description
+   - plantedChapterId
+   - expectedPayoffChapterId
+   - actualPayoffChapterId
+   - payoffStatus
+   - severity
+   - relatedEntities (array of string)
+3. description 中必须包含：埋点信号、触发条件、回收窗口、回收方式、延期补救方案。
+4. payoffStatus 建议使用：open / in_progress / fulfilled / dropped。
+5. severity 仅允许：low / medium / high；内容需可直接入库并在叙事义务列表展示。
 <!-- PROMPT_TEMPLATE_END -->

@@ -2,7 +2,7 @@
 id: world.create_rule
 name: 创建世界规则
 description: 根据用户描述生成可叙事化的世界规则，强调有限性、代价与冲突生成能力
-version: 3
+version: 4
 source: builtin
 category: world
 tags: [世界观, 规则, 设定]
@@ -21,7 +21,7 @@ writesToProject: false
 author: NovelForge
 icon: "🌍"
 createdAt: 2026-04-28
-updatedAt: 2026-04-29
+updatedAt: 2026-04-30
 ---
 
 # 创建世界规则
@@ -109,23 +109,16 @@ After：
 {userDescription}
 
 执行要求：
-1. 必须满足有限性原则：能力上限、硬边界、使用代价、失效条件四项齐全。
-2. 规则必须绑定至少一种冲突机制（资源/伦理/身份/反制）。
-3. 根据题材给出侧重点（玄幻/都市异能/科幻/历史架空）。
-4. 提供叙事化落地：成功案例、失败案例、普通人感知方式。
-5. 明确与既有规则的交互关系和优先级。
-
-输出格式：仅输出 JSON 对象，字段必须包含：
-- name
-- type
-- description
-- boundary
-- cost
-- failureConditions
-- conflictMechanisms
-- interactions
-- narrativeUsage
-- pitfalls
-
-禁止输出解释性前言、禁止Markdown代码块。
+1. 必须只输出一个 JSON 对象，不要 Markdown 代码块，不要解释文本，不要前后缀。
+2. 字段必须使用以下命名（不要新增字段）：
+   - title
+   - category
+   - description
+   - constraintLevel
+   - relatedEntities (array of string)
+   - examples
+   - contradictionPolicy
+3. description 中必须覆盖：能力边界、代价、失效条件、冲突机制。
+4. constraintLevel 仅允许：weak / normal / strong / absolute。
+5. 内容需可直接入库并在世界规则列表展示，避免输出“分析报告体”。
 <!-- PROMPT_TEMPLATE_END -->

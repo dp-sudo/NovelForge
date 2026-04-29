@@ -2,7 +2,7 @@
 id: character.create
 name: 创建角色卡
 description: 根据用户描述生成完整的结构化角色卡，包含基础信息、动机矛盾与阶段化弧光设计
-version: 3
+version: 4
 source: builtin
 category: character
 tags: [角色, 创建, 人物卡]
@@ -21,7 +21,7 @@ writesToProject: false
 author: NovelForge
 icon: "👤"
 createdAt: 2026-04-28
-updatedAt: 2026-04-29
+updatedAt: 2026-04-30
 ---
 
 # 创建角色卡
@@ -83,11 +83,22 @@ updatedAt: 2026-04-29
 {userDescription}
 
 执行要求：
-1. 输出角色基础信息、动机、恐惧、缺陷、关系和声音特征。
-2. 必须给出want与need冲突点，并说明该冲突如何驱动剧情。
-3. 必须给出4阶段角色弧光模板：起点、扰动、抉择、新平衡。
-4. 每个弧光阶段都要包含triggerEvent、innerShift、outwardAction、failureCost。
-5. 设定需可持续用于多章节推进，避免一次性人设。
-
-输出格式：仅输出 JSON 对象，不要额外说明，不要Markdown代码块。
+1. 必须只输出一个 JSON 对象，不要 Markdown 代码块，不要解释文本，不要前后缀。
+2. 所有字段都必须存在；允许空字符串，但关键字段（name, roleType, motivation）不得为空。
+3. 字段必须使用以下命名（不要新增字段）：
+   - name
+   - aliases (array of string)
+   - roleType
+   - age
+   - gender
+   - identityText
+   - appearance
+   - motivation
+   - desire
+   - fear
+   - flaw
+   - arcStage
+   - notes
+4. 内容需可直接入库并在角色列表展示，不要输出“方案对比/说明段落”。
+5. 若给出复杂设定（如 personalityProfile / arc 分阶段），必须同时汇总到上述扁平字段中。
 <!-- PROMPT_TEMPLATE_END -->

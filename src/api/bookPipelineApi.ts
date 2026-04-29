@@ -17,6 +17,8 @@ export type BookStageKey =
   | "character-seed"
   | "world-seed"
   | "plot-seed"
+  | "glossary-seed"
+  | "narrative-seed"
   | "chapter-plan";
 
 export type BookStage = {
@@ -221,6 +223,40 @@ function buildPlotSeedInstruction(baseIdea: string): string {
   ].join("\n");
 }
 
+function buildGlossarySeedInstruction(baseIdea: string): string {
+  return [
+    `核心创意：${baseIdea}`,
+    "请创建 1 条核心名词，必须只输出 JSON 对象，不要 Markdown，不要解释。",
+    "字段要求：",
+    `{
+  "term": "",
+  "termType": "术语",
+  "aliases": [],
+  "description": "",
+  "locked": false,
+  "banned": false
+}`,
+  ].join("\n");
+}
+
+function buildNarrativeSeedInstruction(baseIdea: string): string {
+  return [
+    `核心创意：${baseIdea}`,
+    "请创建 1 条叙事义务，必须只输出 JSON 对象，不要 Markdown，不要解释。",
+    "字段要求：",
+    `{
+  "obligationType": "明线伏笔",
+  "description": "",
+  "plantedChapterId": "",
+  "expectedPayoffChapterId": "",
+  "actualPayoffChapterId": "",
+  "payoffStatus": "open",
+  "severity": "medium",
+  "relatedEntities": []
+}`,
+  ].join("\n");
+}
+
 export function buildBookStages(input: RunBookGenerationInput): BookStage[] {
   const base = input.ideaPrompt.trim();
   const stages: BookStage[] = BLUEPRINT_STAGES.map((stage) => ({
@@ -264,6 +300,26 @@ export function buildBookStages(input: RunBookGenerationInput): BookStage[] {
         projectRoot: input.projectRoot,
         taskType: "plot.create_node",
         userInstruction: buildPlotSeedInstruction(base),
+        autoPersist: true,
+      },
+    },
+    {
+      key: "glossary-seed",
+      label: "名词: 核心术语草案",
+      request: {
+        projectRoot: input.projectRoot,
+        taskType: "glossary.create_term",
+        userInstruction: buildGlossarySeedInstruction(base),
+        autoPersist: true,
+      },
+    },
+    {
+      key: "narrative-seed",
+      label: "叙事: 义务草案",
+      request: {
+        projectRoot: input.projectRoot,
+        taskType: "narrative.create_obligation",
+        userInstruction: buildNarrativeSeedInstruction(base),
         autoPersist: true,
       },
     },
