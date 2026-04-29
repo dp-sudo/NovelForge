@@ -1,8 +1,8 @@
 ---
 id: relationship.review
 name: 关系审阅
-description: 审阅角色关系网络，识别阶段跳变、动机冲突与剧情脱节风险，给出可执行修复方案
-version: 1
+description: 审阅角色关系网络并回填关系边，识别阶段跳变、动机冲突与剧情脱节风险，给出可执行修复方案
+version: 2
 source: builtin
 category: review
 tags: [关系, 角色, 审阅]
@@ -14,13 +14,15 @@ inputSchema:
 outputSchema:
   type: object
   properties:
-    report: { type: string }
+    summary: { type: string }
+    relationGraph:
+      type: object
 requiresUserConfirmation: false
-writesToProject: false
+writesToProject: true
 author: NovelForge
 icon: "🕸️"
 createdAt: 2026-04-29
-updatedAt: 2026-04-29
+updatedAt: 2026-04-30
 ---
 
 # 关系审阅
@@ -121,15 +123,19 @@ Case B（动机脱节）：
 3. 检测阶段跳变，定位触发事件缺口，并给出修复方案。
 4. 检测角色want与need冲突是否支撑关系变化。
 5. 说明关系对剧情推进的影响：哪些关系在推进，哪些关系在空转。
-
-输出格式：仅输出 JSON 对象，字段必须包含：
-- summary
-- relationGraph
-- stageAssessments
-- jumpRisks
-- motivationConflicts
-- plotImpact
-- fixesByPriority
-
-禁止输出解释性前言、禁止Markdown代码块。
+6. 必须只输出一个 JSON 对象，不要 Markdown 代码块，不要解释文本，不要前后缀。
+7. 字段必须包含：
+   - summary
+   - relationGraph
+   - stageAssessments
+   - jumpRisks
+   - motivationConflicts
+   - plotImpact
+   - fixesByPriority
+8. relationGraph 必须包含 edges 数组；每个 edge 至少包含：
+   - sourceName（必须使用角色库中已有角色名或别名）
+   - targetName（必须使用角色库中已有角色名或别名）
+   - relationshipType
+   - description
+9. 输出内容用于自动回填关系图，禁止只给抽象诊断而缺失可落库 edges。
 <!-- PROMPT_TEMPLATE_END -->

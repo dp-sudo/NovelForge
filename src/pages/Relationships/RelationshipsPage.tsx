@@ -32,7 +32,7 @@ export function RelationshipsPage() {
   const [aiError, setAiError] = useState<string | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
 
-  useEffect(() => {
+  const loadGraphData = async () => {
     if (!projectRoot) {
       setCharacters([]);
       setRelationships([]);
@@ -42,22 +42,27 @@ export function RelationshipsPage() {
 
     setLoading(true);
     setError(null);
-    getRelationshipGraphData(projectRoot)
-      .then(({ characters: characterRows, relationships: relationRows }) => {
-        setCharacters(characterRows);
-        setRelationships(relationRows);
-        setFocusedCharacterId((current) =>
-          current && characterRows.some((item) => item.id === current)
-            ? current
-            : characterRows[0]?.id || null
-        );
-      })
-      .catch((err) => {
-        setError(err instanceof Error ? err.message : "加载关系图失败");
-        setCharacters([]);
-        setRelationships([]);
-      })
-      .finally(() => setLoading(false));
+    try {
+      const { characters: characterRows, relationships: relationRows } =
+        await getRelationshipGraphData(projectRoot);
+      setCharacters(characterRows);
+      setRelationships(relationRows);
+      setFocusedCharacterId((current) =>
+        current && characterRows.some((item) => item.id === current)
+          ? current
+          : characterRows[0]?.id || null
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "加载关系图失败");
+      setCharacters([]);
+      setRelationships([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadGraphData();
   }, [projectRoot]);
 
   const nodePositions = useMemo(() => {
@@ -229,10 +234,12 @@ export function RelationshipsPage() {
                 const result = await runModuleAiTask({
                   projectRoot,
                   taskType: "relationship.review",
+                  autoPersist: true,
                   uiAction: "relationship.ai.review",
                   userInstruction: aiPrompt,
                 });
                 setAiResult(result || "AI 未返回内容。");
+                await loadGraphData();
               } catch (err) {
                 setAiError(err instanceof Error ? err.message : "AI 审阅失败");
               } finally {

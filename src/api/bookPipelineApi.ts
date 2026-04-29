@@ -333,7 +333,7 @@ export function buildBookStages(input: RunBookGenerationInput): BookStage[] {
         taskType: "chapter.plan",
         chapterId: input.chapterId,
         userInstruction: base,
-        autoPersist: false,
+        autoPersist: true,
       },
     });
   }

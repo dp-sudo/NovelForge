@@ -1,8 +1,8 @@
 ---
 id: timeline.review
 name: 时间线审阅
-description: 审阅全书时间线与因果链，识别时间矛盾、多线错位与回收窗口风险
-version: 1
+description: 审阅全书时间线与因果链并回填章节字段，识别时间矛盾、多线错位与回收窗口风险
+version: 2
 source: builtin
 category: review
 tags: [时间线, 审阅, 风险]
@@ -14,13 +14,17 @@ inputSchema:
 outputSchema:
   type: object
   properties:
-    report: { type: string }
+    summary: { type: string }
+    timelineEntries:
+      type: array
+      items:
+        type: object
 requiresUserConfirmation: false
-writesToProject: false
+writesToProject: true
 author: NovelForge
 icon: "⏱️"
 createdAt: 2026-04-29
-updatedAt: 2026-04-29
+updatedAt: 2026-04-30
 ---
 
 # 时间线审阅
@@ -113,14 +117,19 @@ Case B（倒计时失效）：
 3. 对多线程叙事检查合流逻辑和信息同步条件。
 4. 对每个问题给出风险级别、冲突证据、最小修正方案。
 5. 输出必须覆盖时间线与因果链映射关系。
-
-输出格式：仅输出 JSON 对象，字段必须包含：
-- summary
-- eventTimeline
-- contradictionFindings
-- multiThreadRisks
-- causalMappingRisks
-- fixesByPriority
-
-禁止输出解释性前言、禁止Markdown代码块。
+6. 必须只输出一个 JSON 对象，不要 Markdown 代码块，不要解释文本，不要前后缀。
+7. 字段必须包含：
+   - summary
+   - timelineEntries
+   - contradictionFindings
+   - multiThreadRisks
+   - causalMappingRisks
+   - fixesByPriority
+8. timelineEntries 必须为数组；每个元素至少包含：
+   - chapterId（可选，优先使用）或 chapterIndex（可选）
+   - title
+   - summary
+   - status（仅允许：planned / drafting / revising / completed）
+   - targetWords（整数）
+9. 输出内容用于自动回填章节时间线，禁止“纯分析报告体”而缺失可回填字段。
 <!-- PROMPT_TEMPLATE_END -->

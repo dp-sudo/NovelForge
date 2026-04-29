@@ -2,7 +2,7 @@
 id: chapter.plan
 name: 生成章节计划
 description: 结合项目设定和章节上下文生成结构化纲目规划，包含场景拆分、节奏曲线、字数与伏笔安排
-version: 3
+version: 4
 source: builtin
 category: writing
 tags: [写作, 规划, 结构]
@@ -17,13 +17,24 @@ inputSchema:
 outputSchema:
   type: object
   properties:
-    plan: { type: string }
+    chapterFunction: { type: string }
+    successCriteria: { type: string }
+    emotionalArc: { type: string }
+    scenes:
+      type: array
+      items:
+        type: object
+    foreshadowingPlan: { type: string }
+    totalWords: { type: integer }
+    cliffhanger: { type: string }
+    notes: { type: string }
+    status: { type: string }
 requiresUserConfirmation: false
-writesToProject: false
+writesToProject: true
 author: NovelForge
 icon: "📋"
 createdAt: 2026-04-28
-updatedAt: 2026-04-29
+updatedAt: 2026-04-30
 ---
 
 # 生成章节计划
@@ -60,21 +71,18 @@ updatedAt: 2026-04-29
 {userInstruction}
 
 执行要求：
-1. 先给出本章功能定位与完成标准。
-2. 拆分3-5个场景，每个场景给出：目的、冲突、关键事件、张力值(1-5)、预计字数。
-3. 规划节奏曲线（开端->发展->转折->收束）并标注至少1个高潮点。
-4. 标注伏笔处理：本章新埋伏笔与本章回收伏笔。
-5. 给出章节结尾钩子和下一章承接建议。
-
-输出格式：仅输出 JSON 对象，字段必须包含：
-- chapterFunction
-- successCriteria
-- emotionalArc
-- scenes
-- foreshadowingPlan
-- totalWords
-- cliffhanger
-- notes
-
-禁止输出解释性前言、禁止Markdown代码块。
+1. 必须只输出一个 JSON 对象，不要 Markdown 代码块，不要解释文本，不要前后缀。
+2. 字段必须使用以下命名（不要新增字段）：
+   - chapterFunction
+   - successCriteria
+   - emotionalArc
+   - scenes
+   - foreshadowingPlan
+   - totalWords
+   - cliffhanger
+   - notes
+   - status
+3. scenes 必须为数组，每个元素至少包含：purpose, conflict, keyEvent, tension, estimatedWords。
+4. totalWords 必须为整数；status 仅允许：planned / drafting / revising / completed。
+5. 输出内容要可直接回填章节数据，避免“分析报告体”。
 <!-- PROMPT_TEMPLATE_END -->

@@ -17,7 +17,6 @@ pub struct PromptResolver;
 
 #[derive(Debug, Clone, Default)]
 struct PromptRenderContext {
-    // 问题1修复: 统一渲染上下文字典（input/context/task_meta）并提供扁平键访问。
     input: BTreeMap<String, String>,
     context: BTreeMap<String, String>,
     task_meta: BTreeMap<String, String>,
@@ -130,7 +129,10 @@ impl PromptResolver {
 
         render.set_input("userInstruction", user_instruction.clone());
         render.set_input("userDescription", user_instruction.clone());
-        render.set_input("customUserQuery", sanitize_custom_instruction(&user_instruction));
+        render.set_input(
+            "customUserQuery",
+            sanitize_custom_instruction(&user_instruction),
+        );
         render.set_input("selectedText", selected_text);
         render.set_input("precedingText", preceding_text);
         render.set_input("chapterContent", chapter_content.clone());
@@ -771,7 +773,10 @@ mod tests {
             let template = guard
                 .read_skill_prompt_template("custom")
                 .expect("read template");
-            assert!(template.is_none(), "fixture expects no builtin custom template");
+            assert!(
+                template.is_none(),
+                "fixture expects no builtin custom template"
+            );
         }
 
         let rendered = resolver

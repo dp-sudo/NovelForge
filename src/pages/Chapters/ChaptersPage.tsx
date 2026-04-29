@@ -61,6 +61,7 @@ export function ChaptersPage() {
   const [volumeForm, setVolumeForm] = useState({ title: "", description: "" });
   const [showAiReview, setShowAiReview] = useState(false);
   const [aiPrompt, setAiPrompt] = useState("");
+  const [aiTargetChapterId, setAiTargetChapterId] = useState("");
   const [aiResult, setAiResult] = useState<string | null>(null);
   const [aiError, setAiError] = useState<string | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
@@ -310,6 +311,8 @@ export function ChaptersPage() {
             size="sm"
             onClick={() => {
               setAiPrompt("");
+              const defaultChapterId = visibleChapters[0]?.id ?? chapters[0]?.id ?? "";
+              setAiTargetChapterId(defaultChapterId);
               setAiResult(null);
               setAiError(null);
               setShowAiReview(true);
@@ -550,6 +553,18 @@ export function ChaptersPage() {
 
       <Modal open={showAiReview} onClose={() => setShowAiReview(false)} title="AI 章节规划建议" width="lg">
         <div className="space-y-4">
+          <Select
+            label="回填章节"
+            value={aiTargetChapterId}
+            onChange={(e) => setAiTargetChapterId(e.target.value)}
+            options={[
+              { value: "", label: "请选择章节" },
+              ...chapters.map((chapter) => ({
+                value: chapter.id,
+                label: `#${chapter.chapterIndex} ${chapter.title}`,
+              })),
+            ]}
+          />
           <Textarea
             label="附加要求（可选）"
             value={aiPrompt}
@@ -569,19 +584,23 @@ export function ChaptersPage() {
                 const result = await runModuleAiTask({
                   projectRoot,
                   taskType: "chapter.plan",
+                  chapterId: aiTargetChapterId || undefined,
+                  autoPersist: true,
                   uiAction: "chapters.ai.plan",
                   userInstruction: aiPrompt,
                 });
                 setAiResult(result || "AI 未返回内容。");
+                setMessage("AI 章节规划已回填到章节数据");
+                await load();
               } catch (err) {
                 setAiError(err instanceof Error ? err.message : "AI 规划失败");
               } finally {
                 setAiLoading(false);
               }
             }}
-            disabled={!projectRoot}
+            disabled={!projectRoot || !aiTargetChapterId}
           >
-            {aiLoading ? "分析中..." : "生成章节规划建议"}
+            {aiLoading ? "分析中..." : "生成并回填章节规划"}
           </Button>
           {aiError && (
             <div className="p-3 rounded-lg bg-error/10 border border-error/30 text-sm text-error">

@@ -1,3 +1,4 @@
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use rusqlite::params;
@@ -13,7 +14,9 @@ use crate::services::narrative_service::CreateObligationInput;
 use crate::services::project_service::get_project_id;
 use crate::services::{
     blueprint_service::{BlueprintService, SaveBlueprintStepInput},
-    character_service::{CharacterService, CreateCharacterInput},
+    character_service::{
+        CharacterService, CreateCharacterInput, CreateRelationshipInput, RelationshipService,
+    },
     glossary_service::GlossaryService,
     narrative_service::NarrativeService,
     plot_service::{CreatePlotNodeInput, PlotService},
@@ -88,7 +91,10 @@ impl TaskHandlers {
                     project_root,
                     SaveBlueprintStepInput {
                         step_key: step_key.to_string(),
-                        content: Self::normalize_blueprint_step_content(step_key, normalized_output),
+                        content: Self::normalize_blueprint_step_content(
+                            step_key,
+                            normalized_output,
+                        ),
                         ai_generated: Some(true),
                     },
                 )?;
@@ -111,8 +117,11 @@ impl TaskHandlers {
                             true,
                         )
                     })?;
-                let batch_size =
-                    self.persist_ai_consistency_issues(project_root, chapter_id, normalized_output)?;
+                let batch_size = self.persist_ai_consistency_issues(
+                    project_root,
+                    chapter_id,
+                    normalized_output,
+                )?;
                 records.push(PersistedRecord {
                     entity_type: "consistency_issue_batch".to_string(),
                     entity_id: format!("{}:{}", chapter_id, request_id),
@@ -141,6 +150,33 @@ impl TaskHandlers {
                     entity_type: "narrative_obligation".to_string(),
                     entity_id: id,
                     action: "created".to_string(),
+                });
+            }
+            "chapter.plan" => {
+                let updated_chapter_id =
+                    Self::persist_chapter_plan_output(project_root, input, normalized_output)?;
+                records.push(PersistedRecord {
+                    entity_type: "chapter".to_string(),
+                    entity_id: updated_chapter_id,
+                    action: "updated".to_string(),
+                });
+            }
+            "timeline.review" => {
+                let updated_count =
+                    Self::persist_timeline_review_output(project_root, normalized_output)?;
+                records.push(PersistedRecord {
+                    entity_type: "timeline_entry_batch".to_string(),
+                    entity_id: request_id.to_string(),
+                    action: format!("updated:{}", updated_count),
+                });
+            }
+            "relationship.review" => {
+                let inserted_count =
+                    Self::persist_relationship_review_output(project_root, normalized_output)?;
+                records.push(PersistedRecord {
+                    entity_type: "character_relationship_batch".to_string(),
+                    entity_id: request_id.to_string(),
+                    action: format!("inserted:{}", inserted_count),
                 });
             }
             _ => {}
@@ -251,27 +287,29 @@ impl TaskHandlers {
     ) -> Result<CreateWorldRuleInput, AppErrorDto> {
         let root = Self::extract_output_object(normalized_output, Some("worldRule"))?;
         let title = Self::pick_string(&root, &["title", "name", "设定名"], Some("未命名设定"));
-        let category =
-            Self::pick_string(&root, &["category", "type", "类别"], Some("世界规则"));
+        let category = Self::pick_string(&root, &["category", "type", "类别"], Some("世界规则"));
         let mut description_parts = Vec::new();
-        if let Some(value) = Self::pick_optional_text(&root, &["description", "summary", "desc", "描述"]) {
+        if let Some(value) =
+            Self::pick_optional_text(&root, &["description", "summary", "desc", "描述"])
+        {
             description_parts.push(value);
         }
-        if let Some(value) =
-            Self::pick_optional_text(&root, &["boundary", "scopeBoundary", "hardBoundary", "边界"])
-        {
+        if let Some(value) = Self::pick_optional_text(
+            &root,
+            &["boundary", "scopeBoundary", "hardBoundary", "边界"],
+        ) {
             description_parts.push(format!("边界：{value}"));
         }
         if let Some(value) = Self::pick_optional_text(&root, &["cost", "代价"]) {
             description_parts.push(format!("代价：{value}"));
         }
-        if let Some(value) =
-            Self::pick_optional_text(&root, &["failureConditions", "failure_conditions", "失效条件"])
-        {
+        if let Some(value) = Self::pick_optional_text(
+            &root,
+            &["failureConditions", "failure_conditions", "失效条件"],
+        ) {
             description_parts.push(format!("失效条件：{value}"));
         }
-        if let Some(value) =
-            Self::pick_optional_text(&root, &["pitfalls", "riskHints", "风险提示"])
+        if let Some(value) = Self::pick_optional_text(&root, &["pitfalls", "riskHints", "风险提示"])
         {
             description_parts.push(format!("风险提示：{value}"));
         }
@@ -343,12 +381,28 @@ impl TaskHandlers {
         Ok(CreatePlotNodeInput {
             title: Self::pick_string(
                 &root,
-                &["title", "name", "nodeTitle", "eventTitle", "keyEvent", "节点标题", "核心事件"],
+                &[
+                    "title",
+                    "name",
+                    "nodeTitle",
+                    "eventTitle",
+                    "keyEvent",
+                    "节点标题",
+                    "核心事件",
+                ],
                 Some("未命名节点"),
             ),
             node_type: Self::pick_string(
                 &root,
-                &["nodeType", "node_type", "type", "layer", "conflictType", "节点类型", "冲突类型"],
+                &[
+                    "nodeType",
+                    "node_type",
+                    "type",
+                    "layer",
+                    "conflictType",
+                    "节点类型",
+                    "冲突类型",
+                ],
                 Some("开端"),
             ),
             sort_order,
@@ -380,7 +434,14 @@ impl TaskHandlers {
             ),
             emotional_curve: Self::pick_optional_text(
                 &root,
-                &["emotionalCurve", "emotional_curve", "emotionalTone", "tone", "情绪曲线", "情绪基调"],
+                &[
+                    "emotionalCurve",
+                    "emotional_curve",
+                    "emotionalTone",
+                    "tone",
+                    "情绪曲线",
+                    "情绪基调",
+                ],
             ),
             status: Self::pick_optional_string(&root, &["status", "状态"]),
             related_characters: {
@@ -410,7 +471,14 @@ impl TaskHandlers {
         let root = Self::extract_output_object(normalized_output, Some("glossaryTerm"))?;
         let term = Self::pick_string(
             &root,
-            &["term", "name", "canonicalName", "canonical_name", "词条", "规范名"],
+            &[
+                "term",
+                "name",
+                "canonicalName",
+                "canonical_name",
+                "词条",
+                "规范名",
+            ],
             Some("未命名名词"),
         );
         let term_type = Self::pick_string(
@@ -418,8 +486,7 @@ impl TaskHandlers {
             &["termType", "term_type", "type", "category", "类型", "分类"],
             Some("术语"),
         );
-        let aliases =
-            Self::pick_string_array(&root, &["aliases", "alias", "aliasMap", "别名"]);
+        let aliases = Self::pick_string_array(&root, &["aliases", "alias", "aliasMap", "别名"]);
         let mut description_parts = Vec::new();
         if let Some(value) = Self::pick_optional_text(
             &root,
@@ -446,7 +513,12 @@ impl TaskHandlers {
         }
         if let Some(value) = Self::pick_optional_text(
             &root,
-            &["forbiddenMisuse", "forbidden_misuse", "常见误用", "禁用用法"],
+            &[
+                "forbiddenMisuse",
+                "forbidden_misuse",
+                "常见误用",
+                "禁用用法",
+            ],
         ) {
             description_parts.push(format!("禁用用法：{value}"));
         }
@@ -457,14 +529,24 @@ impl TaskHandlers {
         }
         if let Some(value) = Self::pick_optional_text(
             &root,
-            &["conflictCheck", "conflict_check", "resolution", "冲突检测", "整合建议"],
+            &[
+                "conflictCheck",
+                "conflict_check",
+                "resolution",
+                "冲突检测",
+                "整合建议",
+            ],
         ) {
             description_parts.push(format!("冲突与整合：{value}"));
         }
         Ok(CreateGlossaryTermInput {
             term,
             term_type,
-            aliases: if aliases.is_empty() { None } else { Some(aliases) },
+            aliases: if aliases.is_empty() {
+                None
+            } else {
+                Some(aliases)
+            },
             description: if description_parts.is_empty() {
                 (!fallback_instruction.trim().is_empty()).then(|| fallback_instruction.to_string())
             } else {
@@ -494,10 +576,14 @@ impl TaskHandlers {
             ],
         );
         let mut description_parts = Vec::new();
-        if let Some(value) = Self::pick_optional_text(&root, &["description", "summary", "desc", "notes", "说明"]) {
+        if let Some(value) =
+            Self::pick_optional_text(&root, &["description", "summary", "desc", "notes", "说明"])
+        {
             description_parts.push(value);
         }
-        if let Some(value) = Self::pick_optional_text(&root, &["seedSignal", "seed_signal", "伏笔埋点"]) {
+        if let Some(value) =
+            Self::pick_optional_text(&root, &["seedSignal", "seed_signal", "伏笔埋点"])
+        {
             description_parts.push(format!("埋点信号：{value}"));
         }
         if let Some(value) = Self::pick_optional_text(
@@ -511,13 +597,21 @@ impl TaskHandlers {
         {
             description_parts.push(format!("回收窗口：{value}"));
         }
-        if let Some(value) = Self::pick_optional_text(&root, &["fallbackPlan", "fallback_plan", "补救方案"]) {
+        if let Some(value) =
+            Self::pick_optional_text(&root, &["fallbackPlan", "fallback_plan", "补救方案"])
+        {
             description_parts.push(format!("延期补救：{value}"));
         }
         Ok(CreateObligationInput {
             obligation_type: Self::pick_string(
                 &root,
-                &["obligationType", "obligation_type", "type", "obligationKind", "伏笔类型"],
+                &[
+                    "obligationType",
+                    "obligation_type",
+                    "type",
+                    "obligationKind",
+                    "伏笔类型",
+                ],
                 Some("foreshadowing"),
             ),
             description: if description_parts.is_empty() {
@@ -551,6 +645,384 @@ impl TaskHandlers {
                 Some(serde_json::to_string(&related_entities).unwrap_or_default())
             },
         })
+    }
+
+    fn persist_chapter_plan_output(
+        project_root: &str,
+        input: &RunAiTaskPipelineInput,
+        normalized_output: &str,
+    ) -> Result<String, AppErrorDto> {
+        let chapter_id = input
+            .chapter_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| {
+                AppErrorDto::new(
+                    "PIPELINE_CHAPTER_ID_REQUIRED",
+                    "章节规划持久化缺少 chapterId",
+                    true,
+                )
+            })?;
+
+        let root = Self::extract_output_object(normalized_output, Some("chapterPlan"))?;
+        let mut summary_parts = Vec::new();
+
+        if let Some(value) = Self::pick_optional_text(
+            &root,
+            &["chapterFunction", "chapter_function", "章节功能定位"],
+        ) {
+            summary_parts.push(format!("章节功能：{value}"));
+        }
+        if let Some(value) =
+            Self::pick_optional_text(&root, &["successCriteria", "success_criteria", "完成标准"])
+        {
+            summary_parts.push(format!("完成标准：{value}"));
+        }
+        if let Some(value) =
+            Self::pick_optional_text(&root, &["emotionalArc", "emotional_arc", "节奏曲线"])
+        {
+            summary_parts.push(format!("节奏曲线：{value}"));
+        }
+        if let Some(value) = Self::pick_optional_text(&root, &["scenes", "场景拆分"]) {
+            summary_parts.push(format!("场景拆分：{value}"));
+        }
+        if let Some(value) = Self::pick_optional_text(
+            &root,
+            &["foreshadowingPlan", "foreshadowing_plan", "伏笔处理"],
+        ) {
+            summary_parts.push(format!("伏笔处理：{value}"));
+        }
+        if let Some(value) =
+            Self::pick_optional_text(&root, &["cliffhanger", "章节钩子", "结尾钩子"])
+        {
+            summary_parts.push(format!("章节钩子：{value}"));
+        }
+        if let Some(value) = Self::pick_optional_text(&root, &["notes", "备注"]) {
+            summary_parts.push(format!("备注：{value}"));
+        }
+
+        let summary = if summary_parts.is_empty() {
+            input.user_instruction.trim().to_string()
+        } else {
+            summary_parts.join("\n")
+        };
+        let target_words = Self::pick_optional_i64(
+            &root,
+            &["totalWords", "total_words", "targetWords", "target_words"],
+        );
+
+        let status = Self::pick_optional_string(&root, &["status", "chapterStatus", "章节状态"])
+            .unwrap_or_else(|| "planned".to_string());
+
+        let conn = open_database(Path::new(project_root)).map_err(|err| {
+            AppErrorDto::new("PIPELINE_DB_OPEN_FAILED", "数据库打开失败", false)
+                .with_detail(err.to_string())
+        })?;
+        let project_id = get_project_id(&conn)?;
+        let updated_at = now_iso();
+
+        let changed = conn
+            .execute(
+                "
+                UPDATE chapters
+                SET summary = ?1,
+                    status = ?2,
+                    target_words = COALESCE(?3, target_words),
+                    updated_at = ?4
+                WHERE id = ?5 AND project_id = ?6 AND is_deleted = 0
+                ",
+                params![
+                    summary,
+                    status,
+                    target_words,
+                    updated_at,
+                    chapter_id,
+                    project_id
+                ],
+            )
+            .map_err(|err| {
+                AppErrorDto::new("PIPELINE_PERSIST_FAILED", "写入章节规划失败", true)
+                    .with_detail(err.to_string())
+            })?;
+
+        if changed == 0 {
+            return Err(AppErrorDto::new(
+                "CHAPTER_NOT_FOUND",
+                "章节不存在或不可写入",
+                true,
+            ));
+        }
+
+        Ok(chapter_id.to_string())
+    }
+
+    fn persist_timeline_review_output(
+        project_root: &str,
+        normalized_output: &str,
+    ) -> Result<usize, AppErrorDto> {
+        let value = Self::extract_output_value(normalized_output)?;
+        let root = value.as_object().cloned().ok_or_else(|| {
+            AppErrorDto::new(
+                "PIPELINE_PERSIST_PARSE_FAILED",
+                "时间线审阅结果不是 JSON 对象",
+                true,
+            )
+        })?;
+
+        let entries = root
+            .get("timelineEntries")
+            .or_else(|| root.get("timeline_entries"))
+            .or_else(|| root.get("eventTimeline"))
+            .or_else(|| root.get("event_timeline"))
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+
+        if entries.is_empty() {
+            return Ok(0);
+        }
+
+        let conn = open_database(Path::new(project_root)).map_err(|err| {
+            AppErrorDto::new("PIPELINE_DB_OPEN_FAILED", "数据库打开失败", false)
+                .with_detail(err.to_string())
+        })?;
+        let project_id = get_project_id(&conn)?;
+        let updated_at = now_iso();
+        let mut updated_count = 0usize;
+
+        for item in entries {
+            let obj = match item.as_object() {
+                Some(obj) => obj,
+                None => continue,
+            };
+            let chapter_id = Self::pick_optional_string(obj, &["chapterId", "chapter_id", "id"]);
+            let chapter_index =
+                Self::pick_optional_i64(obj, &["chapterIndex", "chapter_index", "index"]);
+            let title = Self::pick_optional_string(
+                obj,
+                &["title", "chapterTitle", "chapter_title", "章节标题"],
+            );
+            let summary =
+                Self::pick_optional_text(obj, &["summary", "event", "description", "事件摘要"]);
+            let status =
+                Self::pick_optional_string(obj, &["status", "chapterStatus", "chapter_status"]);
+            let target_words =
+                Self::pick_optional_i64(obj, &["targetWords", "target_words", "words"]);
+
+            let changed = if let Some(chapter_id) = chapter_id.as_deref() {
+                conn.execute(
+                    "
+                    UPDATE chapters
+                    SET title = COALESCE(?1, title),
+                        summary = COALESCE(?2, summary),
+                        status = COALESCE(?3, status),
+                        target_words = COALESCE(?4, target_words),
+                        updated_at = ?5
+                    WHERE id = ?6 AND project_id = ?7 AND is_deleted = 0
+                    ",
+                    params![
+                        title,
+                        summary,
+                        status,
+                        target_words,
+                        updated_at,
+                        chapter_id,
+                        project_id
+                    ],
+                )
+                .map_err(|err| {
+                    AppErrorDto::new("PIPELINE_PERSIST_FAILED", "写入时间线失败", true)
+                        .with_detail(err.to_string())
+                })?
+            } else if let Some(chapter_index) = chapter_index {
+                conn.execute(
+                    "
+                    UPDATE chapters
+                    SET title = COALESCE(?1, title),
+                        summary = COALESCE(?2, summary),
+                        status = COALESCE(?3, status),
+                        target_words = COALESCE(?4, target_words),
+                        updated_at = ?5
+                    WHERE chapter_index = ?6 AND project_id = ?7 AND is_deleted = 0
+                    ",
+                    params![
+                        title,
+                        summary,
+                        status,
+                        target_words,
+                        updated_at,
+                        chapter_index,
+                        project_id
+                    ],
+                )
+                .map_err(|err| {
+                    AppErrorDto::new("PIPELINE_PERSIST_FAILED", "写入时间线失败", true)
+                        .with_detail(err.to_string())
+                })?
+            } else {
+                0
+            };
+
+            if changed > 0 {
+                updated_count += changed as usize;
+            }
+        }
+
+        Ok(updated_count)
+    }
+
+    fn persist_relationship_review_output(
+        project_root: &str,
+        normalized_output: &str,
+    ) -> Result<usize, AppErrorDto> {
+        let value = Self::extract_output_value(normalized_output)?;
+        let root = value.as_object().cloned().ok_or_else(|| {
+            AppErrorDto::new(
+                "PIPELINE_PERSIST_PARSE_FAILED",
+                "关系审阅结果不是 JSON 对象",
+                true,
+            )
+        })?;
+
+        let mut edges = root
+            .get("edges")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        if edges.is_empty() {
+            edges = root
+                .get("relationGraph")
+                .and_then(Value::as_object)
+                .and_then(|obj| obj.get("edges"))
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+        }
+        if edges.is_empty() {
+            return Ok(0);
+        }
+
+        let characters = CharacterService::default().list(project_root)?;
+        let mut name_index = HashMap::<String, String>::new();
+        for item in &characters {
+            let key = Self::normalize_lookup_label(&item.name);
+            if !key.is_empty() {
+                name_index.insert(key, item.id.clone());
+            }
+            if let Ok(aliases) = serde_json::from_str::<Vec<String>>(&item.aliases) {
+                for alias in aliases {
+                    let alias_key = Self::normalize_lookup_label(&alias);
+                    if !alias_key.is_empty() {
+                        name_index.insert(alias_key, item.id.clone());
+                    }
+                }
+            }
+        }
+
+        let existing_links = RelationshipService::default().list(project_root, None)?;
+        let mut dedupe = HashSet::<String>::new();
+        for item in existing_links {
+            let key = format!(
+                "{}|{}|{}",
+                item.source_character_id,
+                item.target_character_id,
+                Self::normalize_lookup_label(&item.relationship_type)
+            );
+            dedupe.insert(key);
+        }
+
+        let mut inserted_count = 0usize;
+        for edge in edges {
+            let obj = match edge.as_object() {
+                Some(obj) => obj,
+                None => continue,
+            };
+
+            let source_name = Self::pick_optional_string(
+                obj,
+                &[
+                    "sourceName",
+                    "source_name",
+                    "source",
+                    "from",
+                    "sourceCharacter",
+                ],
+            )
+            .unwrap_or_default();
+            let target_name = Self::pick_optional_string(
+                obj,
+                &[
+                    "targetName",
+                    "target_name",
+                    "target",
+                    "to",
+                    "targetCharacter",
+                ],
+            )
+            .unwrap_or_default();
+            let relation_type = Self::pick_optional_string(
+                obj,
+                &[
+                    "relationshipType",
+                    "relationship_type",
+                    "type",
+                    "relationType",
+                ],
+            )
+            .unwrap_or_else(|| "未命名关系".to_string());
+            if source_name.trim().is_empty() || target_name.trim().is_empty() {
+                continue;
+            }
+
+            let source_id = name_index
+                .get(&Self::normalize_lookup_label(&source_name))
+                .cloned();
+            let target_id = name_index
+                .get(&Self::normalize_lookup_label(&target_name))
+                .cloned();
+            let (source_id, target_id) = match (source_id, target_id) {
+                (Some(source_id), Some(target_id)) => (source_id, target_id),
+                _ => continue,
+            };
+            if source_id == target_id {
+                continue;
+            }
+
+            let dedupe_key = format!(
+                "{}|{}|{}",
+                source_id,
+                target_id,
+                Self::normalize_lookup_label(&relation_type)
+            );
+            if dedupe.contains(&dedupe_key) {
+                continue;
+            }
+
+            let description = Self::pick_optional_text(
+                obj,
+                &[
+                    "description",
+                    "reason",
+                    "evidence",
+                    "latestTriggerEvent",
+                    "latest_trigger_event",
+                ],
+            );
+            RelationshipService::default().create(
+                project_root,
+                CreateRelationshipInput {
+                    source_character_id: source_id.clone(),
+                    target_character_id: target_id.clone(),
+                    relationship_type: relation_type,
+                    description,
+                },
+            )?;
+            dedupe.insert(dedupe_key);
+            inserted_count += 1;
+        }
+
+        Ok(inserted_count)
     }
 
     fn persist_ai_consistency_issues(
@@ -588,12 +1060,20 @@ impl TaskHandlers {
             if explanation.trim().is_empty() {
                 continue;
             }
-            let issue_type =
-                Self::pick_string(issue_obj, &["issueType", "issue_type", "type"], Some("prose_style"));
-            let severity =
-                Self::normalize_consistency_severity(Self::pick_optional_string(issue_obj, &["severity", "level"]));
-            let source_text =
-                Self::pick_string(issue_obj, &["sourceText", "source_text", "snippet"], Some(""));
+            let issue_type = Self::pick_string(
+                issue_obj,
+                &["issueType", "issue_type", "type"],
+                Some("prose_style"),
+            );
+            let severity = Self::normalize_consistency_severity(Self::pick_optional_string(
+                issue_obj,
+                &["severity", "level"],
+            ));
+            let source_text = Self::pick_string(
+                issue_obj,
+                &["sourceText", "source_text", "snippet"],
+                Some(""),
+            );
             let suggested_fix =
                 Self::pick_optional_string(issue_obj, &["suggestedFix", "suggested_fix", "fix"]);
 
@@ -624,26 +1104,35 @@ impl TaskHandlers {
     }
 
     fn extract_output_value(normalized_output: &str) -> Result<Value, AppErrorDto> {
-        if let Ok(value) = serde_json::from_str::<Value>(normalized_output) {
+        let trimmed = normalized_output.trim();
+        if let Ok(value) = serde_json::from_str::<Value>(trimmed) {
             return Ok(value);
         }
 
-        let brace_start = normalized_output.find('{');
-        let brace_end = normalized_output.rfind('}');
+        if let Some(value) = Self::extract_value_from_code_fences(trimmed) {
+            return Ok(value);
+        }
+
+        if let Some(value) = Self::extract_first_balanced_json_value(trimmed) {
+            return Ok(value);
+        }
+
+        let brace_start = trimmed.find('{');
+        let brace_end = trimmed.rfind('}');
         if let (Some(start), Some(end)) = (brace_start, brace_end) {
             if end > start {
-                let json_text = &normalized_output[start..=end];
+                let json_text = &trimmed[start..=end];
                 if let Ok(value) = serde_json::from_str::<Value>(json_text) {
                     return Ok(value);
                 }
             }
         }
 
-        let bracket_start = normalized_output.find('[');
-        let bracket_end = normalized_output.rfind(']');
+        let bracket_start = trimmed.find('[');
+        let bracket_end = trimmed.rfind(']');
         if let (Some(start), Some(end)) = (bracket_start, bracket_end) {
             if end > start {
-                let json_text = &normalized_output[start..=end];
+                let json_text = &trimmed[start..=end];
                 if let Ok(value) = serde_json::from_str::<Value>(json_text) {
                     return Ok(value);
                 }
@@ -659,6 +1148,90 @@ impl TaskHandlers {
             "normalized_output_preview={}",
             Self::preview_output_for_error(normalized_output, 320)
         )))
+    }
+
+    fn extract_value_from_code_fences(raw: &str) -> Option<Value> {
+        for (idx, segment) in raw.split("```").enumerate() {
+            if idx % 2 == 0 {
+                continue;
+            }
+            let body = if let Some(line_break) = segment.find('\n') {
+                &segment[line_break + 1..]
+            } else {
+                segment
+            };
+            let candidate = body.trim();
+            if candidate.is_empty() {
+                continue;
+            }
+
+            if let Ok(value) = serde_json::from_str::<Value>(candidate) {
+                return Some(value);
+            }
+            if let Some(value) = Self::extract_first_balanced_json_value(candidate) {
+                return Some(value);
+            }
+        }
+        None
+    }
+
+    fn extract_first_balanced_json_value(raw: &str) -> Option<Value> {
+        let bytes = raw.as_bytes();
+        for start in 0..bytes.len() {
+            if !matches!(bytes[start], b'{' | b'[') {
+                continue;
+            }
+            let end = match Self::find_balanced_json_end(raw, start) {
+                Some(end) => end,
+                None => continue,
+            };
+            let candidate = &raw[start..=end];
+            if let Ok(value) = serde_json::from_str::<Value>(candidate) {
+                return Some(value);
+            }
+        }
+        None
+    }
+
+    fn find_balanced_json_end(raw: &str, start: usize) -> Option<usize> {
+        let bytes = raw.as_bytes();
+        let mut stack: Vec<u8> = Vec::new();
+        let mut in_string = false;
+        let mut escaped = false;
+
+        for idx in start..bytes.len() {
+            let byte = bytes[idx];
+            if in_string {
+                if escaped {
+                    escaped = false;
+                    continue;
+                }
+                match byte {
+                    b'\\' => escaped = true,
+                    b'"' => in_string = false,
+                    _ => {}
+                }
+                continue;
+            }
+
+            match byte {
+                b'"' => in_string = true,
+                b'{' => stack.push(b'}'),
+                b'[' => stack.push(b']'),
+                b'}' | b']' => {
+                    let expected = stack.pop()?;
+                    if byte != expected {
+                        return None;
+                    }
+                    if stack.is_empty() {
+                        return Some(idx);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        None
     }
 
     fn extract_output_object(
@@ -685,7 +1258,8 @@ impl TaskHandlers {
         }
 
         for fallback_key in ["data", "content", "fields", "payload", "result"] {
-            if let Some(nested) = Self::pick_value(&root_obj, fallback_key).and_then(Value::as_object)
+            if let Some(nested) =
+                Self::pick_value(&root_obj, fallback_key).and_then(Value::as_object)
             {
                 return Ok(nested.clone());
             }
@@ -707,10 +1281,7 @@ impl TaskHandlers {
         format!("{preview}...(truncated,total_chars={})", chars.len())
     }
 
-    fn pick_optional_string(
-        obj: &serde_json::Map<String, Value>,
-        keys: &[&str],
-    ) -> Option<String> {
+    fn pick_optional_string(obj: &serde_json::Map<String, Value>, keys: &[&str]) -> Option<String> {
         for key in keys {
             if let Some(value) = Self::pick_value(obj, key) {
                 match value {
@@ -759,6 +1330,15 @@ impl TaskHandlers {
             .collect()
     }
 
+    fn normalize_lookup_label(value: &str) -> String {
+        value
+            .trim()
+            .to_ascii_lowercase()
+            .chars()
+            .filter(|ch| !matches!(ch, ' ' | '\n' | '\r' | '\t'))
+            .collect()
+    }
+
     fn pick_value<'a>(obj: &'a serde_json::Map<String, Value>, key: &str) -> Option<&'a Value> {
         if let Some(value) = obj.get(key) {
             return Some(value);
@@ -767,6 +1347,27 @@ impl TaskHandlers {
         obj.iter()
             .find(|(candidate, _)| Self::normalize_key(candidate) == normalized_key)
             .map(|(_, value)| value)
+    }
+
+    fn pick_optional_i64(obj: &serde_json::Map<String, Value>, keys: &[&str]) -> Option<i64> {
+        for key in keys {
+            if let Some(value) = Self::pick_value(obj, key) {
+                match value {
+                    Value::Number(v) => {
+                        if let Some(parsed) = v.as_i64() {
+                            return Some(parsed);
+                        }
+                    }
+                    Value::String(v) => {
+                        if let Ok(parsed) = v.trim().parse::<i64>() {
+                            return Some(parsed);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        None
     }
 
     fn json_value_to_text(value: &Value) -> Option<String> {
@@ -971,7 +1572,10 @@ impl TaskHandlers {
             .unwrap_or_else(|| "medium".to_string())
             .trim()
             .to_ascii_lowercase();
-        if matches!(value.as_str(), "blocker" | "high" | "medium" | "low" | "info") {
+        if matches!(
+            value.as_str(),
+            "blocker" | "high" | "medium" | "low" | "info"
+        ) {
             value
         } else {
             "medium".to_string()
@@ -1189,18 +1793,41 @@ mod tests {
     use std::path::PathBuf;
 
     use super::TaskHandlers;
+    use crate::services::ai_pipeline_service::RunAiTaskPipelineInput;
+    use crate::services::chapter_service::{ChapterInput, ChapterService};
+    use crate::services::character_service::CharacterService;
     use crate::services::project_service::{CreateProjectInput, ProjectService};
     use serde_json::Value;
     use uuid::Uuid;
 
     fn create_temp_workspace() -> PathBuf {
-        let workspace = std::env::temp_dir().join(format!("novelforge-task-handlers-{}", Uuid::new_v4()));
+        let workspace =
+            std::env::temp_dir().join(format!("novelforge-task-handlers-{}", Uuid::new_v4()));
         fs::create_dir_all(&workspace).expect("create temp workspace");
         workspace
     }
 
     fn remove_temp_workspace(path: &PathBuf) {
         let _ = fs::remove_dir_all(path);
+    }
+
+    fn build_pipeline_input(
+        project_root: &str,
+        task_type: &str,
+        chapter_id: Option<String>,
+    ) -> RunAiTaskPipelineInput {
+        RunAiTaskPipelineInput {
+            project_root: project_root.to_string(),
+            task_type: task_type.to_string(),
+            chapter_id,
+            ui_action: None,
+            user_instruction: "测试输入".to_string(),
+            selected_text: None,
+            chapter_content: None,
+            blueprint_step_key: None,
+            blueprint_step_title: None,
+            auto_persist: true,
+        }
     }
 
     #[test]
@@ -1342,6 +1969,28 @@ mod tests {
     }
 
     #[test]
+    fn extract_output_value_accepts_json_with_markdown_wrapping_and_prefix_text() {
+        let raw = r#"
+        这是结果：
+        ```json
+        {
+          "name": "沈惊寒",
+          "roleType": "主角",
+          "motivation": "复仇并守护遗孤"
+        }
+        ```
+        请直接入库。
+        "#;
+
+        let value = TaskHandlers::extract_output_value(raw)
+            .expect("extract_output_value should parse markdown wrapped json");
+        let obj = value.as_object().expect("parsed value should be object");
+
+        assert_eq!(obj.get("name").and_then(Value::as_str), Some("沈惊寒"));
+        assert_eq!(obj.get("roleType").and_then(Value::as_str), Some("主角"));
+    }
+
+    #[test]
     fn pick_optional_string_supports_normalized_keys() {
         let mut obj = serde_json::Map::new();
         obj.insert(
@@ -1380,7 +2029,10 @@ mod tests {
             Some(vec!["血契印".to_string(), "宗门法典".to_string()])
         );
         assert_eq!(input.examples.as_deref(), Some("祭火阵反噬"));
-        assert_eq!(input.contradiction_policy.as_deref(), Some("冲突时以铁律优先"));
+        assert_eq!(
+            input.contradiction_policy.as_deref(),
+            Some("冲突时以铁律优先")
+        );
     }
 
     #[test]
@@ -1504,6 +2156,241 @@ mod tests {
             input.related_characters,
             Some(vec!["沈惊寒".to_string(), "玄霄宗主".to_string()])
         );
+
+        remove_temp_workspace(&workspace);
+    }
+
+    #[test]
+    fn persist_task_output_chapter_plan_updates_chapter_summary_and_target_words() {
+        let workspace = create_temp_workspace();
+        let project_service = ProjectService;
+        let chapter_service = ChapterService;
+        let project = project_service
+            .create_project(CreateProjectInput {
+                name: "章节规划回填测试".to_string(),
+                author: None,
+                genre: "玄幻".to_string(),
+                target_words: None,
+                save_directory: workspace.to_string_lossy().to_string(),
+            })
+            .expect("project should be created");
+
+        let chapter = chapter_service
+            .create_chapter(
+                &project.project_root,
+                ChapterInput {
+                    title: "第一章".to_string(),
+                    summary: Some("旧摘要".to_string()),
+                    target_words: Some(1200),
+                    status: Some("drafting".to_string()),
+                },
+            )
+            .expect("chapter should be created");
+
+        let input = build_pipeline_input(
+            &project.project_root,
+            "chapter.plan",
+            Some(chapter.id.clone()),
+        );
+        let output = r#"
+        {
+          "chapterFunction": "推进主线并建立对立",
+          "successCriteria": "主角完成线索确认并触发下一冲突",
+          "emotionalArc": "压抑 -> 爆发",
+          "scenes": [
+            {"purpose":"线索确认"},
+            {"purpose":"正面冲突"}
+          ],
+          "foreshadowingPlan": "埋下逆命印线索",
+          "totalWords": 3600,
+          "cliffhanger": "反派现身",
+          "notes": "需保持冷峻文风"
+        }
+        "#;
+
+        let records = TaskHandlers::default()
+            .persist_task_output(
+                "chapter.plan",
+                &project.project_root,
+                &input,
+                output,
+                "req-chapter-plan",
+            )
+            .expect("chapter plan persist should succeed");
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].entity_type, "chapter");
+        assert_eq!(records[0].entity_id, chapter.id);
+
+        let chapters = chapter_service
+            .list_chapters(&project.project_root)
+            .expect("list chapters should succeed");
+        assert_eq!(chapters.len(), 1);
+        assert_eq!(chapters[0].target_words, 3600);
+        assert_eq!(chapters[0].status, "planned");
+        assert!(chapters[0].summary.contains("章节功能"));
+        assert!(chapters[0].summary.contains("伏笔处理"));
+
+        remove_temp_workspace(&workspace);
+    }
+
+    #[test]
+    fn persist_task_output_timeline_review_updates_chapter_rows() {
+        let workspace = create_temp_workspace();
+        let project_service = ProjectService;
+        let chapter_service = ChapterService;
+        let project = project_service
+            .create_project(CreateProjectInput {
+                name: "时间线回填测试".to_string(),
+                author: None,
+                genre: "玄幻".to_string(),
+                target_words: None,
+                save_directory: workspace.to_string_lossy().to_string(),
+            })
+            .expect("project should be created");
+
+        chapter_service
+            .create_chapter(
+                &project.project_root,
+                ChapterInput {
+                    title: "第一章".to_string(),
+                    summary: Some("旧摘要".to_string()),
+                    target_words: Some(1000),
+                    status: Some("drafting".to_string()),
+                },
+            )
+            .expect("chapter should be created");
+
+        let input = build_pipeline_input(&project.project_root, "timeline.review", None);
+        let output = r#"
+        {
+          "timelineEntries": [
+            {
+              "chapterIndex": 1,
+              "title": "第一章 风起",
+              "summary": "主角在雪夜确认灭门线索。",
+              "status": "planned",
+              "targetWords": 2800
+            }
+          ]
+        }
+        "#;
+
+        let records = TaskHandlers::default()
+            .persist_task_output(
+                "timeline.review",
+                &project.project_root,
+                &input,
+                output,
+                "req-timeline",
+            )
+            .expect("timeline persist should succeed");
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].entity_type, "timeline_entry_batch");
+        assert_eq!(records[0].action, "updated:1");
+
+        let chapters = chapter_service
+            .list_chapters(&project.project_root)
+            .expect("list chapters should succeed");
+        assert_eq!(chapters[0].title, "第一章 风起");
+        assert_eq!(chapters[0].summary, "主角在雪夜确认灭门线索。");
+        assert_eq!(chapters[0].status, "planned");
+        assert_eq!(chapters[0].target_words, 2800);
+
+        remove_temp_workspace(&workspace);
+    }
+
+    #[test]
+    fn persist_task_output_relationship_review_creates_relationship_edges() {
+        let workspace = create_temp_workspace();
+        let project_service = ProjectService;
+        let character_service = CharacterService;
+        let project = project_service
+            .create_project(CreateProjectInput {
+                name: "关系回填测试".to_string(),
+                author: None,
+                genre: "玄幻".to_string(),
+                target_words: None,
+                save_directory: workspace.to_string_lossy().to_string(),
+            })
+            .expect("project should be created");
+
+        character_service
+            .create(
+                &project.project_root,
+                crate::services::character_service::CreateCharacterInput {
+                    name: "沈惊寒".to_string(),
+                    role_type: "主角".to_string(),
+                    aliases: Some(vec!["寒剑".to_string()]),
+                    age: None,
+                    gender: None,
+                    identity_text: None,
+                    appearance: None,
+                    motivation: None,
+                    desire: None,
+                    fear: None,
+                    flaw: None,
+                    arc_stage: None,
+                    locked_fields: None,
+                    notes: None,
+                },
+            )
+            .expect("character should be created");
+        character_service
+            .create(
+                &project.project_root,
+                crate::services::character_service::CreateCharacterInput {
+                    name: "苏晚棠".to_string(),
+                    role_type: "配角".to_string(),
+                    aliases: None,
+                    age: None,
+                    gender: None,
+                    identity_text: None,
+                    appearance: None,
+                    motivation: None,
+                    desire: None,
+                    fear: None,
+                    flaw: None,
+                    arc_stage: None,
+                    locked_fields: None,
+                    notes: None,
+                },
+            )
+            .expect("character should be created");
+
+        let input = build_pipeline_input(&project.project_root, "relationship.review", None);
+        let output = r#"
+        {
+          "relationGraph": {
+            "edges": [
+              {
+                "sourceName": "寒剑",
+                "targetName": "苏晚棠",
+                "relationshipType": "守护与试探",
+                "description": "两人在共同追查中形成脆弱同盟。"
+              }
+            ]
+          }
+        }
+        "#;
+
+        let records = TaskHandlers::default()
+            .persist_task_output(
+                "relationship.review",
+                &project.project_root,
+                &input,
+                output,
+                "req-relationship",
+            )
+            .expect("relationship persist should succeed");
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].entity_type, "character_relationship_batch");
+        assert_eq!(records[0].action, "inserted:1");
+
+        let relations = crate::services::character_service::RelationshipService::default()
+            .list(&project.project_root, None)
+            .expect("list relationships should succeed");
+        assert_eq!(relations.len(), 1);
+        assert_eq!(relations[0].relationship_type, "守护与试探");
 
         remove_temp_workspace(&workspace);
     }

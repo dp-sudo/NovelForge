@@ -25,21 +25,26 @@ export function TimelinePage() {
   const [aiError, setAiError] = useState<string | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
 
-  useEffect(() => {
+  const loadTimeline = async () => {
     if (!projectRoot) {
       setEntries([]);
       return;
     }
-
     setLoading(true);
     setError(null);
-    listTimelineEntries(projectRoot)
-      .then((rows) => setEntries(rows))
-      .catch((err) => {
-        setError(err instanceof Error ? err.message : "加载时间线失败");
-        setEntries([]);
-      })
-      .finally(() => setLoading(false));
+    try {
+      const rows = await listTimelineEntries(projectRoot);
+      setEntries(rows);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "加载时间线失败");
+      setEntries([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadTimeline();
   }, [projectRoot]);
 
   const sortedEntries = useMemo(() => {
@@ -130,10 +135,12 @@ export function TimelinePage() {
                 const result = await runModuleAiTask({
                   projectRoot,
                   taskType: "timeline.review",
+                  autoPersist: true,
                   uiAction: "timeline.ai.review",
                   userInstruction: aiPrompt,
                 });
                 setAiResult(result || "AI 未返回内容。");
+                await loadTimeline();
               } catch (err) {
                 setAiError(err instanceof Error ? err.message : "AI 审阅失败");
               } finally {
