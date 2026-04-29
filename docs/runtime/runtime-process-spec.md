@@ -1,9 +1,9 @@
 # NovelForge 运行流程文档（Main / Renderer / API / Service）
 
 ## 1. 文档信息
-- 版本：v0.6
+- 版本：v0.7
 - 状态：S18（AI Pipeline v1 已接入编辑器主链路）
-- 最后更新：2026-04-28
+- 最后更新：2026-04-29
 
 ## 2. 运行时角色
 ### 2.1 Main（Tauri + Rust）
@@ -25,8 +25,8 @@
   - `skillsApi`（技能管理）
 
 ### 2.4 兼容层
-- 保留 legacy AI 命令：`generate_ai_preview`、`stream_ai_generate`、`stream_ai_chapter_task`。
-- `stream_ai_chapter_task` 现已桥接到 pipeline 事件，再转发到旧事件名。
+- 问题3修复：legacy AI 命令 `generate_ai_preview`、`stream_ai_generate`、`stream_ai_chapter_task` 已从当前代码命令面移除。
+- 问题4修复：仅保留少量 compatibility-only 命令（如 `load_provider_config`、`save_provider_config`、`register_ai_provider`、`test_ai_connection`），用于历史调用兼容。
 
 ## 3. 启动流程
 1. `main.rs` 调用 `app_lib::run()`。
@@ -113,8 +113,7 @@
   - pipeline 错误会被编码后注入 legacy stream chunk，供兼容桥接解析。
 
 ## 6. 当前已知流程差异
-- `generate_ai_preview` 仍带 mock fallback（用于兼容与兜底），不是推荐主链路。
-- `stream_ai_generate` 为旧流式入口，仍保留但不用于编辑器 9 按钮主流程。
+- 问题3修复：编辑器 AI 主链路为 `run_ai_task_pipeline + ai:pipeline:event`；旧流式命令不再是可用接口。
 - 结构化抽取采用规则启发式，仍需人工确认，不自动直接写核心资产表。
 
 ## 7. 文档维护规则

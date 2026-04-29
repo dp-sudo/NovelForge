@@ -179,6 +179,7 @@ export async function recoverDraft(chapterId: string, projectRoot: string): Prom
 }
 
 export async function readChapterContent(chapterId: string, projectRoot: string): Promise<string> {
+  // 问题1修复(调用面): 编辑器切章时必须先走正式正文读取，再做草稿恢复决策。
   return invokeCommand<string>("read_chapter_content", {
     projectRoot,
     chapterId,

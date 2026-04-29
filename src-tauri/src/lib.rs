@@ -201,6 +201,7 @@ pub fn run() {
             commands::settings_commands::delete_task_route,
             commands::settings_commands::check_remote_registry,
             commands::settings_commands::apply_registry_update,
+            // 问题4修复(收敛计划): 以下为 compatibility-only 命令，官方调用面统一走 src/api/settingsApi.ts。
             commands::settings_commands::load_provider_config,
             commands::settings_commands::save_provider_config,
             commands::settings_commands::test_provider_connection,
@@ -208,6 +209,7 @@ pub fn run() {
             commands::settings_commands::save_editor_settings,
             commands::ai_commands::run_ai_task_pipeline,
             commands::ai_commands::cancel_ai_task_pipeline,
+            // 问题4修复(收敛计划): 以下为 compatibility-only 命令，后续将逐步移除。
             commands::ai_commands::register_ai_provider,
             commands::ai_commands::test_ai_connection,
             commands::skill_commands::list_skills,

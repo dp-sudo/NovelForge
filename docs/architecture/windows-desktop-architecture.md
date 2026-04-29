@@ -112,12 +112,10 @@
 - 阶段：`validate -> context -> route -> prompt -> generate -> postprocess -> persist -> done`
 - 命令入口：
   - `run_ai_task_pipeline`（新协议）
-  - `stream_ai_chapter_task`（兼容入口，内部桥接到 pipeline）
   - `cancel_ai_task_pipeline`
 - 事件协议：
   - 主事件：`ai:pipeline:event`
   - 事件类型：`start | progress | delta | done | error`
-  - 兼容桥接：`ai:stream-chunk:{requestId}` / `ai:stream-done:{requestId}`
 
 ### 6.3 Prompt 解析策略
 - 优先读取技能 Markdown 模板（`SkillRegistry`）。
@@ -134,14 +132,14 @@
 ## 7. 命令面（按域摘要）
 - Project：项目创建/打开/最近项目 + 写作风格保存读取 + Git 仓库与快照。
 - Chapter：章节 CRUD、重排、自动保存/恢复、快照、卷管理。
-- AI：预览、legacy stream、pipeline run/cancel、章节流式任务、蓝图/角色/设定/剧情/一致性 AI 任务。
+- AI：pipeline run/cancel、蓝图/角色/设定/剧情/一致性 AI 任务（legacy stream 命令已移除）。
 - Context：上下文聚合、资产候选采纳、结构化草案确认。
 - Settings：Provider/模型/路由/registry、编辑器设置、授权、更新。
 - Skills：技能列表/详情/内容读取、创建、编辑、删除、导入、重置、重载。
 - Search/Integrity：关键字+语义检索、索引重建、项目完整性检查。
 
 ## 8. 当前过渡态与风险
-- `generate_ai_preview` 与 `stream_ai_generate` 仍保留兼容路径（主链路已切到 pipeline）。
+- compatibility-only 命令（`load_provider_config`、`save_provider_config`、`register_ai_provider`、`test_ai_connection`）仍保留用于历史调用兼容，不作为新接入路径。
 - Pipeline 对模型可用性、API Key、路由配置依赖强，未配置时会在 `route/generate` 阶段显式失败。
 - 结构化抽取为启发式规则，存在误报；当前策略是“先草案、再人工确认入库”。
 - 向量索引与草案池都会随项目规模增长，需持续关注 DB 体积与索引策略。

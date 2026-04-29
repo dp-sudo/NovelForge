@@ -12,6 +12,7 @@ import {
   listChapters,
   listSnapshots,
   listVolumes,
+  readChapterContent,
   readSnapshotContent,
   recoverDraft,
   saveChapterContent,
@@ -36,6 +37,7 @@ import { Textarea } from "../../components/forms/Textarea";
 import { Button } from "../../components/ui/Button.js";
 import { FindBar } from "../../components/editor/FindBar.js";
 import { canonicalTaskType, getTaskRequirements } from "../../utils/taskRouting.js";
+import { loadEditorChapterContentWithRecovery } from "./chapterLoadFlow.js";
 
 const AUTOSAVE_DELAY_MS = 5000;
 
@@ -116,6 +118,7 @@ export function EditorPage() {
   const activeAiRequestIdRef = useRef<string | null>(null);
   const aiRunTokenRef = useRef(0);
   const lastChapterIdRef = useRef<string | null>(null);
+  const hydratingContentRef = useRef(false);
 
   const [chapters, setChapters] = useState<ChapterRecord[]>([]);
   const [volumes, setVolumes] = useState<VolumeRecord[]>([]);
@@ -207,15 +210,29 @@ export function EditorPage() {
     const cid: string = chapterId;
     const root: string = projectRoot;
     let cancelled = false;
+    const setLoadedContent = (value: string) => {
+      // 问题1修复(1/3): 切章/进入编辑器时先写入“正式正文”，避免空内容覆盖已有章节。
+      hydratingContentRef.current = true;
+      store.setContent(value);
+      store.setIsDirty(false);
+      store.setSaveStatus("saved");
+    };
     async function loadChapterRuntimeData() {
-      try {
-        const result = await recoverDraft(cid, root);
-        if (!cancelled && result.hasNewerDraft && result.draftContent) {
-          setRecoveryContent(result.draftContent);
+      store.setIsDirty(false);
+      store.setSaveStatus("saved");
+      const { persistedContent, recoveryContent } = await loadEditorChapterContentWithRecovery({
+        chapterId: cid,
+        projectRoot: root,
+        readChapterContent,
+        recoverDraft,
+      });
+      if (!cancelled) {
+        // 问题1修复(2/3): 先读取正式正文，再进行草稿恢复决策，防止恢复提示与正文加载顺序冲突。
+        setLoadedContent(persistedContent);
+        if (recoveryContent) {
+          setRecoveryContent(recoveryContent);
           setShowRecovery(true);
-        }
-      } catch {
-        if (!cancelled) {
+        } else {
           setShowRecovery(false);
         }
       }
@@ -233,6 +250,11 @@ export function EditorPage() {
   useEffect(() => {
     const wc = content.replace(/\s+/g, "").length;
     store.setWordCount(wc);
+    // 问题1修复(3/3): 加载正式正文时不标记 unsaved，避免误触发自动保存覆盖已有内容。
+    if (hydratingContentRef.current) {
+      hydratingContentRef.current = false;
+      return;
+    }
     store.setIsDirty(true);
     store.setSaveStatus("unsaved");
   }, [content]);
@@ -365,7 +387,6 @@ export function EditorPage() {
   function handleSelectChapter(ch: ChapterRecord) {
     void cancelActivePipeline("select_chapter");
     store.setActiveChapter(ch.id, ch.title);
-    store.setContent("");
     store.setSaveStatus("saved");
     store.setIsDirty(false);
     setCandidateStatus({});

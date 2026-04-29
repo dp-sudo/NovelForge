@@ -155,6 +155,7 @@ export function ChaptersPage() {
   }
 
   function handleOpenEditor(chapter: ChapterRecord) {
+    // 问题1修复(链路入口): 这里只切路由与章节，不主动改写正文；正文加载统一由 EditorPage 处理。
     setActiveChapter(chapter.id, chapter.title);
     setActiveRoute("editor");
   }

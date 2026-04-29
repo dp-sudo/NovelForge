@@ -339,6 +339,8 @@ pub async fn load_provider(
     provider_id: String,
     state: State<'_, AppState>,
 ) -> Result<ProviderConfig, AppErrorDto> {
+    // 问题4修复(Deprecated 命令面): 兼容入口保留，但官方调用面改为 settingsApi.list_providers/save_provider。
+    log::warn!("[DEPRECATED_COMMAND] load_provider is compatibility-only");
     state.settings_service.load_provider(&provider_id)
 }
 
@@ -535,6 +537,8 @@ pub async fn load_provider_config(
     _project_root: String,
     state: State<'_, AppState>,
 ) -> Result<serde_json::Value, AppErrorDto> {
+    // 问题4修复(Deprecated 命令面): 兼容旧协议，后续由 list_providers 收敛替代。
+    log::warn!("[DEPRECATED_COMMAND] load_provider_config is compatibility-only");
     let providers = state.settings_service.list_providers()?;
     serde_json::to_value(providers).map_err(|e| {
         AppErrorDto::new(
@@ -552,6 +556,8 @@ pub async fn save_provider_config(
     input: serde_json::Value,
     state: State<'_, AppState>,
 ) -> Result<(), AppErrorDto> {
+    // 问题4修复(Deprecated 命令面): 兼容旧协议，后续由 save_provider 收敛替代。
+    log::warn!("[DEPRECATED_COMMAND] save_provider_config is compatibility-only");
     let mut config: ProviderConfig = serde_json::from_value(input).map_err(|e| {
         AppErrorDto::new("INVALID_INPUT", "Invalid provider config format", true)
             .with_detail(e.to_string())

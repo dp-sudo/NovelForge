@@ -1,49 +1,181 @@
-模块逐项结论（按侧边栏）
+项目背景
+NovelForge — AI 驱动的长篇小说创作辅助软件。
+核心开发理念：
 
-仪表盘：未打通 AI
-证据：DashboardPage (line 11) 仅拉统计；dashboard_service (line 27) 仅 count/sum。
+方便每位小说创作者，都能使用这个软件快速创作出高质量、逻辑性强的长篇小说。
 
-蓝图：半打通
-证据：BlueprintPage handleAiSuggest (line 378) 有 AI 按钮；但走的是 generate_blueprint_suggestion (line 428) 直调 generate_text，不是统一流式 pipeline。无阶段事件、无 requestId 级可视化、无超时治理；且“采用”后才入表，不是自动闭环。
+技术栈：
 
-角色：半打通
-证据：CharactersPage (line 103) 先 AI 生成，再手动“保存角色”；后端虽走 pipeline 命令 ai_generate_character (line 502)，但业务落库在前端二次解析后触发，不是后端原子闭环。
+前端：React 19 + TypeScript + Vite + Zustand + Tauri API
+后端：Rust 2021 + Tauri 2 + rusqlite + reqwest + tokio + keyring
+存储：章节正文 Markdown 文件化 + SQLite 元数据
 
-世界：半打通
-证据：WorldPage (line 124) 同角色逻辑，AI 输出后手动保存。
+核心架构：
 
-名词库：未打通 AI
-证据：GlossaryPage (line 9) 只有 list/create。
+前端 UI 层：src/pages/* + src/app/router.tsx
+前端调用层：src/api/*（统一通过 invokeCommand 调 Rust command）
+后端命令层：src-tauri/src/commands/*（Tauri 命令门面）
+后端服务层：src-tauri/src/services/*（业务核心）
+基础设施层：src-tauri/src/infra/*（路径、数据库、迁移）
 
-剧情：半打通
-证据：PlotPage (line 128) AI 生成后手动保存节点。
 
-叙事义务：未打通 AI
-证据：NarrativePage (line 8) 只有 CRUD，无 AI 生成/优化。
+问题修复清单
+🔴 严重问题（必须修复）
+问题1：章节正文加载链路缺口
+涉及文件：
 
-时间线：未打通 AI
-证据：TimelinePage (line 4) 仅 listTimelineEntries；后端 list_timeline_entries (line 147) 只是读 chapters.summary。
+src/pages/Editor/EditorPage.tsx:199, 365
+src/pages/Chapters/ChaptersPage.tsx:157
+src/api/chapterApi.ts:181
 
-关系图：未打通 AI（仅可视化）
-证据：RelationshipsPage (line 4) 只是读取角色+关系并展示。
+问题表现：
 
-章节：分裂状态
-证据：章节管理页 ChaptersPage (line 12) 无 AI；编辑器页 EditorPage (line 457) 才有统一 pipeline 流式生成。
-所以“章节模块”内部是“管理无 AI、编辑有 AI”。
+切章时直接 store.setContent("")
+切换章节 effect 只做 recoverDraft + refreshContext，没有 readChapterContent 加载
+已有正文可能被空内容覆盖保存
 
-检查：关键断链（后端有 AI，前端没接）
-证据：consistencyApi (line 38) 有 aiScanConsistency；但 ConsistencyPage (line 6) 只调用 scanChapterConsistency/scanFullConsistency。
-且当前规则扫描服务 consistency_service (line 45) 主要是禁用词检查，不是你期望的“专业 AI 审校”。
+修复要求：
 
-结论；
-跨模块“总链路”断点（这是我现在体验卡顿和不成闭环的根因）
-路由能力只覆盖 10 个任务类型，没覆盖时间线/关系图/名词库/叙事义务/导出/仪表盘
-证据：task_routing (line 3) 与 TASK_ROUTE_OPTIONS (line 1)。
-Pipeline 的 persist 阶段只记审计，不做业务对象自动入库
-证据：ai_pipeline_service (line 468)。
-这导致很多模块只能“AI 文本 -> 前端手工解析 -> 再创建数据”。
-章节 AI 上下文只取“chapter_links 已关联资产”，不会自动吃全项目资产
-证据：collect_related_context (line 1682)。
-而角色/世界/剧情模块新建资产时并不会自动建 chapter_links（仅写各自表），所以你会感觉“AI 没吃到全书资料”。
-蓝图链路没走统一流式治理，慢时就只看到“生成中”
-证据：BlueprintPage (line 387) + ai_commands blueprint (line 428)。
+在进入编辑器与切换章节时统一执行：读取正式正文 -> 再叠加 draft 恢复决策
+确保切换章节不丢失已有正文内容
+补一条回归测试：打开已有章节应加载历史正文，切章不丢内容
+
+
+问题2：测试主链路与生产主链路分离
+涉及文件：
+
+tests/integration/runtime-chain-full.test.ts:7
+src/services/novelforge-mvp.ts:13
+src-tauri/src/lib.rs:146
+
+问题表现：
+
+集成测试主要跑 NovelForgeMvp（Node 服务层）
+未覆盖 renderer -> src/api -> Tauri command -> Rust service 的真实调用栈
+导致"测试绿但真实链路漏检"
+
+修复要求：
+
+新增至少一层 Tauri command 级集成验证，覆盖：
+
+payload shape
+command registration
+event 协议
+
+
+关键页面补最小 UI 端到端 smoke 测试
+确保测试覆盖真实调用栈
+
+
+🟡 中等问题（必须修复）
+问题3：文档与实现存在协议漂移
+涉及文件：
+
+docs/runtime/runtime-process-spec.md:28
+docs/api/api-integration-spec.md:141
+
+问题表现：
+
+文档描述 generate_ai_preview / stream_ai_generate / stream_ai_chapter_task
+但代码主链路已是 pipeline
+新开发者可能按旧协议接入
+
+修复要求：
+
+更新文档，标注 generate_ai_preview / stream_ai_generate / stream_ai_chapter_task 为已废弃
+或移除这些命令（如果已无调用）
+文档必须与代码契约同步
+
+
+问题4：后端暴露未被前端使用的命令面
+涉及文件：
+
+src-tauri/src/lib.rs:194
+src-tauri/src/commands/settings_commands.rs:531
+
+问题表现：
+
+load_provider_config / save_provider_config / register_ai_provider / test_ai_connection 等命令
+src/api 主层未使用，但维护成本偏高
+
+修复要求：
+
+明确"唯一官方调用面"（建议 src/api 对应命令集合）
+其余未使用命令标记 deprecated
+制定收敛计划
+
+
+问题5：AI 链路与"快速自动生成"理念存在落差
+涉及文件：
+
+src/pages/Editor/EditorPage.tsx:457, 513
+src-tauri/src/services/context_service.rs:420
+
+问题表现：
+
+大量路径是"先生成预览，再人工插入/确认入库"
+自动化程度偏低
+不是"一键从基础设定到主要资产闭环"
+
+修复要求：
+
+设计"全书生成编排任务"（可分阶段、可中断）
+将当前离散任务编排成可追踪的 pipeline 工作流
+减少人工拼接步骤，提升自动化程度
+
+
+🟢 建议修复
+问题6：页面过大导致认知负担与变更风险偏高
+涉及文件：
+
+src/pages/Editor/EditorPage.tsx（1346 行）
+src/pages/Settings/SettingsPage.tsx（1742 行）
+
+问题表现：
+
+状态与副作用耦合重
+变更风险高
+
+修复要求：
+
+按"数据加载 / 命令执行 / 展示组件"拆分
+先从不改行为的 hooks 抽取开始
+分阶段降低单文件复杂度
+
+
+问题7：无效/残余代码与告警噪声
+涉及文件：
+
+src/api/dev-engine.ts:1（未被引用）
+src/pages/World/WorldPage.tsx:32（parseAiJson 未使用）
+src/pages/Plot/PlotPage.tsx:29（parseAiJson 未使用）
+
+问题表现：
+
+dev-engine.ts 无人使用
+parseAiJson 在多页面定义但未使用
+cargo test 有大量 unused / dead_code warning
+
+修复要求：
+
+清理真实无用的符号（dev-engine.ts、parseAiJson 等）
+建立"告警预算"与定期清理节奏
+消除不必要的编译告警
+
+
+修复执行约束
+
+每修复一个文件，必须在代码注释中标注：修复了哪个问题的哪一部分
+修改后确保不破坏现有功能 — 涉及测试文件同步更新
+问题1（章节加载链路）需特别谨慎 — 确保正文不丢失
+问题2（测试链路）需新增测试用例 — 覆盖真实 Tauri 调用栈
+问题3-4（文档/接口收敛）需同步更新 — 文档与代码保持一致
+
+输出要求
+修复完成后，输出修复报告，包含：
+状态数量说明✅ 已修复X列出修复的问题及对应文件⚠️ 部分修复X说明未完全修复的部分及原因❌ 未修复X说明原因
+每个已修复项需注明：
+
+问题编号
+修复涉及的文件列表
+关键修改内容摘要

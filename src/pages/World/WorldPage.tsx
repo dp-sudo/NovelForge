@@ -29,23 +29,8 @@ const CONSTRAINTS = [
 
 const emptyForm = { title: "", category: "世界规则" as const, description: "", constraintLevel: "normal" as const, examples: "" };
 
-function parseAiJson(raw: string): Record<string, unknown> {
-  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  const base = (fenced ? fenced[1] : raw).trim();
-  const start = base.indexOf("{");
-  const end = base.lastIndexOf("}");
-  if (start < 0 || end <= start) {
-    throw new Error("AI 返回内容中未找到 JSON 对象");
-  }
-  const jsonText = base.slice(start, end + 1);
-  const parsed = JSON.parse(jsonText) as unknown;
-  if (!parsed || typeof parsed !== "object") {
-    throw new Error("AI 返回 JSON 结构无效");
-  }
-  return parsed as Record<string, unknown>;
-}
-
 function pickText(value: unknown): string | undefined {
+  // 问题7修复: 清理未使用解析器，保留当前仍被调用的最小规范化工具函数。
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 

@@ -1,9 +1,9 @@
 # NovelForge API 集成文档（Frontend <-> Tauri <-> Rust）
 
 ## 1. 文档信息
-- 版本：v0.6
+- 版本：v0.7
 - 状态：S18（AI Pipeline v1 + 结构化草案池闭环）
-- 最后更新：2026-04-28
+- 最后更新：2026-04-29
 - 代码基线：`src/api/*`、`src-tauri/src/commands/*`
 
 ## 2. 集成原则（当前）
@@ -12,11 +12,16 @@
 - 任务路由统一使用 canonical task type（前后端同一映射）。
 - 错误基线：统一 `AppErrorDto`。
 
+## 2.1 唯一官方调用面（问题4修复）
+- 官方前端调用面：`src/api/*`。
+- 约束：页面层仅通过 `src/api/*` 调用 Tauri command。
+- 标记为 compatibility-only 的命令（如 `load_provider_config`、`save_provider_config`、`register_ai_provider`、`test_ai_connection`）不作为新功能接入入口。
+
 ## 3. 前端 API 入口
 - 统一调用：`src/api/tauriClient.ts`
 - 业务模块：
   - `projectApi`, `chapterApi`, `blueprintApi`, `characterApi`, `worldApi`, `glossaryApi`, `plotApi`, `narrativeApi`
-  - `consistencyApi`, `statsApi`, `settingsApi`, `skillsApi`, `contextApi`, `pipelineApi`, `aiApi`, `exportApi`, `timelineApi`
+  - `consistencyApi`, `statsApi`, `settingsApi`, `skillsApi`, `contextApi`, `pipelineApi`, `moduleAiApi`, `exportApi`, `timelineApi`
 
 ## 4. Command 契约（按模块）
 ### 4.1 Project
@@ -39,6 +44,7 @@
 - `save_chapter_content(input: { projectRoot, chapterId, content }) -> SaveChapterOutput`
 - `autosave_draft(input: { projectRoot, chapterId, content }) -> string`
 - `recover_draft(input: { projectRoot, chapterId }) -> RecoverDraftResult`
+- 问题1修复：`read_chapter_content(projectRoot, chapterId) -> string`（切章与进入编辑器先加载正式正文）
 - `delete_chapter(projectRoot, input: { id }) -> void`
 - `list_timeline_entries(projectRoot) -> TimelineEntryRecord[]`
 - `create_snapshot(projectRoot, chapterId, title?, note?) -> SnapshotRecord`
@@ -113,7 +119,7 @@
   - `load_editor_settings() -> EditorSettings`
   - `save_editor_settings(settings) -> void`
 - 兼容命令：
-  - `load_provider_config`, `save_provider_config`
+  - 问题4修复：`load_provider_config`, `save_provider_config`（compatibility-only，已标注 deprecated）
 - 授权：
   - `get_license_status() -> LicenseStatus`
   - `activate_license(licenseKey) -> LicenseStatus`
@@ -137,21 +143,18 @@
 - `refresh_skills() -> SkillManifest[]`
 
 ### 4.7 AI / Pipeline / Context
-- Legacy AI：
-  - `generate_ai_preview(projectRoot, input) -> AiPreviewResult`
-  - `stream_ai_generate(req) -> requestId` + `ai:stream-*` 事件
+- 问题3修复：legacy AI 命令 `generate_ai_preview`、`stream_ai_generate`、`stream_ai_chapter_task` 已从当前命令面移除。
 - Pipeline：
   - `run_ai_task_pipeline(input) -> requestId`
   - `cancel_ai_task_pipeline(requestId) -> void`
-  - `stream_ai_chapter_task(input) -> requestId`（兼容桥接入口）
 - AI 功能任务：
   - `generate_blueprint_suggestion(input) -> string`
   - `ai_generate_character(input) -> string`
   - `ai_generate_world_rule(input) -> string`
   - `ai_generate_plot_node(input) -> string`
   - `ai_scan_consistency(input) -> string`
-  - `register_ai_provider(config) -> void`
-  - `test_ai_connection(providerId) -> void`
+  - 问题4修复：`register_ai_provider(config) -> void`（compatibility-only，deprecated）
+  - 问题4修复：`test_ai_connection(providerId) -> void`（compatibility-only，deprecated）
 - Context：
   - `get_chapter_context(projectRoot, chapterId) -> ChapterContext`
   - `apply_asset_candidate(projectRoot, chapterId, input) -> ApplyAssetCandidateResult`
@@ -168,11 +171,6 @@
 - `recoverable?: boolean`
 - `meta?: Record<string, unknown> | null`
 
-兼容桥接：
-- `stream_ai_chapter_task` 会把 pipeline 事件转发到：
-  - `ai:stream-chunk:{requestId}`
-  - `ai:stream-done:{requestId}`
-
 ## 6. 标准错误结构
 ```ts
 interface AppErrorDto {
@@ -187,7 +185,8 @@ interface AppErrorDto {
 ## 7. 当前接口状态
 - `src/api/*` 当前业务调用均为 invoke-only。
 - 任务路由采用 canonical task type，前后端映射一致。
-- 编辑器 AI 主路径已从 legacy stream 切换到 pipeline 事件流。
+- 问题3修复：编辑器 AI 主路径已切换到 pipeline 事件流，legacy AI 命令不再开放。
+- 问题4修复：compatibility-only 命令仅用于历史兼容，不作为官方接入路径。
 - 结构化抽取结果默认仅入草案池，需显式确认命令才落核心资产表。
 
 ## 8. 最小回归链路
@@ -203,3 +202,8 @@ interface AppErrorDto {
 - 输入输出 DTO 结构变化。
 - pipeline 事件字段或阶段语义变化。
 - 路由 canonical 规则变化。
+
+## 10. Compatibility 命令收敛计划（问题4修复）
+1. `2026-04-29` 起：`load_provider_config`、`save_provider_config`、`register_ai_provider`、`test_ai_connection` 标记为 compatibility-only，并在后端日志输出 deprecated 警告。
+2. 新功能约束：页面/模块新增调用必须通过 `src/api/settingsApi.ts` 与 `src/api/pipelineApi.ts` 官方调用面。
+3. 后续移除条件：当代码库内与外部适配层不再出现上述命令调用后，从 `src-tauri/src/lib.rs` `invoke_handler` 中移除。
