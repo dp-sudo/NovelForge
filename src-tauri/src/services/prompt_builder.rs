@@ -665,6 +665,192 @@ impl PromptBuilder {
 
         parts.join("\n")
     }
+
+    /// Build a glossary term creation prompt. Returns JSON-oriented output.
+    pub fn build_glossary_create_term(
+        context: &CollectedContext,
+        user_instruction: &str,
+    ) -> String {
+        let mut parts = vec![];
+        parts.push("# 角色".to_string());
+        parts.push("你是长篇小说术语编辑，擅长建立稳定、可复用的名词体系。".to_string());
+        parts.push(String::new());
+        parts.push("# 任务".to_string());
+        parts.push("根据用户需求生成一条可直接入库的名词记录。".to_string());
+        parts.push(String::new());
+        parts.push("# 项目上下文".to_string());
+        parts.push(format!("作品名称：{}", context.global_context.project_name));
+        parts.push(format!("题材：{}", context.global_context.genre));
+        if !context.global_context.locked_terms.is_empty() {
+            parts.push(format!(
+                "已锁定名词：{}",
+                context.global_context.locked_terms.join("、")
+            ));
+        }
+        if !context.global_context.banned_terms.is_empty() {
+            parts.push(format!(
+                "已禁用词：{}",
+                context.global_context.banned_terms.join("、")
+            ));
+        }
+        parts.push(String::new());
+        parts.push("# 用户需求".to_string());
+        parts.push(user_instruction.to_string());
+        parts.push(String::new());
+        parts.push(
+            r#"# 输出 JSON
+{
+  "term": "名词",
+  "termType": "人名|地名|组织名|术语|别名|禁用词",
+  "aliases": ["别名1", "别名2"],
+  "description": "用途说明",
+  "locked": false,
+  "banned": false
+}"#
+                .to_string(),
+        );
+        parts.join("\n")
+    }
+
+    /// Build a narrative obligation creation prompt. Returns JSON-oriented output.
+    pub fn build_narrative_create_obligation(
+        context: &CollectedContext,
+        user_instruction: &str,
+    ) -> String {
+        let mut parts = vec![];
+        parts.push("# 角色".to_string());
+        parts.push("你是长篇小说叙事义务设计师，擅长把伏笔和承诺转为可追踪任务。".to_string());
+        parts.push(String::new());
+        parts.push("# 任务".to_string());
+        parts.push("根据用户需求生成一条可直接入库的叙事义务。".to_string());
+        parts.push(String::new());
+        parts.push("# 项目上下文".to_string());
+        parts.push(format!("作品名称：{}", context.global_context.project_name));
+        parts.push(format!("题材：{}", context.global_context.genre));
+        for step in &context.global_context.blueprint_summary {
+            if step.status == "completed" {
+                if let Some(ref content) = step.content {
+                    let preview: String = content.chars().take(120).collect();
+                    parts.push(format!("[蓝图] {}: {}", step.title, preview));
+                }
+            }
+        }
+        parts.push(String::new());
+        parts.push("# 用户需求".to_string());
+        parts.push(user_instruction.to_string());
+        parts.push(String::new());
+        parts.push(
+            r#"# 输出 JSON
+{
+  "obligationType": "foreshadowing|promise|mystery|relationship|setup",
+  "description": "义务描述",
+  "payoffStatus": "open|in_progress|paid_off|dropped",
+  "severity": "low|medium|high",
+  "relatedEntities": ["实体1", "实体2"]
+}"#
+                .to_string(),
+        );
+        parts.join("\n")
+    }
+
+    pub fn build_timeline_review(context: &CollectedContext, user_instruction: &str) -> String {
+        let mut parts = vec![];
+        parts.push("# 角色".to_string());
+        parts.push("你是小说时间线审阅编辑。".to_string());
+        parts.push(String::new());
+        parts.push("# 任务".to_string());
+        parts.push("结合已有蓝图与上下文，给出时间线风险与修复建议。".to_string());
+        if !user_instruction.trim().is_empty() {
+            parts.push(format!("附加要求：{}", user_instruction.trim()));
+        }
+        parts.push(String::new());
+        parts.push("# 上下文".to_string());
+        parts.push(format!("作品名称：{}", context.global_context.project_name));
+        parts.push(format!("题材：{}", context.global_context.genre));
+        for step in &context.global_context.blueprint_summary {
+            if step.status == "completed" {
+                if let Some(ref content) = step.content {
+                    let preview: String = content.chars().take(120).collect();
+                    parts.push(format!("[蓝图] {}: {}", step.title, preview));
+                }
+            }
+        }
+        parts.push(String::new());
+        parts.push("# 输出".to_string());
+        parts.push("输出 Markdown，包含：时间线风险、冲突点、建议修复步骤。".to_string());
+        parts.join("\n")
+    }
+
+    pub fn build_relationship_review(
+        context: &CollectedContext,
+        user_instruction: &str,
+    ) -> String {
+        let mut parts = vec![];
+        parts.push("# 角色".to_string());
+        parts.push("你是角色关系审阅编辑。".to_string());
+        parts.push(String::new());
+        parts.push("# 任务".to_string());
+        parts.push("评估当前角色关系与剧情推进的一致性，并给出可执行建议。".to_string());
+        if !user_instruction.trim().is_empty() {
+            parts.push(format!("附加要求：{}", user_instruction.trim()));
+        }
+        parts.push(String::new());
+        parts.push("# 上下文".to_string());
+        parts.push(format!("作品名称：{}", context.global_context.project_name));
+        parts.push(format!("题材：{}", context.global_context.genre));
+        if !context.related_context.characters.is_empty() {
+            for ch in &context.related_context.characters {
+                parts.push(format!("- 角色：{}（{}）", ch.name, ch.role_type));
+            }
+        }
+        parts.push(String::new());
+        parts.push("# 输出".to_string());
+        parts.push("输出 Markdown，包含：关系风险、缺口、建议补强方式。".to_string());
+        parts.join("\n")
+    }
+
+    pub fn build_dashboard_review(context: &CollectedContext, user_instruction: &str) -> String {
+        let mut parts = vec![];
+        parts.push("# 角色".to_string());
+        parts.push("你是小说项目运营分析助手。".to_string());
+        parts.push(String::new());
+        parts.push("# 任务".to_string());
+        parts.push("生成当前项目进展诊断，指出优先风险与下一步行动。".to_string());
+        if !user_instruction.trim().is_empty() {
+            parts.push(format!("附加要求：{}", user_instruction.trim()));
+        }
+        parts.push(String::new());
+        parts.push("# 上下文".to_string());
+        parts.push(format!("作品名称：{}", context.global_context.project_name));
+        parts.push(format!("题材：{}", context.global_context.genre));
+        for step in &context.global_context.blueprint_summary {
+            parts.push(format!("- {}: {}", step.title, step.status));
+        }
+        parts.push(String::new());
+        parts.push("# 输出".to_string());
+        parts.push("输出 Markdown，分为：进展概览、主要风险、本周建议动作。".to_string());
+        parts.join("\n")
+    }
+
+    pub fn build_export_review(context: &CollectedContext, user_instruction: &str) -> String {
+        let mut parts = vec![];
+        parts.push("# 角色".to_string());
+        parts.push("你是出版交付审阅助手。".to_string());
+        parts.push(String::new());
+        parts.push("# 任务".to_string());
+        parts.push("在导出前给出可执行的内容质检清单和修复优先级。".to_string());
+        if !user_instruction.trim().is_empty() {
+            parts.push(format!("附加要求：{}", user_instruction.trim()));
+        }
+        parts.push(String::new());
+        parts.push("# 上下文".to_string());
+        parts.push(format!("作品名称：{}", context.global_context.project_name));
+        parts.push(format!("题材：{}", context.global_context.genre));
+        parts.push(String::new());
+        parts.push("# 输出".to_string());
+        parts.push("输出 Markdown，分为：必修项、建议项、可忽略项。".to_string());
+        parts.join("\n")
+    }
 }
 
 #[cfg(test)]

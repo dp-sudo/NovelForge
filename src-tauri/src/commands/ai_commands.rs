@@ -203,6 +203,7 @@ pub async fn stream_ai_chapter_task(
         chapter_content: None,
         blueprint_step_key: None,
         blueprint_step_title: None,
+        auto_persist: false,
     };
     let listener_id =
         register_legacy_stream_bridge(&app_handle, &request_id, "ai:pipeline:event".to_string());
@@ -426,6 +427,7 @@ pub struct BlueprintSuggestionInput {
 
 #[tauri::command]
 pub async fn generate_blueprint_suggestion(
+    app_handle: tauri::AppHandle,
     input: BlueprintSuggestionInput,
     state: State<'_, AppState>,
 ) -> Result<String, AppErrorDto> {
@@ -435,58 +437,23 @@ pub async fn generate_blueprint_suggestion(
         &format!("blueprint.{}", input.step_key),
         None,
     );
-
-    // Collect global context
-    let context = state
-        .context_service
-        .collect_global_context_only(&input.project_root)?;
-
-    // Build prompt
-    let prompt = PromptBuilder::build_blueprint_step(
-        &context,
-        &input.step_key,
-        &input.step_title,
-        &input.user_instruction,
-    );
-
-    // Log the AI request
-    let _ = state.ai_service.log_ai_request(
-        &input.project_root,
-        "blueprint.generate_step",
-        None,
-        None,
-        &prompt,
-        "running",
-    );
-
-    // Generate
-    let req = UnifiedGenerateRequest {
-        model: "default".to_string(),
-        messages: vec![Message {
-            role: "user".to_string(),
-            content: vec![ContentBlock {
-                block_type: "text".to_string(),
-                text: Some("请根据上述要求生成内容。".to_string()),
-            }],
-        }],
-        system_prompt: Some(prompt),
-        stream: false,
-        task_type: Some("blueprint.generate_step".to_string()),
-        ..Default::default()
-    };
-
-    match state.ai_service.generate_text(req, None).await {
-        Ok(resp) => {
-            let text = resp
-                .choices
-                .first()
-                .and_then(|c| c.message.content.first())
-                .and_then(|c| c.text.clone())
-                .unwrap_or_default();
-            Ok(text)
-        }
-        Err(e) => Err(e),
-    }
+    run_pipeline_text_result(
+        &app_handle,
+        &state,
+        RunAiTaskPipelineInput {
+            project_root: input.project_root,
+            task_type: "blueprint.generate_step".to_string(),
+            chapter_id: None,
+            ui_action: Some("generate_blueprint_suggestion".to_string()),
+            user_instruction: input.user_instruction,
+            selected_text: None,
+            chapter_content: None,
+            blueprint_step_key: Some(input.step_key),
+            blueprint_step_title: Some(input.step_title),
+            auto_persist: true,
+        },
+    )
+    .await
 }
 
 // ── AI character creation (non-streaming) ──
@@ -518,6 +485,7 @@ pub async fn ai_generate_character(
             chapter_content: None,
             blueprint_step_key: None,
             blueprint_step_title: None,
+            auto_persist: true,
         },
     )
     .await
@@ -552,6 +520,7 @@ pub async fn ai_generate_world_rule(
             chapter_content: None,
             blueprint_step_key: None,
             blueprint_step_title: None,
+            auto_persist: true,
         },
     )
     .await
@@ -586,6 +555,7 @@ pub async fn ai_generate_plot_node(
             chapter_content: None,
             blueprint_step_key: None,
             blueprint_step_title: None,
+            auto_persist: true,
         },
     )
     .await
@@ -621,6 +591,78 @@ pub async fn ai_scan_consistency(
             chapter_content: Some(input.chapter_content),
             blueprint_step_key: None,
             blueprint_step_title: None,
+            auto_persist: true,
+        },
+    )
+    .await
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiGlossaryInput {
+    pub project_root: String,
+    pub user_description: String,
+}
+
+#[tauri::command]
+pub async fn ai_generate_glossary_term(
+    app_handle: tauri::AppHandle,
+    input: AiGlossaryInput,
+    state: State<'_, AppState>,
+) -> Result<String, AppErrorDto> {
+    crate::infra::logger::log_ai_call("glossary", "default", "glossary.create_term", None);
+    run_pipeline_text_result(
+        &app_handle,
+        &state,
+        RunAiTaskPipelineInput {
+            project_root: input.project_root,
+            task_type: "glossary.create_term".to_string(),
+            chapter_id: None,
+            ui_action: Some("ai_generate_glossary_term".to_string()),
+            user_instruction: input.user_description,
+            selected_text: None,
+            chapter_content: None,
+            blueprint_step_key: None,
+            blueprint_step_title: None,
+            auto_persist: true,
+        },
+    )
+    .await
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiNarrativeInput {
+    pub project_root: String,
+    pub user_description: String,
+}
+
+#[tauri::command]
+pub async fn ai_generate_narrative_obligation(
+    app_handle: tauri::AppHandle,
+    input: AiNarrativeInput,
+    state: State<'_, AppState>,
+) -> Result<String, AppErrorDto> {
+    crate::infra::logger::log_ai_call(
+        "narrative",
+        "default",
+        "narrative.create_obligation",
+        None,
+    );
+    run_pipeline_text_result(
+        &app_handle,
+        &state,
+        RunAiTaskPipelineInput {
+            project_root: input.project_root,
+            task_type: "narrative.create_obligation".to_string(),
+            chapter_id: None,
+            ui_action: Some("ai_generate_narrative_obligation".to_string()),
+            user_instruction: input.user_description,
+            selected_text: None,
+            chapter_content: None,
+            blueprint_step_key: None,
+            blueprint_step_title: None,
+            auto_persist: true,
         },
     )
     .await

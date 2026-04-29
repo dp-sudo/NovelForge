@@ -9,6 +9,12 @@ export const TASK_ROUTE_OPTIONS = [
   { value: "consistency.scan", label: "一致性检查" },
   { value: "blueprint.generate_step", label: "蓝图生成" },
   { value: "plot.create_node", label: "剧情生成" },
+  { value: "glossary.create_term", label: "名词生成" },
+  { value: "narrative.create_obligation", label: "叙事义务生成" },
+  { value: "timeline.review", label: "时间线审阅" },
+  { value: "relationship.review", label: "关系审阅" },
+  { value: "dashboard.review", label: "仪表盘审阅" },
+  { value: "export.review", label: "导出审阅" },
   { value: "custom", label: "自定义任务（兜底）" },
 ] as const;
 
@@ -58,6 +64,18 @@ const TASK_TYPE_ALIAS_MAP: Record<string, string> = {
   consistency_scan: "consistency.scan",
   generate_blueprint_step: "blueprint.generate_step",
   blueprint_generate: "blueprint.generate_step",
+  glossary_create_term: "glossary.create_term",
+  "glossary.create": "glossary.create_term",
+  narrative_create_obligation: "narrative.create_obligation",
+  "narrative.create": "narrative.create_obligation",
+  timeline_review: "timeline.review",
+  "timeline.scan": "timeline.review",
+  relationship_review: "relationship.review",
+  "relationships.review": "relationship.review",
+  dashboard_review: "dashboard.review",
+  "dashboard.analyze": "dashboard.review",
+  export_review: "export.review",
+  "export.check": "export.review",
 };
 
 export const TASK_TYPE_LABELS: Record<string, string> = {
@@ -69,6 +87,12 @@ export const TASK_TYPE_LABELS: Record<string, string> = {
   "character.create": "创建角色卡",
   "world.create_rule": "创建世界规则",
   "plot.create_node": "创建剧情节点",
+  "glossary.create_term": "创建名词",
+  "narrative.create_obligation": "创建叙事义务",
+  "timeline.review": "时间线审阅",
+  "relationship.review": "关系审阅",
+  "dashboard.review": "仪表盘审阅",
+  "export.review": "导出审阅",
   "consistency.scan": "一致性检查",
   "blueprint.generate_step": "生成蓝图步骤",
   custom: "自定义",
@@ -95,7 +119,7 @@ const TASK_REQUIREMENT_MAP: Record<string, {
     requiresChapterContent: false
   },
   "chapter.plan": {
-    requiresChapterId: true,
+    requiresChapterId: false,
     requiresSelectedText: false,
     requiresUserInstruction: false,
     requiresChapterContent: false
@@ -135,6 +159,42 @@ const TASK_REQUIREMENT_MAP: Record<string, {
     requiresSelectedText: false,
     requiresUserInstruction: false,
     requiresChapterContent: true
+  },
+  "glossary.create_term": {
+    requiresChapterId: false,
+    requiresSelectedText: false,
+    requiresUserInstruction: true,
+    requiresChapterContent: false
+  },
+  "narrative.create_obligation": {
+    requiresChapterId: false,
+    requiresSelectedText: false,
+    requiresUserInstruction: true,
+    requiresChapterContent: false
+  },
+  "timeline.review": {
+    requiresChapterId: false,
+    requiresSelectedText: false,
+    requiresUserInstruction: false,
+    requiresChapterContent: false
+  },
+  "relationship.review": {
+    requiresChapterId: false,
+    requiresSelectedText: false,
+    requiresUserInstruction: false,
+    requiresChapterContent: false
+  },
+  "dashboard.review": {
+    requiresChapterId: false,
+    requiresSelectedText: false,
+    requiresUserInstruction: false,
+    requiresChapterContent: false
+  },
+  "export.review": {
+    requiresChapterId: false,
+    requiresSelectedText: false,
+    requiresUserInstruction: false,
+    requiresChapterContent: false
   }
 };
 

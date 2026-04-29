@@ -9,6 +9,7 @@ import { Textarea } from "../../components/forms/Textarea.js";
 import { Modal } from "../../components/dialogs/Modal.js";
 import { ConfirmDialog } from "../../components/dialogs/ConfirmDialog.js";
 import { Badge } from "../../components/ui/Badge.js";
+import { runModuleAiTask } from "../../api/moduleAiApi.js";
 import {
   assignChapterVolume,
   createChapter,
@@ -54,6 +55,11 @@ export function ChaptersPage() {
   const [volumeFilter, setVolumeFilter] = useState<VolumeFilter>("all");
   const [form, setForm] = useState({ title: "", summary: "", targetWords: 3000 });
   const [volumeForm, setVolumeForm] = useState({ title: "", description: "" });
+  const [showAiReview, setShowAiReview] = useState(false);
+  const [aiPrompt, setAiPrompt] = useState("");
+  const [aiResult, setAiResult] = useState<string | null>(null);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const setActiveRoute = useUiStore((s) => s.setActiveRoute);
   const setActiveChapter = useEditorStore((s) => s.setActiveChapter);
@@ -208,6 +214,19 @@ export function ChaptersPage() {
           </Button>
           <Button variant="secondary" size="sm" onClick={() => setShowCreateVolume(true)} disabled={!projectRoot}>
             新建卷
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              setAiPrompt("");
+              setAiResult(null);
+              setAiError(null);
+              setShowAiReview(true);
+            }}
+            disabled={!projectRoot}
+          >
+            AI 规划
           </Button>
           <Button variant="primary" size="sm" onClick={() => setShowNew(true)} disabled={!projectRoot}>
             新建章节
@@ -403,6 +422,54 @@ export function ChaptersPage() {
               创建卷
             </Button>
           </div>
+        </div>
+      </Modal>
+
+      <Modal open={showAiReview} onClose={() => setShowAiReview(false)} title="AI 章节规划建议" width="lg">
+        <div className="space-y-4">
+          <Textarea
+            label="附加要求（可选）"
+            value={aiPrompt}
+            onChange={(e) => setAiPrompt(e.target.value)}
+            placeholder="例如：优先检查分卷节奏和章节目标衔接"
+            className="min-h-[90px]"
+          />
+          <Button
+            variant="primary"
+            loading={aiLoading}
+            onClick={async () => {
+              if (!projectRoot) return;
+              setAiLoading(true);
+              setAiResult(null);
+              setAiError(null);
+              try {
+                const result = await runModuleAiTask({
+                  projectRoot,
+                  taskType: "chapter.plan",
+                  uiAction: "chapters.ai.plan",
+                  userInstruction: aiPrompt,
+                });
+                setAiResult(result || "AI 未返回内容。");
+              } catch (err) {
+                setAiError(err instanceof Error ? err.message : "AI 规划失败");
+              } finally {
+                setAiLoading(false);
+              }
+            }}
+            disabled={!projectRoot}
+          >
+            {aiLoading ? "分析中..." : "生成章节规划建议"}
+          </Button>
+          {aiError && (
+            <div className="p-3 rounded-lg bg-error/10 border border-error/30 text-sm text-error">
+              {aiError}
+            </div>
+          )}
+          {aiResult && (
+            <div className="p-4 rounded-xl bg-primary/5 border border-primary/20">
+              <pre className="text-sm text-surface-200 whitespace-pre-wrap font-sans leading-relaxed max-h-80 overflow-y-auto">{aiResult}</pre>
+            </div>
+          )}
         </div>
       </Modal>
 

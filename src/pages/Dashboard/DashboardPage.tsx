@@ -1,14 +1,24 @@
+import { useState } from "react";
 import { useProjectStore } from "../../stores/projectStore.js";
 import { useUiStore } from "../../stores/uiStore.js";
 import { Card } from "../../components/cards/Card.js";
 import { Badge } from "../../components/ui/Badge.js";
+import { Button } from "../../components/ui/Button.js";
+import { Modal } from "../../components/dialogs/Modal.js";
+import { Textarea } from "../../components/forms/Textarea.js";
 import { useDashboardStats } from "../../hooks/useApi.js";
+import { runModuleAiTask } from "../../api/moduleAiApi.js";
 
 export function DashboardPage() {
   const project = useProjectStore((s) => s.currentProject);
   const projectRoot = useProjectStore((s) => s.currentProjectPath);
   const setActiveRoute = useUiStore((s) => s.setActiveRoute);
   const { data: stats, isLoading } = useDashboardStats(projectRoot);
+  const [showAiReview, setShowAiReview] = useState(false);
+  const [aiPrompt, setAiPrompt] = useState("");
+  const [aiResult, setAiResult] = useState<string | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
 
   const statCards = [
     { label: "总字数", value: stats?.totalWords.toLocaleString() ?? "0", color: "text-info" },
@@ -30,9 +40,23 @@ export function DashboardPage() {
 
   return (
     <div className="max-w-5xl mx-auto">
-      <h1 className="text-2xl font-bold text-surface-100 mb-1">
-        {project?.name ?? "项目仪表盘"}
-      </h1>
+      <div className="flex items-center justify-between mb-1">
+        <h1 className="text-2xl font-bold text-surface-100">
+          {project?.name ?? "项目仪表盘"}
+        </h1>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => {
+            setAiError(null);
+            setAiResult(null);
+            setAiPrompt("");
+            setShowAiReview(true);
+          }}
+        >
+          AI 诊断
+        </Button>
+      </div>
       <p className="text-sm text-surface-400 mb-6">
         {project?.genre ? `类型: ${project.genre}` : ""}
         {project?.targetWords
@@ -106,6 +130,54 @@ export function DashboardPage() {
           </div>
         </Card>
       )}
+
+      <Modal open={showAiReview} onClose={() => setShowAiReview(false)} title="AI 仪表盘诊断" width="lg">
+        <div className="space-y-4">
+          <Textarea
+            label="附加要求（可选）"
+            value={aiPrompt}
+            onChange={(e) => setAiPrompt(e.target.value)}
+            placeholder="例如：更关注本周应该优先推进的两个任务"
+            className="min-h-[90px]"
+          />
+          <Button
+            variant="primary"
+            loading={aiLoading}
+            onClick={async () => {
+              if (!projectRoot) return;
+              setAiLoading(true);
+              setAiError(null);
+              setAiResult(null);
+              try {
+                const result = await runModuleAiTask({
+                  projectRoot,
+                  taskType: "dashboard.review",
+                  uiAction: "dashboard.ai.review",
+                  userInstruction: aiPrompt,
+                });
+                setAiResult(result || "AI 未返回内容。");
+              } catch (error) {
+                setAiError(error instanceof Error ? error.message : "AI 诊断失败");
+              } finally {
+                setAiLoading(false);
+              }
+            }}
+            disabled={!projectRoot}
+          >
+            {aiLoading ? "分析中..." : "生成诊断"}
+          </Button>
+          {aiError && (
+            <div className="p-3 rounded-lg bg-error/10 border border-error/30 text-sm text-error">
+              {aiError}
+            </div>
+          )}
+          {aiResult && (
+            <div className="p-4 rounded-xl bg-primary/5 border border-primary/20">
+              <pre className="text-sm text-surface-200 whitespace-pre-wrap font-sans leading-relaxed max-h-80 overflow-y-auto">{aiResult}</pre>
+            </div>
+          )}
+        </div>
+      </Modal>
     </div>
   );
 }

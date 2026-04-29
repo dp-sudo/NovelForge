@@ -391,6 +391,7 @@ export function BlueprintPage() {
         userInstruction: textSummary || ""
       });
       setAiResult(suggestion.trim() ? suggestion : "AI 返回为空内容，请重试或切换模型后再试。");
+      await load();
     } catch {
       setAiResult("AI 建议生成失败。请检查 AI 供应商配置。");
     } finally { setAiLoading(false); }
@@ -485,9 +486,9 @@ export function BlueprintPage() {
             {aiResult && (
               <div className="mt-4 p-4 bg-primary/5 border border-primary/20 rounded-xl">
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-medium text-primary">AI 建议</span>
+                  <span className="text-xs font-medium text-primary">AI 建议（已自动写入当前步骤，可选同步到表单）</span>
                   <div className="flex gap-2">
-                    <Button variant="primary" size="sm" onClick={handleApplyAiResult}>采用</Button>
+                    <Button variant="primary" size="sm" onClick={handleApplyAiResult}>填充到表单</Button>
                     <Button variant="ghost" size="sm" onClick={() => setAiResult(null)}>忽略</Button>
                   </div>
                 </div>
@@ -511,7 +512,7 @@ export function BlueprintPage() {
               loading={aiLoading}
               onClick={() => void handleAiSuggest()}
             >
-              {aiLoading ? "生成中..." : "生成建议"}
+              {aiLoading ? "生成中..." : "生成并写入"}
             </Button>
             {!projectRoot && <p className="text-xs text-warning mb-2">请先打开项目</p>}
           </Card>

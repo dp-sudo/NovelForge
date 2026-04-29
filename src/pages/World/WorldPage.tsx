@@ -121,45 +121,6 @@ export function WorldPage() {
     await load();
   }
 
-  async function handleCreateFromAi() {
-    if (!projectRoot || !aiResult) return;
-    try {
-      const parsed = parseAiJson(aiResult);
-      const candidate = (parsed.worldRule && typeof parsed.worldRule === "object")
-        ? (parsed.worldRule as Record<string, unknown>)
-        : parsed;
-      const title = pickText(candidate.title) ?? pickText(candidate.name) ?? "未命名设定";
-      const category = normalizeWorldCategory(candidate.category ?? candidate.type);
-      const description = pickText(candidate.description) ?? pickText(candidate.summary) ?? "（AI 未返回描述）";
-      const examplesSource = candidate.examples;
-      const examples = typeof examplesSource === "string"
-        ? examplesSource.trim()
-        : Array.isArray(examplesSource)
-          ? examplesSource.filter((x): x is string => typeof x === "string" && x.trim().length > 0).join("；")
-          : undefined;
-      const constraintLevel = normalizeConstraintLevel(
-        candidate.constraintLevel ?? candidate.constraint_level ?? candidate.level ?? candidate.strictness
-      );
-
-      await createWorldRule(
-        {
-          title,
-          category,
-          description,
-          constraintLevel,
-          examples: examples || undefined,
-        },
-        projectRoot
-      );
-      setAiResult(null);
-      setAiDescription("");
-      setShowAiCreate(false);
-      await load();
-    } catch {
-      setAiResult("AI 返回结果不是可解析的设定 JSON，请重试或补充更明确的指令。");
-    }
-  }
-
   return (
     <div className="max-w-6xl mx-auto">
       <div className="flex items-center justify-between mb-6">
@@ -276,20 +237,24 @@ export function WorldPage() {
             onClick={async () => {
               if (!projectRoot) return;
               setAiLoading(true);
-              try { setAiResult(await aiGenerateWorldRule(projectRoot, aiDescription)); }
+              try {
+                setAiResult(await aiGenerateWorldRule(projectRoot, aiDescription));
+                await load();
+              }
               catch { setAiResult("AI 生成失败。请检查 AI 供应商配置。"); }
               finally { setAiLoading(false); }
             }}
             disabled={!aiDescription.trim()}
           >
-            {aiLoading ? "生成中..." : "生成"}
+            {aiLoading ? "生成中..." : "生成并入库"}
           </Button>
           {aiResult && (
             <div className="p-4 bg-primary/5 border border-primary/20 rounded-xl">
+              <p className="text-xs text-success mb-2">AI 结果已自动写入世界设定库。</p>
               <pre className="text-sm text-surface-200 whitespace-pre-wrap font-sans leading-relaxed max-h-64 overflow-y-auto">{aiResult}</pre>
               <div className="flex gap-2 mt-3">
-                <Button variant="primary" size="sm" onClick={() => void handleCreateFromAi()}>保存设定</Button>
-                <Button variant="primary" size="sm" onClick={() => { setAiResult(null); setShowAiCreate(false); }}>关闭</Button>
+                <Button variant="ghost" size="sm" onClick={() => setAiResult(null)}>重新生成</Button>
+                <Button variant="primary" size="sm" onClick={() => { setAiResult(null); setShowAiCreate(false); setAiDescription(""); }}>关闭</Button>
               </div>
             </div>
           )}

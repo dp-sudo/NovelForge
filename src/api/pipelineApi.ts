@@ -33,6 +33,7 @@ export interface RunTaskPipelineInput {
   chapterContent?: string;
   blueprintStepKey?: string;
   blueprintStepTitle?: string;
+  autoPersist?: boolean;
 }
 
 export interface AiPipelineEvent {
@@ -135,6 +136,7 @@ export async function runTaskPipeline(
       chapterContent: input.chapterContent,
       blueprintStepKey: input.blueprintStepKey,
       blueprintStepTitle: input.blueprintStepTitle,
+      autoPersist: input.autoPersist ?? false,
     },
   });
   const requestId = await withTimeout(

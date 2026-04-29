@@ -1679,19 +1679,28 @@ impl ContextService {
                     .with_detail(err.to_string())
             })?;
 
-        // Characters linked to this chapter
+        // Linked assets first, then project-level fallback assets.
+        // This avoids context starvation when a newly created asset has not been linked yet.
         let characters: Vec<CharacterSummary> = conn
             .prepare(
                 r#"
                 SELECT c.id, c.name, c.role_type, c.aliases, c.motivation, c.desire,
                        c.fear, c.flaw, c.arc_stage, c.identity_text, c.appearance, c.locked_fields
                 FROM characters c
-                JOIN chapter_links cl ON cl.target_id = c.id
-                WHERE cl.chapter_id = ?1 AND cl.target_type = 'character' AND c.is_deleted = 0
+                LEFT JOIN chapter_links cl
+                  ON cl.target_id = c.id
+                 AND cl.target_type = 'character'
+                 AND cl.chapter_id = ?1
+                WHERE c.project_id = ?2 AND c.is_deleted = 0
+                ORDER BY
+                  CASE WHEN cl.chapter_id IS NULL THEN 1 ELSE 0 END,
+                  c.updated_at DESC,
+                  c.created_at DESC
+                LIMIT 24
                 "#,
             )
             .map_err(|_| AppErrorDto::new("DB_QUERY_FAILED", "查询角色失败", true))?
-            .query_map(params![chapter_id], |row| {
+            .query_map(params![chapter_id, project_id], |row| {
                 Ok(CharacterSummary {
                     id: row.get(0)?,
                     name: row.get(1)?,
@@ -1717,12 +1726,20 @@ impl ContextService {
                 r#"
                 SELECT w.id, w.title, w.category, w.description, w.constraint_level
                 FROM world_rules w
-                JOIN chapter_links cl ON cl.target_id = w.id
-                WHERE cl.chapter_id = ?1 AND cl.target_type = 'world_rule' AND w.is_deleted = 0
+                LEFT JOIN chapter_links cl
+                  ON cl.target_id = w.id
+                 AND cl.target_type = 'world_rule'
+                 AND cl.chapter_id = ?1
+                WHERE w.project_id = ?2 AND w.is_deleted = 0
+                ORDER BY
+                  CASE WHEN cl.chapter_id IS NULL THEN 1 ELSE 0 END,
+                  w.updated_at DESC,
+                  w.created_at DESC
+                LIMIT 24
                 "#,
             )
             .map_err(|_| AppErrorDto::new("DB_QUERY_FAILED", "查询世界规则失败", true))?
-            .query_map(params![chapter_id], |row| {
+            .query_map(params![chapter_id, project_id], |row| {
                 Ok(WorldRuleSummary {
                     id: row.get(0)?,
                     title: row.get(1)?,
@@ -1741,12 +1758,20 @@ impl ContextService {
                 r#"
                 SELECT p.id, p.title, p.node_type, p.goal, p.conflict, p.sort_order
                 FROM plot_nodes p
-                JOIN chapter_links cl ON cl.target_id = p.id
-                WHERE cl.chapter_id = ?1 AND cl.target_type = 'plot_node'
+                LEFT JOIN chapter_links cl
+                  ON cl.target_id = p.id
+                 AND cl.target_type = 'plot_node'
+                 AND cl.chapter_id = ?1
+                WHERE p.project_id = ?2
+                ORDER BY
+                  CASE WHEN cl.chapter_id IS NULL THEN 1 ELSE 0 END,
+                  p.sort_order ASC,
+                  p.updated_at DESC
+                LIMIT 24
                 "#,
             )
             .map_err(|_| AppErrorDto::new("DB_QUERY_FAILED", "查询主线节点失败", true))?
-            .query_map(params![chapter_id], |row| {
+            .query_map(params![chapter_id, project_id], |row| {
                 Ok(PlotNodeSummary {
                     id: row.get(0)?,
                     title: row.get(1)?,

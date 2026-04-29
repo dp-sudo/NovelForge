@@ -22,3 +22,7 @@ export async function listGlossaryTerms(projectRoot: string): Promise<GlossaryRo
 export async function createGlossaryTerm(input: GlossaryTermInput, projectRoot: string): Promise<string> {
   return invokeCommand<string>("create_glossary_term", { projectRoot, input });
 }
+
+export async function aiGenerateGlossaryTerm(projectRoot: string, userDescription: string): Promise<string> {
+  return invokeCommand<string>("ai_generate_glossary_term", { input: { projectRoot, userDescription } });
+}

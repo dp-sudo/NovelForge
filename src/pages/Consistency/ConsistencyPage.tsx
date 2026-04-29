@@ -3,7 +3,8 @@ import { Card } from "../../components/cards/Card";
 import { Button } from "../../components/ui/Button";
 import { Badge } from "../../components/ui/Badge";
 import { useEditorStore } from "../../stores/editorStore";
-import { scanChapterConsistency, scanFullConsistency, updateIssueStatus, type ConsistencyIssueRow } from "../../api/consistencyApi";
+import { readChapterContent } from "../../api/chapterApi";
+import { aiScanConsistency, scanChapterConsistency, scanFullConsistency, updateIssueStatus, type ConsistencyIssueRow } from "../../api/consistencyApi";
 import { useProjectStore } from "../../stores/projectStore";
 
 const severityColors: Record<string, "error" | "warning" | "info" | "default"> = {
@@ -44,6 +45,7 @@ export function ConsistencyPage() {
   const [scope, setScope] = useState<"chapter" | "full">("full");
   const [filterSeverity, setFilterSeverity] = useState<string>("all");
   const activeChapterId = useEditorStore((s) => s.activeChapterId);
+  const chapterContent = useEditorStore((s) => s.content);
   const projectRoot = useProjectStore((s) => s.currentProjectPath);
 
   const load = useCallback(async () => {
@@ -63,7 +65,24 @@ export function ConsistencyPage() {
     try {
       let data: ConsistencyIssueRow[];
       if (scope === "chapter" && activeChapterId) {
-        data = await scanChapterConsistency(activeChapterId, projectRoot);
+        let contentForAi = chapterContent.trim();
+        if (!contentForAi) {
+          try {
+            contentForAi = (await readChapterContent(activeChapterId, projectRoot)).trim();
+          } catch {
+            contentForAi = "";
+          }
+        }
+        if (contentForAi) {
+          await aiScanConsistency({
+            projectRoot,
+            chapterId: activeChapterId,
+            chapterContent: contentForAi,
+          });
+          data = await scanFullConsistency(projectRoot);
+        } else {
+          data = await scanChapterConsistency(activeChapterId, projectRoot);
+        }
       } else {
         data = await scanFullConsistency(projectRoot);
       }

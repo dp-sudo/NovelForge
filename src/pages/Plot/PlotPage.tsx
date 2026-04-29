@@ -125,46 +125,6 @@ export function PlotPage() {
     await load();
   }
 
-  async function handleCreateFromAi() {
-    if (!projectRoot || !aiResult) return;
-    try {
-      const parsed = parseAiJson(aiResult);
-      const candidate = (parsed.plotNode && typeof parsed.plotNode === "object")
-        ? (parsed.plotNode as Record<string, unknown>)
-        : parsed;
-      const conflict = candidate.conflict;
-      const conflictText = typeof conflict === "string"
-        ? conflict
-        : conflict && typeof conflict === "object"
-          ? pickText((conflict as Record<string, unknown>).description)
-            ?? pickText((conflict as Record<string, unknown>).primaryType)
-          : undefined;
-      const goal =
-        pickText(candidate.goal) ??
-        pickText(candidate.objective) ??
-        pickText(candidate.summary) ??
-        undefined;
-
-      await createPlotNode(
-        {
-          title: pickText(candidate.title) ?? "未命名剧情节点",
-          nodeType: normalizeNodeType(candidate.nodeType ?? candidate.node_type ?? candidate.type),
-          sortOrder: (nodes.length > 0 ? Math.max(...nodes.map((n) => n.sort_order)) + 1 : 1),
-          goal,
-          conflict: conflictText,
-          status: normalizeStatus(candidate.status),
-        },
-        projectRoot
-      );
-      setAiResult(null);
-      setAiDescription("");
-      setShowAiCreate(false);
-      await load();
-    } catch {
-      setAiResult("AI 返回结果不是可解析的剧情节点 JSON，请重试或补充更明确的指令。");
-    }
-  }
-
   return (
     <div className="max-w-5xl mx-auto">
       <div className="flex items-center justify-between mb-6">
@@ -273,20 +233,24 @@ export function PlotPage() {
             onClick={async () => {
               if (!projectRoot) return;
               setAiLoading(true);
-              try { setAiResult(await aiGeneratePlotNode(projectRoot, aiDescription)); }
+              try {
+                setAiResult(await aiGeneratePlotNode(projectRoot, aiDescription));
+                await load();
+              }
               catch { setAiResult("AI 生成失败。请检查 AI 供应商配置。"); }
               finally { setAiLoading(false); }
             }}
             disabled={!aiDescription.trim()}
           >
-            {aiLoading ? "生成中..." : "生成"}
+            {aiLoading ? "生成中..." : "生成并入库"}
           </Button>
           {aiResult && (
             <div className="p-4 bg-primary/5 border border-primary/20 rounded-xl">
+              <p className="text-xs text-success mb-2">AI 结果已自动写入剧情节点库。</p>
               <pre className="text-sm text-surface-200 whitespace-pre-wrap font-sans leading-relaxed max-h-64 overflow-y-auto">{aiResult}</pre>
               <div className="flex gap-2 mt-3">
-                <Button variant="primary" size="sm" onClick={() => void handleCreateFromAi()}>保存节点</Button>
-                <Button variant="primary" size="sm" onClick={() => { setAiResult(null); setShowAiCreate(false); }}>关闭</Button>
+                <Button variant="ghost" size="sm" onClick={() => setAiResult(null)}>重新生成</Button>
+                <Button variant="primary" size="sm" onClick={() => { setAiResult(null); setShowAiCreate(false); setAiDescription(""); }}>关闭</Button>
               </div>
             </div>
           )}

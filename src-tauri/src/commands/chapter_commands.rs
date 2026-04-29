@@ -165,6 +165,17 @@ pub async fn recover_draft(
 }
 
 #[tauri::command]
+pub async fn read_chapter_content(
+    project_root: String,
+    chapter_id: String,
+    state: State<'_, AppState>,
+) -> Result<String, AppErrorDto> {
+    state
+        .chapter_service
+        .read_chapter_content(&project_root, &chapter_id)
+}
+
+#[tauri::command]
 pub async fn delete_chapter(
     project_root: String,
     input: DeleteChapterRequest,

@@ -611,6 +611,41 @@ impl ChapterService {
         })
     }
 
+    pub fn read_chapter_content(
+        &self,
+        project_root: &str,
+        chapter_id: &str,
+    ) -> Result<String, AppErrorDto> {
+        let project_root_path = Path::new(project_root);
+        let conn = open_database(project_root_path).map_err(|err| {
+            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false)
+                .with_detail(err.to_string())
+                .with_suggested_action("请检查 database/project.sqlite 是否存在并可读写")
+        })?;
+
+        let content_path = conn
+            .query_row(
+                "SELECT content_path FROM chapters WHERE id = ?1 AND is_deleted = 0",
+                params![chapter_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|err| {
+                AppErrorDto::new("CHAPTER_READ_FAILED", "读取章节失败", true)
+                    .with_detail(err.to_string())
+                    .with_suggested_action("请检查章节是否可访问")
+            })?
+            .ok_or_else(|| AppErrorDto::new("CHAPTER_NOT_FOUND", "章节不存在", true))?;
+
+        let chapter_file = resolve_project_scoped_path(project_root_path, &content_path)?;
+        let raw = fs::read_to_string(&chapter_file).map_err(|err| {
+            AppErrorDto::new("CHAPTER_READ_FAILED", "读取章节失败", true)
+                .with_detail(err.to_string())
+                .with_suggested_action("请检查章节文件读取权限")
+        })?;
+        Ok(strip_frontmatter_content(&raw))
+    }
+
     pub fn delete_chapter(&self, project_root: &str, chapter_id: &str) -> Result<(), AppErrorDto> {
         let project_root_path = Path::new(project_root);
         let mut conn = open_database(project_root_path).map_err(|err| {
@@ -736,6 +771,16 @@ fn resolve_project_scoped_path(
             .with_detail(detail)
             .with_suggested_action("请检查数据库中的路径字段是否被篡改")
     })
+}
+
+fn strip_frontmatter_content(content: &str) -> String {
+    if !content.starts_with("---\n") {
+        return content.to_string();
+    }
+    if let Some(offset) = content[4..].find("\n---\n") {
+        return content[(offset + 9)..].trim().to_string();
+    }
+    content.to_string()
 }
 
 fn content_word_count(content: &str) -> i64 {

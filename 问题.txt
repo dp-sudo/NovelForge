@@ -1,0 +1,49 @@
+模块逐项结论（按侧边栏）
+
+仪表盘：未打通 AI
+证据：DashboardPage (line 11) 仅拉统计；dashboard_service (line 27) 仅 count/sum。
+
+蓝图：半打通
+证据：BlueprintPage handleAiSuggest (line 378) 有 AI 按钮；但走的是 generate_blueprint_suggestion (line 428) 直调 generate_text，不是统一流式 pipeline。无阶段事件、无 requestId 级可视化、无超时治理；且“采用”后才入表，不是自动闭环。
+
+角色：半打通
+证据：CharactersPage (line 103) 先 AI 生成，再手动“保存角色”；后端虽走 pipeline 命令 ai_generate_character (line 502)，但业务落库在前端二次解析后触发，不是后端原子闭环。
+
+世界：半打通
+证据：WorldPage (line 124) 同角色逻辑，AI 输出后手动保存。
+
+名词库：未打通 AI
+证据：GlossaryPage (line 9) 只有 list/create。
+
+剧情：半打通
+证据：PlotPage (line 128) AI 生成后手动保存节点。
+
+叙事义务：未打通 AI
+证据：NarrativePage (line 8) 只有 CRUD，无 AI 生成/优化。
+
+时间线：未打通 AI
+证据：TimelinePage (line 4) 仅 listTimelineEntries；后端 list_timeline_entries (line 147) 只是读 chapters.summary。
+
+关系图：未打通 AI（仅可视化）
+证据：RelationshipsPage (line 4) 只是读取角色+关系并展示。
+
+章节：分裂状态
+证据：章节管理页 ChaptersPage (line 12) 无 AI；编辑器页 EditorPage (line 457) 才有统一 pipeline 流式生成。
+所以“章节模块”内部是“管理无 AI、编辑有 AI”。
+
+检查：关键断链（后端有 AI，前端没接）
+证据：consistencyApi (line 38) 有 aiScanConsistency；但 ConsistencyPage (line 6) 只调用 scanChapterConsistency/scanFullConsistency。
+且当前规则扫描服务 consistency_service (line 45) 主要是禁用词检查，不是你期望的“专业 AI 审校”。
+
+结论；
+跨模块“总链路”断点（这是我现在体验卡顿和不成闭环的根因）
+路由能力只覆盖 10 个任务类型，没覆盖时间线/关系图/名词库/叙事义务/导出/仪表盘
+证据：task_routing (line 3) 与 TASK_ROUTE_OPTIONS (line 1)。
+Pipeline 的 persist 阶段只记审计，不做业务对象自动入库
+证据：ai_pipeline_service (line 468)。
+这导致很多模块只能“AI 文本 -> 前端手工解析 -> 再创建数据”。
+章节 AI 上下文只取“chapter_links 已关联资产”，不会自动吃全项目资产
+证据：collect_related_context (line 1682)。
+而角色/世界/剧情模块新建资产时并不会自动建 chapter_links（仅写各自表），所以你会感觉“AI 没吃到全书资料”。
+蓝图链路没走统一流式治理，慢时就只看到“生成中”
+证据：BlueprintPage (line 387) + ai_commands blueprint (line 428)。

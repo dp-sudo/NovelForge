@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { Card } from "../../components/cards/Card";
 import { Button } from "../../components/ui/Button";
+import { Modal } from "../../components/dialogs/Modal";
+import { Textarea } from "../../components/forms/Textarea";
 import { getRelationshipGraphData, type CharacterRelationship, type CharacterRow } from "../../api/characterApi";
+import { runModuleAiTask } from "../../api/moduleAiApi";
 import { useProjectStore } from "../../stores/projectStore";
 import { useUiStore } from "../../stores/uiStore";
 
@@ -23,6 +26,11 @@ export function RelationshipsPage() {
   const [focusedCharacterId, setFocusedCharacterId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showAiReview, setShowAiReview] = useState(false);
+  const [aiPrompt, setAiPrompt] = useState("");
+  const [aiResult, setAiResult] = useState<string | null>(null);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
 
   useEffect(() => {
     if (!projectRoot) {
@@ -91,9 +99,14 @@ export function RelationshipsPage() {
           <h1 className="text-2xl font-bold text-surface-100">角色关系图</h1>
           <p className="text-sm text-surface-400 mt-1">可视化查看角色连接并跳转到角色页面处理细节</p>
         </div>
-        <Button variant="secondary" size="sm" onClick={() => setActiveRoute("characters")}>
-          前往角色页
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="ghost" size="sm" onClick={() => { setShowAiReview(true); setAiError(null); setAiResult(null); }}>
+            AI 审阅
+          </Button>
+          <Button variant="secondary" size="sm" onClick={() => setActiveRoute("characters")}>
+            前往角色页
+          </Button>
+        </div>
       </div>
 
       {loading ? (
@@ -194,6 +207,54 @@ export function RelationshipsPage() {
           </Card>
         </div>
       )}
+
+      <Modal open={showAiReview} onClose={() => setShowAiReview(false)} title="AI 关系审阅" width="lg">
+        <div className="space-y-4">
+          <Textarea
+            label="附加要求（可选）"
+            value={aiPrompt}
+            onChange={(e) => setAiPrompt(e.target.value)}
+            placeholder="例如：优先检查主角关系是否缺少关键对立线"
+            className="min-h-[90px]"
+          />
+          <Button
+            variant="primary"
+            loading={aiLoading}
+            onClick={async () => {
+              if (!projectRoot) return;
+              setAiLoading(true);
+              setAiError(null);
+              setAiResult(null);
+              try {
+                const result = await runModuleAiTask({
+                  projectRoot,
+                  taskType: "relationship.review",
+                  uiAction: "relationship.ai.review",
+                  userInstruction: aiPrompt,
+                });
+                setAiResult(result || "AI 未返回内容。");
+              } catch (err) {
+                setAiError(err instanceof Error ? err.message : "AI 审阅失败");
+              } finally {
+                setAiLoading(false);
+              }
+            }}
+            disabled={!projectRoot}
+          >
+            {aiLoading ? "审阅中..." : "生成关系审阅报告"}
+          </Button>
+          {aiError && (
+            <div className="p-3 rounded-lg bg-error/10 border border-error/30 text-sm text-error">
+              {aiError}
+            </div>
+          )}
+          {aiResult && (
+            <div className="p-4 rounded-xl bg-primary/5 border border-primary/20">
+              <pre className="text-sm text-surface-200 whitespace-pre-wrap font-sans leading-relaxed max-h-80 overflow-y-auto">{aiResult}</pre>
+            </div>
+          )}
+        </div>
+      </Modal>
     </div>
   );
 }

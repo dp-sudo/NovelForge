@@ -48,3 +48,12 @@ export async function updateObligationStatus(
 export async function deleteNarrativeObligation(projectRoot: string, id: string): Promise<void> {
   return invokeCommand<void>("delete_narrative_obligation", { projectRoot, id });
 }
+
+export async function aiGenerateNarrativeObligation(
+  projectRoot: string,
+  userDescription: string,
+): Promise<string> {
+  return invokeCommand<string>("ai_generate_narrative_obligation", {
+    input: { projectRoot, userDescription },
+  });
+}

@@ -1,8 +1,11 @@
 import { useEffect, useState } from "react";
 import { Card } from "../../components/cards/Card";
 import { Button } from "../../components/ui/Button";
+import { Modal } from "../../components/dialogs/Modal";
+import { Textarea } from "../../components/forms/Textarea";
 import { listChapters, type ChapterRecord } from "../../api/chapterApi";
 import { exportBook, exportChapter, type ExportFormat } from "../../api/exportApi";
+import { runModuleAiTask } from "../../api/moduleAiApi";
 import { useProjectStore } from "../../stores/projectStore";
 
 export function ExportPage() {
@@ -15,6 +18,11 @@ export function ExportPage() {
   const [result, setResult] = useState<{ path: string; content?: string } | null>(null);
   const [chapters, setChapters] = useState<ChapterRecord[]>([]);
   const [selectedChapterId, setSelectedChapterId] = useState("");
+  const [showAiReview, setShowAiReview] = useState(false);
+  const [aiPrompt, setAiPrompt] = useState("");
+  const [aiResult, setAiResult] = useState<string | null>(null);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
   const projectRoot = useProjectStore((s) => s.currentProjectPath);
   const projectName = useProjectStore((s) => s.currentProject?.name ?? "project");
 
@@ -64,7 +72,22 @@ export function ExportPage() {
 
   return (
     <div className="max-w-3xl mx-auto">
-      <h1 className="text-2xl font-bold text-surface-100 mb-6">导出中心</h1>
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-2xl font-bold text-surface-100">导出中心</h1>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => {
+            setAiPrompt("");
+            setAiResult(null);
+            setAiError(null);
+            setShowAiReview(true);
+          }}
+          disabled={!projectRoot}
+        >
+          AI 审阅
+        </Button>
+      </div>
 
       <Card padding="lg" className="space-y-6">
         {/* Range */}
@@ -241,6 +264,54 @@ export function ExportPage() {
           </div>
         )}
       </Card>
+
+      <Modal open={showAiReview} onClose={() => setShowAiReview(false)} title="AI 导出审阅" width="lg">
+        <div className="space-y-4">
+          <Textarea
+            label="附加要求（可选）"
+            value={aiPrompt}
+            onChange={(e) => setAiPrompt(e.target.value)}
+            placeholder="例如：优先检查章节衔接断层与术语一致性"
+            className="min-h-[90px]"
+          />
+          <Button
+            variant="primary"
+            loading={aiLoading}
+            onClick={async () => {
+              if (!projectRoot) return;
+              setAiLoading(true);
+              setAiError(null);
+              setAiResult(null);
+              try {
+                const result = await runModuleAiTask({
+                  projectRoot,
+                  taskType: "export.review",
+                  uiAction: "export.ai.review",
+                  userInstruction: aiPrompt,
+                });
+                setAiResult(result || "AI 未返回内容。");
+              } catch (err) {
+                setAiError(err instanceof Error ? err.message : "AI 审阅失败");
+              } finally {
+                setAiLoading(false);
+              }
+            }}
+            disabled={!projectRoot}
+          >
+            {aiLoading ? "审阅中..." : "生成导出前审阅"}
+          </Button>
+          {aiError && (
+            <div className="p-3 rounded-lg bg-error/10 border border-error/30 text-sm text-error">
+              {aiError}
+            </div>
+          )}
+          {aiResult && (
+            <div className="p-4 rounded-xl bg-primary/5 border border-primary/20">
+              <pre className="text-sm text-surface-200 whitespace-pre-wrap font-sans leading-relaxed max-h-80 overflow-y-auto">{aiResult}</pre>
+            </div>
+          )}
+        </div>
+      </Modal>
     </div>
   );
 }

@@ -178,6 +178,13 @@ export async function recoverDraft(chapterId: string, projectRoot: string): Prom
   });
 }
 
+export async function readChapterContent(chapterId: string, projectRoot: string): Promise<string> {
+  return invokeCommand<string>("read_chapter_content", {
+    projectRoot,
+    chapterId,
+  });
+}
+
 export async function deleteChapter(id: string, projectRoot: string): Promise<void> {
   await invokeCommand<void>("delete_chapter", { projectRoot, input: { id } });
 }

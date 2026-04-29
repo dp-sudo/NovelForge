@@ -11,6 +11,12 @@ pub const CORE_TASK_ROUTE_TYPES: &[&str] = &[
     "consistency.scan",
     "blueprint.generate_step",
     "plot.create_node",
+    "glossary.create_term",
+    "narrative.create_obligation",
+    "timeline.review",
+    "relationship.review",
+    "dashboard.review",
+    "export.review",
 ];
 
 pub const TASK_ROUTE_TYPES_WITH_CUSTOM: &[&str] = &[
@@ -24,6 +30,12 @@ pub const TASK_ROUTE_TYPES_WITH_CUSTOM: &[&str] = &[
     "consistency.scan",
     "blueprint.generate_step",
     "plot.create_node",
+    "glossary.create_term",
+    "narrative.create_obligation",
+    "timeline.review",
+    "relationship.review",
+    "dashboard.review",
+    "export.review",
     "custom",
 ];
 
@@ -48,6 +60,22 @@ pub fn canonical_task_type<'a>(task_type: &'a str) -> Cow<'a, str> {
         "plot.generate" | "plot_create_node" | "plot.create_node" => {
             Cow::Borrowed("plot.create_node")
         }
+        "glossary_create_term" | "glossary.create" | "glossary.create_term" => {
+            Cow::Borrowed("glossary.create_term")
+        }
+        "narrative_create_obligation"
+        | "narrative.create"
+        | "narrative.create_obligation" => Cow::Borrowed("narrative.create_obligation"),
+        "timeline_review" | "timeline.scan" | "timeline.review" => {
+            Cow::Borrowed("timeline.review")
+        }
+        "relationship_review" | "relationships.review" | "relationship.review" => {
+            Cow::Borrowed("relationship.review")
+        }
+        "dashboard_review" | "dashboard.analyze" | "dashboard.review" => {
+            Cow::Borrowed("dashboard.review")
+        }
+        "export_review" | "export.check" | "export.review" => Cow::Borrowed("export.review"),
         "scan_consistency" | "consistency_scan" | "consistency.scan" => {
             Cow::Borrowed("consistency.scan")
         }
@@ -79,6 +107,15 @@ mod tests {
             canonical_task_type("generate_blueprint_step"),
             "blueprint.generate_step"
         );
+        assert_eq!(canonical_task_type("glossary.create"), "glossary.create_term");
+        assert_eq!(
+            canonical_task_type("narrative_create_obligation"),
+            "narrative.create_obligation"
+        );
+        assert_eq!(canonical_task_type("relationships.review"), "relationship.review");
+        assert_eq!(canonical_task_type("timeline.scan"), "timeline.review");
+        assert_eq!(canonical_task_type("dashboard.analyze"), "dashboard.review");
+        assert_eq!(canonical_task_type("export.check"), "export.review");
     }
 
     #[test]
