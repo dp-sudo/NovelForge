@@ -479,8 +479,8 @@ impl ContextService {
         }
         if let Some(style) = &global.writing_style {
             lines.push(format!(
-                "写作风格: 语言={}、描写密度={}、对话比例={}、句式节奏={}、氛围={}、心理深度={}",
-                style.language_style,
+                "写作风格: 文风={}、描写密度={}、对话比例={}、句式节奏={}、氛围={}、心理深度={}",
+                display_language_style(&style.language_style),
                 style.description_density,
                 style.dialogue_ratio,
                 style.sentence_rhythm,
@@ -2721,6 +2721,17 @@ fn preview_text(value: &str, max_chars: usize) -> String {
     format!("{}...", chars[..max_chars].iter().collect::<String>())
 }
 
+fn display_language_style(raw: &str) -> String {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "plain" => "平实".to_string(),
+        "balanced" => "适中".to_string(),
+        "ornate" => "华丽".to_string(),
+        "colloquial" => "口语化".to_string(),
+        other if other.is_empty() => "适中".to_string(),
+        other => other.to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -2729,10 +2740,13 @@ mod tests {
     use rusqlite::params;
     use uuid::Uuid;
 
-    use super::{ApplyAssetCandidateInput, ApplyStructuredDraftInput, ContextService};
+    use super::{
+        ApplyAssetCandidateInput, ApplyStructuredDraftInput, CollectedContext, ContextService,
+        GlobalContext, RelatedContext,
+    };
     use crate::infra::database::open_database;
     use crate::services::chapter_service::{ChapterInput, ChapterService};
-    use crate::services::project_service::{CreateProjectInput, ProjectService};
+    use crate::services::project_service::{CreateProjectInput, ProjectService, WritingStyle};
 
     fn create_temp_workspace() -> PathBuf {
         let workspace =
@@ -3136,5 +3150,44 @@ mod tests {
         );
 
         remove_temp_workspace(&workspace);
+    }
+
+    #[test]
+    fn constitution_context_formats_style_as_tone_label_instead_of_language_code() {
+        let service = ContextService;
+        let context = CollectedContext {
+            global_context: GlobalContext {
+                project_name: "文风测试".to_string(),
+                genre: "测试".to_string(),
+                narrative_pov: Some("third_limited".to_string()),
+                writing_style: Some(WritingStyle {
+                    language_style: "ornate".to_string(),
+                    description_density: 6,
+                    dialogue_ratio: 3,
+                    sentence_rhythm: "long".to_string(),
+                    atmosphere: "suspenseful".to_string(),
+                    psychological_depth: 7,
+                }),
+                locked_terms: Vec::new(),
+                banned_terms: Vec::new(),
+                blueprint_summary: Vec::new(),
+            },
+            related_context: RelatedContext {
+                chapter: None,
+                characters: Vec::new(),
+                world_rules: Vec::new(),
+                plot_nodes: Vec::new(),
+                relationship_edges: Vec::new(),
+                previous_chapter_summary: None,
+            },
+        };
+
+        let lines = service.get_constitution_context(&context);
+        let style_line = lines
+            .iter()
+            .find(|line| line.starts_with("写作风格:"))
+            .expect("style line exists");
+        assert!(style_line.contains("文风=华丽"));
+        assert!(!style_line.contains("语言=ornate"));
     }
 }

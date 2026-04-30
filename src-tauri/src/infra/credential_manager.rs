@@ -31,7 +31,15 @@ pub fn load_api_key(provider_id: &str) -> Result<Option<String>, AppErrorDto> {
     let keyring_result = load_from_keyring(provider_id);
     match keyring_result {
         Ok(Some(value)) => Ok(Some(value)),
-        Ok(None) | Err(_) => load_fallback_secret(provider_id),
+        Ok(None) => load_fallback_secret(provider_id),
+        Err(err) => {
+            log::warn!(
+                "[SECRET] keyring load failed for provider={} fallback=file err={}",
+                provider_id,
+                err
+            );
+            load_fallback_secret(provider_id)
+        }
     }
 }
 

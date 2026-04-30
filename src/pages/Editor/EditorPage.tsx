@@ -89,23 +89,23 @@ const PIPELINE_SUGGESTION_BY_ERROR_CODE: Record<string, string> = {
   PIPELINE_USER_INSTRUCTION_REQUIRED: "先输入任务描述，再重新执行。",
   PIPELINE_CHAPTER_ID_REQUIRED: "先选择目标章节，再执行该任务。",
   PIPELINE_CHAPTER_CONTENT_REQUIRED: "先保存或填写章节内容，再执行一致性扫描。",
-  TASK_ROUTE_NOT_FOUND: "前往 设置 > 任务路由，为该任务配置 Provider 和模型 ID。",
-  MODEL_NOT_CONFIGURED: "前往 设置 > 模型配置，补齐该 Provider 的默认模型。",
-  PROVIDER_NOT_FOUND: "前往 设置 > 模型配置，确认 Provider 已创建且可用。",
-  LLM_ADAPTER_NOT_FOUND: "前往 设置 > 模型配置，先测试并重新加载该 Provider。",
+  TASK_ROUTE_NOT_FOUND: "前往 设置 > 任务路由，为该任务配置供应商和模型ID。",
+  MODEL_NOT_CONFIGURED: "前往 设置 > 模型配置，补齐该供应商的默认模型。",
+  PROVIDER_NOT_FOUND: "前往 设置 > 模型配置，确认供应商已创建且可用。",
+  LLM_ADAPTER_NOT_FOUND: "前往 设置 > 模型配置，先测试并重新加载该供应商。",
   LLM_NO_PROVIDER: "前往 设置 > 任务路由或模型配置，补齐可用模型后重试。",
   PIPELINE_START_TIMEOUT: "任务启动超时，可能是开发热重载或后端回调中断，重试前先确认页面未重载。",
   PIPELINE_FIRST_EVENT_TIMEOUT: "任务已启动但未收到事件，可能存在事件监听竞态或开发热重载，请重试。",
-  PIPELINE_EVENT_TIMEOUT: "模型响应超时，请检查网络/API Key 或切换模型后重试。",
+  PIPELINE_EVENT_TIMEOUT: "模型响应超时，请检查网络/API 密钥或切换模型后重试。",
   PIPELINE_CANCELLED: "任务已取消，可重新发起。"
 };
 
 const PIPELINE_SUGGESTION_BY_PHASE: Record<string, string> = {
   validate: "检查输入参数（章节、选区、任务描述）后重试。",
   context: "检查项目目录和章节数据是否可读，必要时重开项目。",
-  route: "检查任务路由的 Provider 与模型 ID 是否已配置。",
+  route: "检查任务路由的供应商与模型ID是否已配置。",
   prompt: "检查技能模板或提示词参数是否完整。",
-  generate: "检查 API Key、模型可用性与网络状态，必要时切换模型。",
+  generate: "检查 API 密钥、模型可用性与网络状态，必要时切换模型。",
   postprocess: "模型返回格式异常，请重试；若持续失败可更换模型。",
   persist: "检查项目目录写权限和数据库状态后重试。",
   run: "检查控制台日志，确认后端命令是否执行成功。"

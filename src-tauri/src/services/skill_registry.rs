@@ -145,7 +145,7 @@ impl SkillRegistry {
     pub fn initialize(&self) -> Result<(), AppErrorDto> {
         // 1. Create skills directory
         fs::create_dir_all(&self.skills_dir).map_err(|e| {
-            AppErrorDto::new("SKILLS_DIR_FAILED", "Cannot create skills directory", true)
+            AppErrorDto::new("SKILLS_DIR_FAILED", "无法创建技能目录", true)
                 .with_detail(e.to_string())
         })?;
 
@@ -155,13 +155,13 @@ impl SkillRegistry {
             for entry in fs::read_dir(&self.builtin_dir).map_err(|e| {
                 AppErrorDto::new(
                     "SKILLS_READ_BUILTIN_FAILED",
-                    "Cannot read builtin skills",
+                    "无法读取内置技能目录",
                     true,
                 )
                 .with_detail(e.to_string())
             })? {
                 let entry = entry.map_err(|e| {
-                    AppErrorDto::new("SKILLS_ENTRY_FAILED", "Cannot read builtin entry", true)
+                    AppErrorDto::new("SKILLS_ENTRY_FAILED", "无法读取内置技能条目", true)
                         .with_detail(e.to_string())
                 })?;
                 let path = entry.path();
@@ -183,7 +183,7 @@ impl SkillRegistry {
                 }
                 if should_copy {
                     fs::copy(&path, &target).map_err(|e| {
-                        AppErrorDto::new("SKILLS_COPY_FAILED", "Cannot copy builtin skill", true)
+                        AppErrorDto::new("SKILLS_COPY_FAILED", "无法复制内置技能", true)
                             .with_detail(e.to_string())
                     })?;
                 }
@@ -212,7 +212,7 @@ impl SkillRegistry {
         let mut list = Vec::new();
         if !self.skills_dir.exists() {
             let mut guard = self.manifests.write().map_err(|e| {
-                AppErrorDto::new("SKILLS_LOCK_FAILED", "Skill registry lock failed", false)
+                AppErrorDto::new("SKILLS_LOCK_FAILED", "技能注册表锁定失败", false)
                     .with_detail(e.to_string())
             })?;
             *guard = list;
@@ -222,13 +222,13 @@ impl SkillRegistry {
         for entry in fs::read_dir(&self.skills_dir).map_err(|e| {
             AppErrorDto::new(
                 "SKILLS_READ_DIR_FAILED",
-                "Cannot read skills directory",
+                "无法读取技能目录",
                 true,
             )
             .with_detail(e.to_string())
         })? {
             let entry = entry.map_err(|e| {
-                AppErrorDto::new("SKILLS_ENTRY_FAILED", "Cannot read skill entry", true)
+                AppErrorDto::new("SKILLS_ENTRY_FAILED", "无法读取技能条目", true)
                     .with_detail(e.to_string())
             })?;
             let path = entry.path();
@@ -244,7 +244,7 @@ impl SkillRegistry {
         list.sort_by(|a, b| a.id.cmp(&b.id));
 
         let mut guard = self.manifests.write().map_err(|e| {
-            AppErrorDto::new("SKILLS_LOCK_FAILED", "Skill registry lock failed", false)
+            AppErrorDto::new("SKILLS_LOCK_FAILED", "技能注册表锁定失败", false)
                 .with_detail(e.to_string())
         })?;
         *guard = list;
@@ -256,14 +256,14 @@ impl SkillRegistry {
 
     pub fn list_skills(&self) -> Result<Vec<SkillManifest>, AppErrorDto> {
         self.manifests.read().map(|g| g.clone()).map_err(|e| {
-            AppErrorDto::new("SKILLS_LOCK_FAILED", "Skill registry lock failed", false)
+            AppErrorDto::new("SKILLS_LOCK_FAILED", "技能注册表锁定失败", false)
                 .with_detail(e.to_string())
         })
     }
 
     pub fn get_skill(&self, id: &str) -> Result<Option<SkillManifest>, AppErrorDto> {
         let guard = self.manifests.read().map_err(|e| {
-            AppErrorDto::new("SKILLS_LOCK_FAILED", "Skill registry lock failed", false)
+            AppErrorDto::new("SKILLS_LOCK_FAILED", "技能注册表锁定失败", false)
                 .with_detail(e.to_string())
         })?;
         Ok(guard.iter().find(|s| s.id == id).cloned())
@@ -272,7 +272,7 @@ impl SkillRegistry {
     pub fn select_skills_for_task(&self, task_type: &str) -> Result<SelectedSkills, AppErrorDto> {
         let canonical_task = task_routing::canonical_task_type(task_type).into_owned();
         let guard = self.manifests.read().map_err(|e| {
-            AppErrorDto::new("SKILLS_LOCK_FAILED", "Skill registry lock failed", false)
+            AppErrorDto::new("SKILLS_LOCK_FAILED", "技能注册表锁定失败", false)
                 .with_detail(e.to_string())
         })?;
 
@@ -331,7 +331,7 @@ impl SkillRegistry {
             return Ok(None);
         }
         fs::read_to_string(&path).map(Some).map_err(|e| {
-            AppErrorDto::new("SKILLS_READ_FAILED", "Cannot read skill file", true)
+            AppErrorDto::new("SKILLS_READ_FAILED", "无法读取技能文件", true)
                 .with_detail(e.to_string())
         })
     }
@@ -353,14 +353,14 @@ impl SkillRegistry {
         if path.exists() {
             return Err(AppErrorDto::new(
                 "SKILLS_CONFLICT",
-                &format!("Skill '{}' already exists", manifest.id),
+                &format!("技能 '{}' 已存在", manifest.id),
                 true,
             ));
         }
 
         let content = render_skill_file(manifest, body);
         fs::write(&path, &content).map_err(|e| {
-            AppErrorDto::new("SKILLS_WRITE_FAILED", "Cannot write skill file", true)
+            AppErrorDto::new("SKILLS_WRITE_FAILED", "无法写入技能文件", true)
                 .with_detail(e.to_string())
         })?;
 
@@ -379,7 +379,7 @@ impl SkillRegistry {
         if !path.exists() {
             return Err(AppErrorDto::new(
                 "SKILLS_NOT_FOUND",
-                &format!("Skill '{}' not found", id),
+                &format!("未找到技能 '{}'", id),
                 true,
             ));
         }
@@ -396,7 +396,7 @@ impl SkillRegistry {
         let next_body = body.unwrap_or(existing.body.as_str());
         let content = render_skill_file(&manifest, next_body);
         fs::write(&path, &content).map_err(|e| {
-            AppErrorDto::new("SKILLS_WRITE_FAILED", "Cannot write skill file", true)
+            AppErrorDto::new("SKILLS_WRITE_FAILED", "无法写入技能文件", true)
                 .with_detail(e.to_string())
         })?;
 
@@ -407,14 +407,14 @@ impl SkillRegistry {
     /// Delete a skill file (only user/imported skills).
     pub fn delete_skill(&self, id: &str) -> Result<(), AppErrorDto> {
         let guard = self.manifests.read().map_err(|e| {
-            AppErrorDto::new("SKILLS_LOCK_FAILED", "Skill registry lock failed", false)
+            AppErrorDto::new("SKILLS_LOCK_FAILED", "技能注册表锁定失败", false)
                 .with_detail(e.to_string())
         })?;
 
         let skill = guard.iter().find(|s| s.id == id).ok_or_else(|| {
             AppErrorDto::new(
                 "SKILLS_NOT_FOUND",
-                &format!("Skill '{}' not found", id),
+                &format!("未找到技能 '{}'", id),
                 true,
             )
         })?;
@@ -422,7 +422,7 @@ impl SkillRegistry {
         if skill.source == "builtin" {
             return Err(AppErrorDto::new(
                 "SKILLS_CANNOT_DELETE_BUILTIN",
-                "Cannot delete a built-in skill; use reset instead",
+                "内置技能不可删除，请使用重置",
                 true,
             ));
         }
@@ -430,7 +430,7 @@ impl SkillRegistry {
         let path = self.skills_dir.join(format!("{}.md", id));
         if path.exists() {
             fs::remove_file(&path).map_err(|e| {
-                AppErrorDto::new("SKILLS_DELETE_FAILED", "Cannot delete skill file", true)
+                AppErrorDto::new("SKILLS_DELETE_FAILED", "无法删除技能文件", true)
                     .with_detail(e.to_string())
             })?;
         }
@@ -446,14 +446,14 @@ impl SkillRegistry {
         if !src.exists() {
             return Err(AppErrorDto::new(
                 "SKILLS_NOT_FOUND",
-                &format!("Builtin skill '{}' not found in package", id),
+                &format!("内置包中未找到内置技能 '{}'", id),
                 true,
             ));
         }
 
         let target = self.skills_dir.join(format!("{}.md", id));
         fs::copy(&src, &target).map_err(|e| {
-            AppErrorDto::new("SKILLS_COPY_FAILED", "Cannot reset builtin skill", true)
+            AppErrorDto::new("SKILLS_COPY_FAILED", "无法重置内置技能", true)
                 .with_detail(e.to_string())
         })?;
 
@@ -472,14 +472,14 @@ impl SkillRegistry {
         if self.get_skill(&sf.manifest.id)?.is_some() {
             return Err(AppErrorDto::new(
                 "SKILLS_CONFLICT",
-                &format!("A skill with id '{}' already exists", sf.manifest.id),
+                &format!("技能ID '{}' 已存在", sf.manifest.id),
                 true,
             ));
         }
 
         let target = self.skills_dir.join(format!("{}.md", sf.manifest.id));
         fs::copy(src, &target).map_err(|e| {
-            AppErrorDto::new("SKILLS_COPY_FAILED", "Cannot import skill file", true)
+            AppErrorDto::new("SKILLS_COPY_FAILED", "无法导入技能文件", true)
                 .with_detail(e.to_string())
         })?;
 
@@ -511,7 +511,7 @@ impl SkillRegistry {
     /// Parse a single .md file into SkillManifest + body.
     pub fn parse_file(path: &Path) -> Result<SkillFile, AppErrorDto> {
         let content = fs::read_to_string(path).map_err(|e| {
-            AppErrorDto::new("SKILLS_READ_FAILED", "Cannot read skill file", true)
+            AppErrorDto::new("SKILLS_READ_FAILED", "无法读取技能文件", true)
                 .with_detail(e.to_string())
         })?;
 
@@ -520,7 +520,7 @@ impl SkillRegistry {
         let mut manifest: SkillManifest = serde_yaml::from_str(frontmatter_str).map_err(|e| {
             AppErrorDto::new(
                 "SKILLS_PARSE_FAILED",
-                "Cannot parse skill frontmatter",
+                "无法解析技能 frontmatter",
                 true,
             )
             .with_detail(e.to_string())
@@ -613,7 +613,7 @@ fn validate_skill_class(value: String) -> Result<Option<String>, AppErrorDto> {
         Some(ref class) if !ALLOWED_SKILL_CLASSES.contains(&class.as_str()) => {
             Err(AppErrorDto::new(
                 "SKILLS_INVALID_SKILL_CLASS",
-                "Invalid skill class. Expected workflow/capability/extractor/review/policy",
+                "技能分类无效，应为 workflow/capability/extractor/review/policy",
                 true,
             ))
         }
@@ -627,7 +627,7 @@ fn validate_automation_tier(value: String) -> Result<Option<String>, AppErrorDto
         Some(ref tier) if !ALLOWED_AUTOMATION_TIERS.contains(&tier.as_str()) => {
             Err(AppErrorDto::new(
                 "SKILLS_INVALID_AUTOMATION_TIER",
-                "Invalid automation tier. Expected auto/supervised/confirm",
+                "自动化档位无效，应为 auto/supervised/confirm",
                 true,
             ))
         }
@@ -693,7 +693,7 @@ fn split_frontmatter(content: &str) -> Result<(&str, &str), AppErrorDto> {
     if !trimmed.starts_with("---") {
         return Err(AppErrorDto::new(
             "SKILLS_INVALID_FORMAT",
-            "Skill file must start with --- frontmatter",
+            "技能文件必须以 --- frontmatter 开头",
             true,
         ));
     }
@@ -719,7 +719,7 @@ fn split_frontmatter(content: &str) -> Result<(&str, &str), AppErrorDto> {
     } else {
         Err(AppErrorDto::new(
             "SKILLS_INVALID_FORMAT",
-            "Skill file has opening --- but no closing ---",
+            "技能文件存在起始 --- 但缺少结束 ---",
             true,
         ))
     }
@@ -751,7 +751,7 @@ fn validate_id(id: &str) -> Result<(), AppErrorDto> {
     if id.is_empty() {
         return Err(AppErrorDto::new(
             "SKILLS_INVALID_ID",
-            "Skill ID cannot be empty",
+            "技能ID不能为空",
             true,
         ));
     }
@@ -761,7 +761,7 @@ fn validate_id(id: &str) -> Result<(), AppErrorDto> {
     {
         return Err(AppErrorDto::new(
             "SKILLS_INVALID_ID",
-            "Skill ID may only contain letters, digits, dots, hyphens, underscores",
+            "技能ID仅允许字母、数字、点、连字符、下划线",
             true,
         ));
     }
@@ -983,3 +983,4 @@ mod tests {
         assert_eq!(route_override.reason, "high precision scene");
     }
 }
+

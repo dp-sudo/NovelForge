@@ -8,6 +8,8 @@ use crate::infra::{app_database, credential_manager};
 
 pub struct ModelRegistryService;
 
+const MAX_REGISTRY_PAYLOAD_BYTES: usize = 2 * 1024 * 1024;
+
 impl Default for ModelRegistryService {
     fn default() -> Self {
         Self
@@ -26,7 +28,7 @@ impl ModelRegistryService {
         let mut config = app_database::load_provider(&conn, provider_id)?.ok_or_else(|| {
             AppErrorDto::new(
                 "PROVIDER_NOT_FOUND",
-                &format!("Provider '{}' not found", provider_id),
+                &format!("未找到供应商 '{}'", provider_id),
                 true,
             )
         })?;
@@ -40,7 +42,7 @@ impl ModelRegistryService {
         let live_model_names = adapter.fetch_models().await.map_err(|e| {
             AppErrorDto::new(
                 "MODEL_FETCH_FAILED",
-                "Cannot fetch model list from provider",
+                "无法从供应商获取模型列表",
                 true,
             )
             .with_detail(format!("{:?}", e))
@@ -57,7 +59,7 @@ impl ModelRegistryService {
                 json_schema: false,
                 tools: false,
                 thinking: false,
-                error: Some("Capability detection failed".to_string()),
+                error: Some("能力检测失败".to_string()),
             });
 
         let existing = app_database::load_models(&conn, provider_id)?;
@@ -149,11 +151,7 @@ impl ModelRegistryService {
         url: &str,
     ) -> Result<RegistryCheckResult, AppErrorDto> {
         let now = crate::infra::time::now_iso();
-        let parsed_url = validate_registry_url(url)?;
-        let payload = fetch_registry_payload(parsed_url.as_str()).await?;
-        let (registry, registry_json) = parse_registry_payload(&payload)?;
-        validate_registry_document(&registry)?;
-        verify_registry_signature(&registry, &registry_json, parsed_url.host_str())?;
+        let registry = load_verified_registry(url).await?;
 
         let registry_version = registry.registry_version.clone();
         let registry_updated_at = registry.updated_at.clone();
@@ -204,17 +202,13 @@ impl ModelRegistryService {
         url: &str,
     ) -> Result<RegistryApplyResult, AppErrorDto> {
         let now = crate::infra::time::now_iso();
-        let parsed_url = validate_registry_url(url)?;
-        let payload = fetch_registry_payload(parsed_url.as_str()).await?;
-        let (registry, registry_json) = parse_registry_payload(&payload)?;
-        validate_registry_document(&registry)?;
-        verify_registry_signature(&registry, &registry_json, parsed_url.host_str())?;
+        let registry = load_verified_registry(url).await?;
 
         let mut conn = app_database::open_or_create()?;
         let tx = conn.transaction().map_err(|e| {
             AppErrorDto::new(
                 "DB_TRANSACTION_FAILED",
-                "Cannot start registry update transaction",
+                "无法启动注册表更新事务",
                 false,
             )
             .with_detail(e.to_string())
@@ -283,7 +277,7 @@ impl ModelRegistryService {
         tx.commit().map_err(|e| {
             AppErrorDto::new(
                 "DB_TRANSACTION_FAILED",
-                "Cannot commit registry update",
+                "无法提交注册表更新事务",
                 false,
             )
             .with_detail(e.to_string())
@@ -383,7 +377,7 @@ struct RegistrySigning {
 
 fn validate_registry_url(url: &str) -> Result<reqwest::Url, AppErrorDto> {
     let parsed = reqwest::Url::parse(url).map_err(|e| {
-        AppErrorDto::new("INVALID_REGISTRY_URL", "Registry URL is invalid", true)
+        AppErrorDto::new("INVALID_REGISTRY_URL", "注册表地址无效", true)
             .with_detail(e.to_string())
     })?;
 
@@ -398,9 +392,18 @@ fn validate_registry_url(url: &str) -> Result<reqwest::Url, AppErrorDto> {
 
     Err(AppErrorDto::new(
         "INSECURE_REGISTRY_URL",
-        "Registry URL must use HTTPS unless target is localhost/loopback",
+        "注册表地址必须使用 HTTPS（localhost/loopback 可使用 HTTP）",
         true,
     ))
+}
+
+async fn load_verified_registry(url: &str) -> Result<RegistryDocument, AppErrorDto> {
+    let parsed_url = validate_registry_url(url)?;
+    let payload = fetch_registry_payload(parsed_url.as_str()).await?;
+    let (registry, registry_json) = parse_registry_payload(&payload)?;
+    validate_registry_document(&registry)?;
+    verify_registry_signature(&registry, &registry_json, parsed_url.host_str())?;
+    Ok(registry)
 }
 
 async fn fetch_registry_payload(url: &str) -> Result<String, AppErrorDto> {
@@ -408,14 +411,14 @@ async fn fetch_registry_payload(url: &str) -> Result<String, AppErrorDto> {
         .timeout(std::time::Duration::from_secs(10))
         .build()
         .map_err(|e| {
-            AppErrorDto::new("HTTP_CLIENT_FAILED", "Cannot create HTTP client", false)
+            AppErrorDto::new("HTTP_CLIENT_FAILED", "无法创建 HTTP 客户端", false)
                 .with_detail(e.to_string())
         })?;
 
     let response = client.get(url).send().await.map_err(|e| {
         AppErrorDto::new(
             "REGISTRY_FETCH_FAILED",
-            "Cannot fetch remote registry",
+            "无法获取远程注册表",
             true,
         )
         .with_detail(e.to_string())
@@ -424,16 +427,46 @@ async fn fetch_registry_payload(url: &str) -> Result<String, AppErrorDto> {
     if !response.status().is_success() {
         return Err(AppErrorDto::new(
             "REGISTRY_HTTP_ERROR",
-            &format!("Registry returned HTTP {}", response.status().as_u16()),
+            &format!("注册表返回 HTTP {}", response.status().as_u16()),
             true,
         ));
     }
 
-    response.text().await.map_err(|e| {
+    if let Some(content_length) = response.content_length() {
+        if content_length > MAX_REGISTRY_PAYLOAD_BYTES as u64 {
+            return Err(AppErrorDto::new(
+                "REGISTRY_PAYLOAD_TOO_LARGE",
+                "注册表内容过大，请检查源地址",
+                true,
+            ));
+        }
+    }
+
+    let bytes = response.bytes().await.map_err(|e| {
         AppErrorDto::new(
             "REGISTRY_FETCH_FAILED",
-            "Cannot read registry payload",
+            "无法读取注册表内容",
             true,
+        )
+        .with_detail(e.to_string())
+    })?;
+    decode_registry_payload_bytes(bytes.as_ref())
+}
+
+fn decode_registry_payload_bytes(bytes: &[u8]) -> Result<String, AppErrorDto> {
+    if bytes.len() > MAX_REGISTRY_PAYLOAD_BYTES {
+        return Err(AppErrorDto::new(
+            "REGISTRY_PAYLOAD_TOO_LARGE",
+            "注册表内容过大，请检查源地址",
+            true,
+        ));
+    }
+
+    String::from_utf8(bytes.to_vec()).map_err(|e| {
+        AppErrorDto::new(
+            "REGISTRY_PARSE_FAILED",
+            "注册表内容不是有效 UTF-8",
+            false,
         )
         .with_detail(e.to_string())
     })
@@ -445,7 +478,7 @@ fn parse_registry_payload(
     let json = serde_json::from_str::<serde_json::Value>(payload).map_err(|e| {
         AppErrorDto::new(
             "REGISTRY_PARSE_FAILED",
-            "Invalid registry JSON schema",
+            "注册表 JSON 结构无效",
             false,
         )
         .with_detail(e.to_string())
@@ -453,7 +486,7 @@ fn parse_registry_payload(
     let registry = serde_json::from_value::<RegistryDocument>(json.clone()).map_err(|e| {
         AppErrorDto::new(
             "REGISTRY_PARSE_FAILED",
-            "Invalid registry JSON schema",
+            "注册表 JSON 结构无效",
             false,
         )
         .with_detail(e.to_string())
@@ -465,21 +498,21 @@ fn validate_registry_document(registry: &RegistryDocument) -> Result<(), AppErro
     if registry.schema_version.trim().is_empty() {
         return Err(AppErrorDto::new(
             "REGISTRY_SCHEMA_INVALID",
-            "schemaVersion cannot be empty",
+            "schemaVersion 不能为空",
             false,
         ));
     }
     if registry.registry_version.trim().is_empty() {
         return Err(AppErrorDto::new(
             "REGISTRY_SCHEMA_INVALID",
-            "registryVersion cannot be empty",
+            "registryVersion 不能为空",
             false,
         ));
     }
     if registry.providers.is_empty() {
         return Err(AppErrorDto::new(
             "REGISTRY_SCHEMA_INVALID",
-            "providers cannot be empty",
+            "providers 不能为空",
             false,
         ));
     }
@@ -488,7 +521,7 @@ fn validate_registry_document(registry: &RegistryDocument) -> Result<(), AppErro
         if provider.vendor.trim().is_empty() {
             return Err(AppErrorDto::new(
                 "REGISTRY_SCHEMA_INVALID",
-                "provider.vendor cannot be empty",
+                "provider.vendor 不能为空",
                 false,
             ));
         }
@@ -496,7 +529,7 @@ fn validate_registry_document(registry: &RegistryDocument) -> Result<(), AppErro
             if model.model_name.trim().is_empty() {
                 return Err(AppErrorDto::new(
                     "REGISTRY_SCHEMA_INVALID",
-                    "model.modelName cannot be empty",
+                    "model.modelName 不能为空",
                     false,
                 ));
             }
@@ -515,7 +548,7 @@ fn verify_registry_signature(
     if signature.is_empty() {
         return Err(AppErrorDto::new(
             "REGISTRY_SIGNATURE_INVALID",
-            "Registry signature is missing",
+            "注册表签名缺失",
             false,
         ));
     }
@@ -527,7 +560,7 @@ fn verify_registry_signature(
                 .map_err(|e| {
                     AppErrorDto::new(
                         "REGISTRY_SIGNATURE_INVALID",
-                        "Registry signature is not valid base64",
+                        "注册表签名不是有效的 base64",
                         false,
                     )
                     .with_detail(e.to_string())
@@ -535,14 +568,14 @@ fn verify_registry_signature(
             if signature_bytes.len() != 64 {
                 return Err(AppErrorDto::new(
                     "REGISTRY_SIGNATURE_INVALID",
-                    "Registry signature length is invalid for ed25519",
+                    "注册表签名长度不符合 ed25519 要求",
                     false,
                 ));
             }
             let signature = Signature::from_slice(&signature_bytes).map_err(|e| {
                 AppErrorDto::new(
                     "REGISTRY_SIGNATURE_INVALID",
-                    "Registry signature cannot be parsed",
+                    "注册表签名无法解析",
                     false,
                 )
                 .with_detail(e.to_string())
@@ -551,7 +584,7 @@ fn verify_registry_signature(
             let public_key_b64 = resolve_registry_public_key(registry, host).ok_or_else(|| {
                 AppErrorDto::new(
                     "REGISTRY_SIGNATURE_INVALID",
-                    "Trusted registry public key is missing",
+                    "缺少受信任的注册表公钥",
                     false,
                 )
             })?;
@@ -560,7 +593,7 @@ fn verify_registry_signature(
                 .map_err(|e| {
                     AppErrorDto::new(
                         "REGISTRY_SIGNATURE_INVALID",
-                        "Registry public key is not valid base64",
+                        "注册表公钥不是有效的 base64",
                         false,
                     )
                     .with_detail(e.to_string())
@@ -568,7 +601,7 @@ fn verify_registry_signature(
             if public_key_bytes.len() != 32 {
                 return Err(AppErrorDto::new(
                     "REGISTRY_SIGNATURE_INVALID",
-                    "Registry public key length is invalid for ed25519",
+                    "注册表公钥长度不符合 ed25519 要求",
                     false,
                 ));
             }
@@ -576,14 +609,14 @@ fn verify_registry_signature(
             let key_array: [u8; 32] = public_key_bytes.as_slice().try_into().map_err(|_| {
                 AppErrorDto::new(
                     "REGISTRY_SIGNATURE_INVALID",
-                    "Registry public key length is invalid for ed25519",
+                    "注册表公钥长度不符合 ed25519 要求",
                     false,
                 )
             })?;
             let verifying_key = VerifyingKey::from_bytes(&key_array).map_err(|e| {
                 AppErrorDto::new(
                     "REGISTRY_SIGNATURE_INVALID",
-                    "Registry public key cannot be parsed",
+                    "注册表公钥无法解析",
                     false,
                 )
                 .with_detail(e.to_string())
@@ -595,7 +628,7 @@ fn verify_registry_signature(
                 .map_err(|e| {
                     AppErrorDto::new(
                         "REGISTRY_SIGNATURE_INVALID",
-                        "Registry signature verification failed",
+                        "注册表签名校验失败",
                         false,
                     )
                     .with_detail(e.to_string())
@@ -607,14 +640,14 @@ fn verify_registry_signature(
             } else {
                 Err(AppErrorDto::new(
                     "REGISTRY_SIGNATURE_INVALID",
-                    "Unsigned registry is allowed only for localhost/loopback",
+                    "仅 localhost/loopback 允许无签名注册表",
                     false,
                 ))
             }
         }
         _ => Err(AppErrorDto::new(
             "REGISTRY_SIGNATURE_INVALID",
-            "Unsupported registry signature algorithm",
+            "不支持的注册表签名算法",
             false,
         )),
     }
@@ -631,7 +664,7 @@ fn canonical_unsigned_registry_payload(
         .ok_or_else(|| {
             AppErrorDto::new(
                 "REGISTRY_SIGNATURE_INVALID",
-                "Registry signing payload is missing",
+                "注册表签名载荷缺失",
                 false,
             )
         })?;
@@ -644,7 +677,7 @@ fn canonical_unsigned_registry_payload(
     serde_json::to_string(&unsigned).map_err(|e| {
         AppErrorDto::new(
             "REGISTRY_SIGNATURE_INVALID",
-            "Registry payload serialization failed",
+            "注册表载荷序列化失败",
             false,
         )
         .with_detail(e.to_string())
@@ -822,5 +855,19 @@ mod tests {
             verify_registry_signature(&registry, &registry_json, Some("updates.novelforge.app"))
                 .expect_err("public host should require trusted env key");
         assert_eq!(err.code, "REGISTRY_SIGNATURE_INVALID");
+    }
+
+    #[test]
+    fn reject_registry_payload_when_too_large() {
+        let bytes = vec![b'a'; MAX_REGISTRY_PAYLOAD_BYTES + 1];
+        let err = decode_registry_payload_bytes(&bytes).expect_err("oversized payload should fail");
+        assert_eq!(err.code, "REGISTRY_PAYLOAD_TOO_LARGE");
+    }
+
+    #[test]
+    fn reject_registry_payload_when_not_utf8() {
+        let err =
+            decode_registry_payload_bytes(&[0xFF, 0xFE]).expect_err("invalid utf8 should fail");
+        assert_eq!(err.code, "REGISTRY_PARSE_FAILED");
     }
 }

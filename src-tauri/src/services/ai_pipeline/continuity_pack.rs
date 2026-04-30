@@ -130,8 +130,8 @@ fn build_lexicon_policy_context(context: &CollectedContext) -> Vec<String> {
     }
     if let Some(style) = &global.writing_style {
         lines.push(format!(
-            "文风约束: 语言={}、描写密度={}、对话比例={}、句式节奏={}、氛围={}、心理深度={}",
-            style.language_style,
+            "文风约束: 文风={}、描写密度={}、对话比例={}、句式节奏={}、氛围={}、心理深度={}",
+            display_language_style(&style.language_style),
             style.description_density,
             style.dialogue_ratio,
             style.sentence_rhythm,
@@ -170,12 +170,24 @@ fn preview_text(value: &str, max_chars: usize) -> String {
     format!("{}...", chars[..max_chars].iter().collect::<String>())
 }
 
+fn display_language_style(raw: &str) -> String {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "plain" => "平实".to_string(),
+        "balanced" => "适中".to_string(),
+        "ornate" => "华丽".to_string(),
+        "colloquial" => "口语化".to_string(),
+        other if other.is_empty() => "适中".to_string(),
+        other => other.to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{ContextService, ContinuityPackCompiler};
     use crate::services::context_service::{
         BlueprintStepSummary, ChapterSummary, CollectedContext, GlobalContext, RelatedContext,
     };
+    use crate::services::project_service::WritingStyle;
 
     fn sample_context() -> CollectedContext {
         CollectedContext {
@@ -233,5 +245,36 @@ mod tests {
         assert!(pack.promise_context.is_empty());
         assert!(pack.window_plan_context.is_empty());
         assert!(pack.recent_continuity_context.is_empty());
+    }
+
+    #[test]
+    fn minimal_depth_lexicon_context_uses_tone_label() {
+        let compiler = ContinuityPackCompiler;
+        let mut context = sample_context();
+        context.global_context.writing_style = Some(WritingStyle {
+            language_style: "colloquial".to_string(),
+            description_density: 4,
+            dialogue_ratio: 6,
+            sentence_rhythm: "mixed".to_string(),
+            atmosphere: "warm".to_string(),
+            psychological_depth: 5,
+        });
+        let service = ContextService;
+
+        let pack = compiler.compile(
+            "",
+            "chapter.draft",
+            "minimal",
+            &context,
+            &service,
+            Some("ch-1"),
+        );
+        let style_line = pack
+            .lexicon_policy_context
+            .iter()
+            .find(|line| line.starts_with("文风约束:"))
+            .expect("style line exists");
+        assert!(style_line.contains("文风=口语化"));
+        assert!(!style_line.contains("语言=colloquial"));
     }
 }

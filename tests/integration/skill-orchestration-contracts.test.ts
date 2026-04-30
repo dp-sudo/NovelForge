@@ -36,7 +36,7 @@ test("技能契约：设置 UI 可编辑分类、绑定与触发条件", async (
   assert.match(detail, /技能分类/);
   assert.match(detail, /bundleIds/);
   assert.match(detail, /triggerConditions/);
-  assert.match(detail, /Always On/);
+  assert.match(detail, /常驻激活/);
   assert.match(detail, /sceneTags/);
 });
 

@@ -21,11 +21,11 @@ const SOURCE_COLORS: Record<string, string> = {
 };
 
 const SKILL_CLASS_LABELS: Record<string, string> = {
-  workflow: "Workflow",
-  capability: "Capability",
-  extractor: "Extractor",
-  review: "Review",
-  policy: "Policy",
+  workflow: "流程",
+  capability: "能力",
+  extractor: "抽取",
+  review: "评审",
+  policy: "策略",
 };
 
 const SKILL_CLASS_COLORS: Record<string, string> = {
@@ -59,7 +59,7 @@ export function SkillCard({ name, description, source, icon, skillClass, active,
                 skillClass ? SKILL_CLASS_COLORS[skillClass] || "bg-surface-700 text-surface-300 border-surface-600" : "bg-surface-700 text-surface-300 border-surface-600"
               }`}
             >
-              {skillClass ? SKILL_CLASS_LABELS[skillClass] || skillClass : "Unclassified"}
+              {skillClass ? SKILL_CLASS_LABELS[skillClass] || skillClass : "未分类"}
             </span>
           </div>
           <p className="text-xs text-surface-500 mt-0.5 truncate">{description}</p>

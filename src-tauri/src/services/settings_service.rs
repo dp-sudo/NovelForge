@@ -76,7 +76,7 @@ impl SettingsService {
         let mut config = app_database::load_provider(&conn, provider_id)?.ok_or_else(|| {
             AppErrorDto::new(
                 "PROVIDER_NOT_FOUND",
-                &format!("Provider '{}' not found", provider_id),
+                &format!("未找到供应商 '{}'", provider_id),
                 true,
             )
         })?;
@@ -99,7 +99,7 @@ impl SettingsService {
         let mut config = app_database::load_provider(&conn, provider_id)?.ok_or_else(|| {
             AppErrorDto::new(
                 "PROVIDER_NOT_FOUND",
-                &format!("Provider '{}' not found", provider_id),
+                &format!("未找到供应商 '{}'", provider_id),
                 true,
             )
         })?;
@@ -118,7 +118,7 @@ impl SettingsService {
         let conn = app_database::open_or_create()?;
         match app_database::load_app_setting(&conn, EDITOR_SETTINGS_KEY)? {
             Some(json) => serde_json::from_str(&json).map_err(|e| {
-                AppErrorDto::new("DESERIALIZE_FAILED", "Cannot parse editor settings", true)
+                AppErrorDto::new("DESERIALIZE_FAILED", "无法解析编辑器设置", true)
                     .with_detail(e.to_string())
             }),
             None => Ok(EditorSettings::default()),
@@ -130,7 +130,7 @@ impl SettingsService {
         let json = serde_json::to_string(settings).map_err(|e| {
             AppErrorDto::new(
                 "SERIALIZE_FAILED",
-                "Cannot serialize editor settings",
+                "无法序列化编辑器设置",
                 false,
             )
             .with_detail(e.to_string())
@@ -170,26 +170,26 @@ fn validate_provider_config(config: &mut ProviderConfig) -> Result<(), AppErrorD
     if config.id.is_empty() {
         return Err(AppErrorDto::new(
             "INVALID_PROVIDER_ID",
-            "Provider id cannot be empty",
+            "供应商ID不能为空",
             true,
         ));
     }
     if config.display_name.is_empty() {
         return Err(AppErrorDto::new(
             "INVALID_PROVIDER_NAME",
-            "Provider display name cannot be empty",
+            "供应商显示名称不能为空",
             true,
         ));
     }
     if config.base_url.is_empty() {
         return Err(AppErrorDto::new(
             "INVALID_BASE_URL",
-            "Provider base URL cannot be empty",
+            "供应商服务地址不能为空",
             true,
         ));
     }
     let parsed = reqwest::Url::parse(&config.base_url).map_err(|err| {
-        AppErrorDto::new("INVALID_BASE_URL", "Provider base URL is invalid", true)
+        AppErrorDto::new("INVALID_BASE_URL", "供应商服务地址无效", true)
             .with_detail(err.to_string())
     })?;
     if parsed.scheme() == "https" {
@@ -199,7 +199,7 @@ fn validate_provider_config(config: &mut ProviderConfig) -> Result<(), AppErrorD
     } else {
         return Err(AppErrorDto::new(
             "INVALID_BASE_URL_SCHEME",
-            "Provider base URL must use https:// (http:// is allowed only for localhost/loopback)",
+            "供应商服务地址必须使用 https://（仅 localhost/loopback 允许 http://）",
             true,
         ));
     }

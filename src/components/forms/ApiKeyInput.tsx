@@ -10,7 +10,7 @@ interface ApiKeyInputProps {
 }
 
 export function ApiKeyInput({
-  label = "API Key",
+  label = "API 密钥",
   value,
   onChange,
   onClearMasked,
@@ -53,7 +53,7 @@ export function ApiKeyInput({
             type={showKey ? "text" : "password"}
             value={value}
             onChange={(e) => onChange(e.target.value)}
-            placeholder={maskedValue ? "输入新 Key 替换" : "sk-..."}
+            placeholder={maskedValue ? "输入新密钥替换" : "sk-..."}
             className={`w-full px-3 py-2 pr-20 text-sm bg-surface-800 border rounded-lg text-surface-100 placeholder-surface-400 transition-colors focus:outline-none focus:ring-2 focus:ring-primary/50 ${
               error ? "border-error" : "border-surface-600 focus:border-primary"
             }`}
@@ -83,8 +83,8 @@ export function ApiKeyInput({
       {!error && (
         <span className="text-xs text-surface-500">
           {hasExistingKey
-            ? "API Key 已保存，点击「替换」可更新"
-            : "API Key 将安全保存在 Windows Credential Manager"}
+            ? "API 密钥已保存，点击「替换」可更新"
+            : "API 密钥将安全保存在 Windows 凭据管理器"}
         </span>
       )}
     </div>

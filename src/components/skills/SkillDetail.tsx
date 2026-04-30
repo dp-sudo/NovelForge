@@ -33,18 +33,18 @@ interface ManifestDraft {
 
 const SKILL_CLASS_OPTIONS = [
   { value: "", label: "未分类" },
-  { value: "workflow", label: "workflow" },
-  { value: "capability", label: "capability" },
-  { value: "extractor", label: "extractor" },
-  { value: "review", label: "review" },
-  { value: "policy", label: "policy" },
+  { value: "workflow", label: "流程" },
+  { value: "capability", label: "能力" },
+  { value: "extractor", label: "抽取" },
+  { value: "review", label: "评审" },
+  { value: "policy", label: "策略" },
 ];
 
 const AUTOMATION_TIER_OPTIONS = [
   { value: "", label: "未指定" },
-  { value: "auto", label: "auto" },
-  { value: "supervised", label: "supervised" },
-  { value: "confirm", label: "confirm" },
+  { value: "auto", label: "自动执行" },
+  { value: "supervised", label: "人工监督" },
+  { value: "confirm", label: "人工确认" },
 ];
 
 const SCENE_TAG_OPTIONS = [
@@ -57,6 +57,17 @@ const SCENE_TAG_OPTIONS = [
   "romance",
   "worldbuilding",
 ];
+
+const SCENE_TAG_LABELS: Record<string, string> = {
+  dialogue: "对话",
+  action: "动作",
+  battle: "战斗",
+  emotion: "情绪",
+  introspection: "内心",
+  suspense: "悬疑",
+  romance: "情感",
+  worldbuilding: "世界构建",
+};
 
 function listToLines(items: string[]): string {
   return normalizeList(items).join("\n");
@@ -318,12 +329,12 @@ export function SkillDetail({ skill, onDeleted, onUpdated }: SkillDetailProps) {
               }))
             }
           >
-            {manifestDraft.alwaysOn ? "Always On 已启用" : "Always On 未启用"}
+            {manifestDraft.alwaysOn ? "常驻激活已启用" : "常驻激活未启用"}
           </Button>
         </div>
 
         <Textarea
-          label="能力包绑定（bundleIds，每行一个）"
+          label="能力包绑定（每行一个）"
           value={manifestDraft.bundleIdsText}
           onChange={(e) =>
             setManifestDraft((prev) => ({
@@ -332,10 +343,10 @@ export function SkillDetail({ skill, onDeleted, onUpdated }: SkillDetailProps) {
             }))
           }
           rows={3}
-          placeholder="chapter-core&#10;character-presence"
+          placeholder="例如：chapter-core&#10;character-presence"
         />
         <Textarea
-          label="触发条件（triggerConditions，每行一个）"
+          label="触发条件（每行一个）"
           value={manifestDraft.triggerConditionsText}
           onChange={(e) =>
             setManifestDraft((prev) => ({
@@ -344,10 +355,10 @@ export function SkillDetail({ skill, onDeleted, onUpdated }: SkillDetailProps) {
             }))
           }
           rows={3}
-          placeholder="chapter.plan&#10;scene.rewrite"
+          placeholder="例如：chapter.plan&#10;scene.rewrite"
         />
         <Textarea
-          label="所需上下文（requiredContexts，每行一个）"
+          label="所需上下文（每行一个）"
           value={manifestDraft.requiredContextsText}
           onChange={(e) =>
             setManifestDraft((prev) => ({
@@ -356,10 +367,10 @@ export function SkillDetail({ skill, onDeleted, onUpdated }: SkillDetailProps) {
             }))
           }
           rows={2}
-          placeholder="canon&#10;state"
+          placeholder="例如：canon&#10;state"
         />
         <Textarea
-          label="状态写入声明（stateWrites，每行一个）"
+          label="状态写入声明（每行一个）"
           value={manifestDraft.stateWritesText}
           onChange={(e) =>
             setManifestDraft((prev) => ({
@@ -368,10 +379,10 @@ export function SkillDetail({ skill, onDeleted, onUpdated }: SkillDetailProps) {
             }))
           }
           rows={2}
-          placeholder="character.emotion&#10;plot.progress"
+          placeholder="例如：character.emotion&#10;plot.progress"
         />
         <Textarea
-          label="影响层（affectsLayers，每行一个）"
+          label="影响层（每行一个）"
           value={manifestDraft.affectsLayersText}
           onChange={(e) =>
             setManifestDraft((prev) => ({
@@ -380,11 +391,11 @@ export function SkillDetail({ skill, onDeleted, onUpdated }: SkillDetailProps) {
             }))
           }
           rows={2}
-          placeholder="constitution&#10;canon&#10;state"
+          placeholder="例如：constitution&#10;canon&#10;state"
         />
 
         <div className="space-y-2">
-          <p className="text-sm font-medium text-surface-200">场景标签（sceneTags）</p>
+          <p className="text-sm font-medium text-surface-200">场景标签</p>
           <p className="text-xs text-surface-400">支持多选，用于标记技能适用场景。</p>
           <div className="flex flex-wrap gap-2">
             {SCENE_TAG_OPTIONS.map((tag) => {
@@ -400,7 +411,7 @@ export function SkillDetail({ skill, onDeleted, onUpdated }: SkillDetailProps) {
                       : "bg-surface-800 text-surface-400 border-surface-600 hover:text-surface-200"
                   }`}
                 >
-                  {tag}
+                  {SCENE_TAG_LABELS[tag] || tag}
                 </button>
               );
             })}
@@ -432,7 +443,7 @@ export function SkillDetail({ skill, onDeleted, onUpdated }: SkillDetailProps) {
       <div className="flex flex-wrap gap-3 mb-4 shrink-0 text-xs text-surface-400">
         <span>{skill.requiresUserConfirmation ? "需要确认" : "自动执行"}</span>
         <span>{skill.writesToProject ? "写入项目" : "不写入"}</span>
-        <span>{skill.alwaysOn ? "Always On" : "按需激活"}</span>
+        <span>{skill.alwaysOn ? "常驻激活" : "按需激活"}</span>
       </div>
 
       <div className="flex-1 min-h-0 mb-4">

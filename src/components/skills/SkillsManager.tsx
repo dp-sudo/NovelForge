@@ -8,11 +8,11 @@ import { listSkills, importSkillFile, refreshSkills, type SkillManifest } from "
 
 const CATEGORIES = [
   { key: "", label: "全部" },
-  { key: "workflow", label: "Workflow" },
-  { key: "capability", label: "Capability" },
-  { key: "extractor", label: "Extractor" },
-  { key: "review", label: "Review" },
-  { key: "policy", label: "Policy" },
+  { key: "workflow", label: "流程" },
+  { key: "capability", label: "能力" },
+  { key: "extractor", label: "抽取" },
+  { key: "review", label: "评审" },
+  { key: "policy", label: "策略" },
   { key: "__unclassified__", label: "未分类" },
 ];
 

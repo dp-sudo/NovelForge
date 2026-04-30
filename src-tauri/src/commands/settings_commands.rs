@@ -32,7 +32,7 @@ fn normalize_task_routes(routes: Vec<TaskRoute>) -> Vec<TaskRoute> {
 fn ensure_updater_configured() -> Result<(), AppErrorDto> {
     let conf: serde_json::Value = serde_json::from_str(include_str!("../../tauri.conf.json"))
         .map_err(|err| {
-            AppErrorDto::new("UPDATER_CONFIG_INVALID", "Updater config is invalid", false)
+            AppErrorDto::new("UPDATER_CONFIG_INVALID", "更新器配置无效", false)
                 .with_detail(err.to_string())
         })?;
 
@@ -41,7 +41,7 @@ fn ensure_updater_configured() -> Result<(), AppErrorDto> {
         .and_then(|plugins| plugins.get("updater"))
         .and_then(|value| value.as_object())
         .ok_or_else(|| {
-            AppErrorDto::new("UPDATER_NOT_CONFIGURED", "Updater is not configured", true)
+            AppErrorDto::new("UPDATER_NOT_CONFIGURED", "更新器未配置", true)
                 .with_suggested_action("请在 tauri.conf.json 中配置 updater 插件")
         })?;
 
@@ -68,7 +68,7 @@ fn ensure_updater_configured() -> Result<(), AppErrorDto> {
     if placeholder_pubkey || !has_valid_endpoint {
         return Err(AppErrorDto::new(
             "UPDATER_NOT_CONFIGURED",
-            "Updater config is incomplete",
+            "更新器配置不完整",
             true,
         )
         .with_suggested_action("请先配置真实 pubkey 与更新端点后再检查更新"));
@@ -85,6 +85,50 @@ pub struct AppUpdateInfo {
     pub target_version: Option<String>,
     pub body: Option<String>,
     pub date: Option<String>,
+}
+
+fn no_update_info(current_version: String) -> AppUpdateInfo {
+    AppUpdateInfo {
+        available: false,
+        current_version,
+        target_version: None,
+        body: None,
+        date: None,
+    }
+}
+
+const DEPRECATED_LOAD_PROVIDER_LOG: &str = "[DEPRECATED_COMMAND] load_provider is compatibility-only";
+const DEPRECATED_LOAD_PROVIDER_CONFIG_LOG: &str =
+    "[DEPRECATED_COMMAND] load_provider_config is compatibility-only";
+const DEPRECATED_SAVE_PROVIDER_CONFIG_LOG: &str =
+    "[DEPRECATED_COMMAND] save_provider_config is compatibility-only";
+
+fn deprecated_source(source: Option<&str>) -> &str {
+    source.unwrap_or("unknown")
+}
+
+fn log_deprecated_command(message: &str, source: Option<&str>) {
+    log::warn!("{} source={}", message, deprecated_source(source));
+}
+
+fn updater_init_error(err: impl ToString) -> AppErrorDto {
+    AppErrorDto::new("UPDATER_INIT_FAILED", "无法初始化更新器", false)
+        .with_detail(err.to_string())
+}
+
+fn updater_check_error(err: impl ToString) -> AppErrorDto {
+    AppErrorDto::new("UPDATER_CHECK_FAILED", "无法检查更新", true)
+        .with_detail(err.to_string())
+}
+
+async fn save_provider_and_reload(
+    state: &State<'_, AppState>,
+    config: ProviderConfig,
+    api_key: Option<String>,
+) -> Result<ProviderConfig, AppErrorDto> {
+    let saved = state.settings_service.save_provider(config, api_key)?;
+    state.ai_service.reload_provider(&saved.id).await?;
+    Ok(saved)
 }
 
 #[tauri::command]
@@ -105,19 +149,12 @@ pub async fn activate_license(
 #[tauri::command]
 pub async fn check_app_update(
     app: tauri::AppHandle,
-    state: State<'_, AppState>,
+    _state: State<'_, AppState>,
 ) -> Result<AppUpdateInfo, AppErrorDto> {
-    let _ = state;
     ensure_updater_configured()?;
-    let updater = app.updater().map_err(|err| {
-        AppErrorDto::new("UPDATER_INIT_FAILED", "Cannot initialize updater", false)
-            .with_detail(err.to_string())
-    })?;
+    let updater = app.updater().map_err(updater_init_error)?;
     let current_version = app.package_info().version.to_string();
-    let maybe_update = updater.check().await.map_err(|err| {
-        AppErrorDto::new("UPDATER_CHECK_FAILED", "Cannot check updates", true)
-            .with_detail(err.to_string())
-    })?;
+    let maybe_update = updater.check().await.map_err(updater_check_error)?;
 
     if let Some(update) = maybe_update {
         return Ok(AppUpdateInfo {
@@ -129,39 +166,20 @@ pub async fn check_app_update(
         });
     }
 
-    Ok(AppUpdateInfo {
-        available: false,
-        current_version,
-        target_version: None,
-        body: None,
-        date: None,
-    })
+    Ok(no_update_info(current_version))
 }
 
 #[tauri::command]
 pub async fn install_app_update(
     app: tauri::AppHandle,
-    state: State<'_, AppState>,
+    _state: State<'_, AppState>,
 ) -> Result<AppUpdateInfo, AppErrorDto> {
-    let _ = state;
     ensure_updater_configured()?;
-    let updater = app.updater().map_err(|err| {
-        AppErrorDto::new("UPDATER_INIT_FAILED", "Cannot initialize updater", false)
-            .with_detail(err.to_string())
-    })?;
+    let updater = app.updater().map_err(updater_init_error)?;
     let current_version = app.package_info().version.to_string();
-    let maybe_update = updater.check().await.map_err(|err| {
-        AppErrorDto::new("UPDATER_CHECK_FAILED", "Cannot check updates", true)
-            .with_detail(err.to_string())
-    })?;
+    let maybe_update = updater.check().await.map_err(updater_check_error)?;
     let Some(update) = maybe_update else {
-        return Ok(AppUpdateInfo {
-            available: false,
-            current_version,
-            target_version: None,
-            body: None,
-            date: None,
-        });
+        return Ok(no_update_info(current_version));
     };
 
     update
@@ -170,7 +188,7 @@ pub async fn install_app_update(
         .map_err(|err| {
             AppErrorDto::new(
                 "UPDATER_INSTALL_FAILED",
-                "Cannot download or install update",
+                "无法下载或安装更新",
                 true,
             )
             .with_detail(err.to_string())
@@ -198,12 +216,11 @@ pub async fn save_provider(
     api_key: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<ProviderConfig, AppErrorDto> {
-    let saved = state.settings_service.save_provider(config, api_key)?;
+    let saved = save_provider_and_reload(&state, config, api_key).await?;
     crate::infra::logger::log_security(
         "save_provider",
         &format!("provider={}", saved.display_name),
     );
-    state.ai_service.reload_provider(&saved.id).await?;
 
     Ok(saved)
 }
@@ -215,10 +232,7 @@ pub async fn load_provider(
     state: State<'_, AppState>,
 ) -> Result<ProviderConfig, AppErrorDto> {
     // 问题4修复(Deprecated 命令面): 兼容入口保留，但官方调用面改为 settingsApi.list_providers/save_provider。
-    log::warn!(
-        "[DEPRECATED_COMMAND] load_provider is compatibility-only source={}",
-        source.as_deref().unwrap_or("unknown")
-    );
+    log_deprecated_command(DEPRECATED_LOAD_PROVIDER_LOG, source.as_deref());
     state.settings_service.load_provider(&provider_id)
 }
 
@@ -292,48 +306,54 @@ pub async fn save_task_route(
     r.provider_id = r.provider_id.trim().to_string();
     r.model_id = r.model_id.trim().to_string();
     r.max_retries = r.max_retries.clamp(1, 8);
-    r.fallback_provider_id = r
+    let fallback_provider = r
         .fallback_provider_id
         .as_ref()
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty());
-    r.fallback_model_id = r
+    let fallback_model = r
         .fallback_model_id
         .as_ref()
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty());
-    if r.fallback_provider_id.is_none() {
-        r.fallback_model_id = None;
-    }
+    r.fallback_provider_id = fallback_provider;
+    r.fallback_model_id = if r.fallback_provider_id.is_some() {
+        fallback_model
+    } else {
+        None
+    };
 
     if r.provider_id.is_empty() {
-        return Err(AppErrorDto::new("INVALID_INPUT", "Provider 不能为空", true));
+        return Err(AppErrorDto::new("INVALID_INPUT", "供应商不能为空", true));
     }
     if r.model_id.is_empty() {
-        return Err(AppErrorDto::new("INVALID_INPUT", "模型 ID 不能为空", true));
+        return Err(AppErrorDto::new("INVALID_INPUT", "模型ID不能为空", true));
     }
 
     let existing_routes = app_database::load_task_routes(&conn)?;
     let existing_same_task = existing_routes.iter().find(|existing| {
         task_routing::canonical_task_type(&existing.task_type).as_ref() == r.task_type
     });
-    if r.id.is_empty() {
-        if let Some(existing) = existing_same_task {
+    match (r.id.is_empty(), existing_same_task) {
+        (true, Some(existing)) => {
             r.id = existing.id.clone();
             r.created_at = existing.created_at.clone();
-        } else {
+        }
+        (true, None) => {
             r.id = Uuid::new_v4().to_string();
             r.created_at = Some(now.clone());
         }
-    } else if let Some(existing) = existing_same_task {
-        if existing.id != r.id {
-            return Err(AppErrorDto::new(
-                "TASK_ROUTE_DUPLICATE",
-                &format!("任务类型 '{}' 已存在路由配置", r.task_type),
-                true,
-            ));
+        (false, Some(existing)) => {
+            if existing.id != r.id {
+                return Err(AppErrorDto::new(
+                    "TASK_ROUTE_DUPLICATE",
+                    &format!("任务类型 '{}' 已存在路由配置", r.task_type),
+                    true,
+                ));
+            }
+            r.created_at = existing.created_at.clone();
         }
-        r.created_at = existing.created_at.clone();
+        (false, None) => {}
     }
 
     app_database::upsert_task_route(&conn, &r, &now)?;
@@ -351,18 +371,25 @@ pub async fn delete_task_route(
 ) -> Result<(), AppErrorDto> {
     let conn = app_database::open_or_create()?;
     let routes = app_database::load_task_routes(&conn)?;
-    let target = routes.iter().find(|r| r.id == route_id);
-    let Some(target_route) = target else {
+    let Some(canonical_target) = routes
+        .iter()
+        .find(|r| r.id == route_id)
+        .map(|route| task_routing::canonical_task_type(&route.task_type).into_owned())
+    else {
         return Ok(());
     };
-    let canonical_target = task_routing::canonical_task_type(&target_route.task_type).into_owned();
+    let alias_route_ids = routes
+        .iter()
+        .filter(|r| {
+            r.id != route_id
+                && task_routing::canonical_task_type(&r.task_type).as_ref() == canonical_target
+        })
+        .map(|r| r.id.clone())
+        .collect::<Vec<_>>();
 
     app_database::delete_task_route(&conn, &route_id)?;
-    for alias_route in routes.iter().filter(|r| {
-        r.id != route_id
-            && task_routing::canonical_task_type(&r.task_type).as_ref() == canonical_target
-    }) {
-        app_database::delete_task_route(&conn, &alias_route.id)?;
+    for alias_route_id in alias_route_ids {
+        app_database::delete_task_route(&conn, &alias_route_id)?;
     }
     Ok(())
 }
@@ -417,15 +444,12 @@ pub async fn load_provider_config(
     state: State<'_, AppState>,
 ) -> Result<serde_json::Value, AppErrorDto> {
     // 问题4修复(Deprecated 命令面): 兼容旧协议，后续由 list_providers 收敛替代。
-    log::warn!(
-        "[DEPRECATED_COMMAND] load_provider_config is compatibility-only source={}",
-        source.as_deref().unwrap_or("unknown")
-    );
+    log_deprecated_command(DEPRECATED_LOAD_PROVIDER_CONFIG_LOG, source.as_deref());
     let providers = state.settings_service.list_providers()?;
     serde_json::to_value(providers).map_err(|e| {
         AppErrorDto::new(
             "SERIALIZE_ERROR",
-            "Cannot serialize provider configs",
+            "无法序列化供应商配置",
             false,
         )
         .with_detail(e.to_string())
@@ -440,16 +464,12 @@ pub async fn save_provider_config(
     state: State<'_, AppState>,
 ) -> Result<(), AppErrorDto> {
     // 问题4修复(Deprecated 命令面): 兼容旧协议，后续由 save_provider 收敛替代。
-    log::warn!(
-        "[DEPRECATED_COMMAND] save_provider_config is compatibility-only source={}",
-        source.as_deref().unwrap_or("unknown")
-    );
+    log_deprecated_command(DEPRECATED_SAVE_PROVIDER_CONFIG_LOG, source.as_deref());
     let mut config: ProviderConfig = serde_json::from_value(input).map_err(|e| {
-        AppErrorDto::new("INVALID_INPUT", "Invalid provider config format", true)
+        AppErrorDto::new("INVALID_INPUT", "供应商配置格式无效", true)
             .with_detail(e.to_string())
     })?;
     let api_key = config.api_key.take();
-    let saved = state.settings_service.save_provider(config, api_key)?;
-    state.ai_service.reload_provider(&saved.id).await?;
+    save_provider_and_reload(&state, config, api_key).await?;
     Ok(())
 }

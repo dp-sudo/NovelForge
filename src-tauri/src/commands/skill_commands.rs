@@ -12,7 +12,7 @@ pub async fn list_skills(state: State<'_, AppState>) -> Result<Vec<SkillManifest
         .skill_registry
         .read()
         .map_err(|e| {
-            AppErrorDto::new("SKILLS_LOCK_FAILED", "Skill registry lock failed", false)
+            AppErrorDto::new("SKILLS_LOCK_FAILED", "技能注册表锁定失败", false)
                 .with_detail(e.to_string())
         })?
         .list_skills()
@@ -29,14 +29,14 @@ pub async fn get_skill(
         .skill_registry
         .read()
         .map_err(|e| {
-            AppErrorDto::new("SKILLS_LOCK_FAILED", "Skill registry lock failed", false)
+            AppErrorDto::new("SKILLS_LOCK_FAILED", "技能注册表锁定失败", false)
                 .with_detail(e.to_string())
         })?
         .get_skill(&id)?
         .ok_or_else(|| {
             AppErrorDto::new(
                 "SKILLS_NOT_FOUND",
-                &format!("Skill '{}' not found", id),
+                &format!("未找到技能 '{}'", id),
                 true,
             )
         })
@@ -53,14 +53,14 @@ pub async fn get_skill_content(
         .skill_registry
         .read()
         .map_err(|e| {
-            AppErrorDto::new("SKILLS_LOCK_FAILED", "Skill registry lock failed", false)
+            AppErrorDto::new("SKILLS_LOCK_FAILED", "技能注册表锁定失败", false)
                 .with_detail(e.to_string())
         })?
         .read_skill_content(&id)?
         .ok_or_else(|| {
             AppErrorDto::new(
                 "SKILLS_NOT_FOUND",
-                &format!("Skill '{}' not found", id),
+                &format!("未找到技能 '{}'", id),
                 true,
             )
         })
@@ -115,7 +115,7 @@ pub async fn create_skill(
     };
 
     let reg = state.skill_registry.read().map_err(|e| {
-        AppErrorDto::new("SKILLS_LOCK_FAILED", "Skill registry lock failed", false)
+        AppErrorDto::new("SKILLS_LOCK_FAILED", "技能注册表锁定失败", false)
             .with_detail(e.to_string())
     })?;
     reg.create_skill(&manifest, &input.body)?;
@@ -140,7 +140,7 @@ pub async fn update_skill(
     state: State<'_, AppState>,
 ) -> Result<SkillManifest, AppErrorDto> {
     let reg = state.skill_registry.read().map_err(|e| {
-        AppErrorDto::new("SKILLS_LOCK_FAILED", "Skill registry lock failed", false)
+        AppErrorDto::new("SKILLS_LOCK_FAILED", "技能注册表锁定失败", false)
             .with_detail(e.to_string())
     })?;
     reg.update_skill(&input.id, input.body.as_deref(), input.manifest)
@@ -151,7 +151,7 @@ pub async fn update_skill(
 #[tauri::command]
 pub async fn delete_skill(id: String, state: State<'_, AppState>) -> Result<(), AppErrorDto> {
     let reg = state.skill_registry.write().map_err(|e| {
-        AppErrorDto::new("SKILLS_LOCK_FAILED", "Skill registry lock failed", false)
+        AppErrorDto::new("SKILLS_LOCK_FAILED", "技能注册表锁定失败", false)
             .with_detail(e.to_string())
     })?;
     reg.delete_skill(&id)
@@ -165,7 +165,7 @@ pub async fn import_skill_file(
     state: State<'_, AppState>,
 ) -> Result<SkillManifest, AppErrorDto> {
     let reg = state.skill_registry.read().map_err(|e| {
-        AppErrorDto::new("SKILLS_LOCK_FAILED", "Skill registry lock failed", false)
+        AppErrorDto::new("SKILLS_LOCK_FAILED", "技能注册表锁定失败", false)
             .with_detail(e.to_string())
     })?;
     reg.import_file(&file_path)
@@ -179,7 +179,7 @@ pub async fn reset_builtin_skill(
     state: State<'_, AppState>,
 ) -> Result<SkillManifest, AppErrorDto> {
     let reg = state.skill_registry.read().map_err(|e| {
-        AppErrorDto::new("SKILLS_LOCK_FAILED", "Skill registry lock failed", false)
+        AppErrorDto::new("SKILLS_LOCK_FAILED", "技能注册表锁定失败", false)
             .with_detail(e.to_string())
     })?;
     reg.reset_builtin(&id)
@@ -190,7 +190,7 @@ pub async fn reset_builtin_skill(
 #[tauri::command]
 pub async fn refresh_skills(state: State<'_, AppState>) -> Result<Vec<SkillManifest>, AppErrorDto> {
     let reg = state.skill_registry.write().map_err(|e| {
-        AppErrorDto::new("SKILLS_LOCK_FAILED", "Skill registry lock failed", false)
+        AppErrorDto::new("SKILLS_LOCK_FAILED", "技能注册表锁定失败", false)
             .with_detail(e.to_string())
     })?;
     reg.reload()?;

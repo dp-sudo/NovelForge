@@ -14,6 +14,8 @@ use crate::infra::fs_utils::{write_bytes_atomic, write_file_atomic};
 use crate::infra::path_utils::resolve_project_relative_path;
 use crate::infra::time::now_iso;
 
+const DEFAULT_EXPORT_LANGUAGE: &str = "zh-CN";
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[allow(dead_code)]
@@ -101,6 +103,7 @@ impl ExportService {
                 .with_suggested_action("请检查 database/project.sqlite 是否存在并可读写")
         })?;
         let (project_id, project_name) = load_project_identity(&conn)?;
+        let project_language = load_project_language(project_root_path);
 
         let chapter = conn
             .query_row(
@@ -150,6 +153,7 @@ impl ExportService {
             &[chapter_payload],
             &opts,
             &project_name,
+            &project_language,
         )?;
 
         Ok(ExportOutput {
@@ -179,6 +183,7 @@ impl ExportService {
                 .with_suggested_action("请检查 database/project.sqlite 是否存在并可读写")
         })?;
         let (project_id, project_name) = load_project_identity(&conn)?;
+        let project_language = load_project_language(project_root_path);
 
         let mut stmt = conn
             .prepare(
@@ -248,6 +253,7 @@ impl ExportService {
             &chapters,
             &opts,
             &project_name,
+            &project_language,
         )?;
 
         Ok(ExportOutput {
@@ -267,6 +273,37 @@ fn load_project_identity(conn: &Connection) -> Result<(String, String), AppError
     })
 }
 
+fn load_project_language(project_root: &Path) -> String {
+    let project_json_path = project_root.join("project.json");
+    let raw = match fs::read_to_string(project_json_path) {
+        Ok(raw) => raw,
+        Err(_) => return DEFAULT_EXPORT_LANGUAGE.to_string(),
+    };
+
+    let value: serde_json::Value = match serde_json::from_str(&raw) {
+        Ok(value) => value,
+        Err(_) => return DEFAULT_EXPORT_LANGUAGE.to_string(),
+    };
+
+    let language = value
+        .get("settings")
+        .and_then(|settings| settings.get("language"))
+        .and_then(|lang| lang.as_str())
+        .map(str::trim)
+        .filter(|lang| !lang.is_empty())
+        .unwrap_or(DEFAULT_EXPORT_LANGUAGE);
+    language.to_string()
+}
+
+fn normalize_export_language(language: &str) -> String {
+    let trimmed = language.trim();
+    if trimmed.is_empty() {
+        DEFAULT_EXPORT_LANGUAGE.to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
 fn write_export_output(
     project_root: &Path,
     output_path: &str,
@@ -274,6 +311,7 @@ fn write_export_output(
     chapters: &[RenderedChapter],
     options: &ExportOptions,
     project_name: &str,
+    project_language: &str,
 ) -> Result<PathBuf, AppErrorDto> {
     let resolved = resolve_output_path(project_root, output_path);
     if let Some(parent) = resolved.parent() {
@@ -295,7 +333,15 @@ fn write_export_output(
         }
         ExportFormat::Docx => write_docx_output(&resolved, chapters, options)?,
         ExportFormat::Pdf => write_pdf_output(&resolved, chapters, options)?,
-        ExportFormat::Epub => write_epub_output(&resolved, chapters, options, project_name)?,
+        ExportFormat::Epub => {
+            write_epub_output(
+                &resolved,
+                chapters,
+                options,
+                project_name,
+                project_language,
+            )?
+        }
     }
 
     Ok(resolved)
@@ -596,6 +642,7 @@ fn write_epub_output(
     chapters: &[RenderedChapter],
     options: &ExportOptions,
     project_name: &str,
+    project_language: &str,
 ) -> Result<(), AppErrorDto> {
     let temp_output = temporary_output_path(output_path);
     let file = fs::File::create(&temp_output).map_err(|err| {
@@ -615,6 +662,7 @@ fn write_epub_output(
     )?;
 
     let compressed = FileOptions::<()>::default().compression_method(CompressionMethod::Deflated);
+    let epub_language = normalize_export_language(project_language);
     let container_xml = r#"<?xml version="1.0" encoding="UTF-8"?>
 <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
   <rootfiles>
@@ -647,7 +695,7 @@ fn write_epub_output(
             xml_escape(title)
         ));
 
-        let chapter_xhtml = build_epub_chapter_xhtml(chapter, options);
+        let chapter_xhtml = build_epub_chapter_xhtml(chapter, options, &epub_language);
         zip_write_entry(
             &mut zip,
             &format!("OEBPS/{file_name}"),
@@ -660,7 +708,7 @@ fn write_epub_output(
     let nav_xhtml = format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>
-<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="zh-CN">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="{}">
   <head><title>目录</title></head>
   <body>
     <nav epub:type="toc" xmlns:epub="http://www.idpf.org/2007/ops">
@@ -669,6 +717,7 @@ fn write_epub_output(
     </nav>
   </body>
 </html>"#,
+        xml_escape(&epub_language),
         nav_links.join("")
     );
     zip_write_entry(
@@ -683,11 +732,11 @@ fn write_epub_output(
     let modified_at = now_iso();
     let opf = format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
-<package version="3.0" unique-identifier="bookid" xmlns="http://www.idpf.org/2007/opf" xml:lang="zh-CN">
+<package version="3.0" unique-identifier="bookid" xmlns="http://www.idpf.org/2007/opf" xml:lang="{}">
   <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
     <dc:identifier id="bookid">urn:uuid:{package_id}</dc:identifier>
     <dc:title>{}</dc:title>
-    <dc:language>zh-CN</dc:language>
+    <dc:language>{}</dc:language>
     <meta property="dcterms:modified">{modified_at}</meta>
   </metadata>
   <manifest>
@@ -698,7 +747,9 @@ fn write_epub_output(
     {}
   </spine>
 </package>"#,
+        xml_escape(&epub_language),
         xml_escape(project_name),
+        xml_escape(&epub_language),
         manifest_items.join(""),
         spine_items.join("")
     );
@@ -745,7 +796,11 @@ fn commit_temporary_output(temp_path: &Path, target_path: &Path) -> Result<(), A
     }
 }
 
-fn build_epub_chapter_xhtml(chapter: &RenderedChapter, options: &ExportOptions) -> String {
+fn build_epub_chapter_xhtml(
+    chapter: &RenderedChapter,
+    options: &ExportOptions,
+    language: &str,
+) -> String {
     let mut body_parts = Vec::new();
     if options.include_chapter_title.unwrap_or(true) {
         body_parts.push(format!("<h1>{}</h1>", xml_escape(&chapter.title)));
@@ -772,10 +827,11 @@ fn build_epub_chapter_xhtml(chapter: &RenderedChapter, options: &ExportOptions) 
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>
-<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="zh-CN">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="{}">
   <head><title>{}</title></head>
   <body>{}</body>
 </html>"#,
+        xml_escape(language),
         xml_escape(&chapter.title),
         body_parts.join("")
     )
@@ -903,9 +959,12 @@ fn zip_write_entry(
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::io::Read;
     use std::path::PathBuf;
 
+    use serde_json::Value;
     use uuid::Uuid;
+    use zip::read::ZipArchive;
 
     use super::{ExportOptions, ExportService};
     use crate::services::chapter_service::{ChapterInput, ChapterService};
@@ -1069,6 +1128,94 @@ mod tests {
             .expect("export epub");
         let epub_bytes = fs::read(&epub_out).expect("read epub");
         assert!(epub_bytes.starts_with(b"PK"));
+
+        remove_temp_workspace(&workspace);
+    }
+
+    #[test]
+    fn export_epub_uses_project_language_from_project_json() {
+        let workspace = create_temp_workspace();
+        let project_service = ProjectService;
+        let chapter_service = ChapterService;
+        let export_service = ExportService;
+        let project = project_service
+            .create_project(CreateProjectInput {
+                name: "语言导出测试".to_string(),
+                author: None,
+                genre: "测试".to_string(),
+                target_words: None,
+                save_directory: workspace.to_string_lossy().to_string(),
+            })
+            .expect("project created");
+        let chapter = chapter_service
+            .create_chapter(
+                &project.project_root,
+                ChapterInput {
+                    title: "Chapter One".to_string(),
+                    summary: Some("summary".to_string()),
+                    target_words: None,
+                    status: None,
+                },
+            )
+            .expect("chapter created");
+        chapter_service
+            .save_chapter_content(&project.project_root, &chapter.id, "Body text.")
+            .expect("save chapter content");
+
+        let project_json_path = PathBuf::from(&project.project_root).join("project.json");
+        let mut project_json: Value = serde_json::from_str(
+            &fs::read_to_string(&project_json_path).expect("read project json"),
+        )
+        .expect("parse project json");
+        project_json["settings"]["language"] = Value::String("en-US".to_string());
+        fs::write(
+            &project_json_path,
+            serde_json::to_string_pretty(&project_json).expect("serialize project json"),
+        )
+        .expect("write project json");
+
+        let epub_out = workspace.join("book-lang.epub");
+        export_service
+            .export_book(
+                &project.project_root,
+                "epub",
+                &epub_out.to_string_lossy(),
+                Some(ExportOptions {
+                    include_chapter_title: Some(true),
+                    include_chapter_summary: Some(true),
+                    separate_by_volume: None,
+                    include_world_settings: None,
+                }),
+            )
+            .expect("export epub");
+
+        let file = fs::File::open(&epub_out).expect("open epub");
+        let mut archive = ZipArchive::new(file).expect("read epub archive");
+
+        let mut content_opf = String::new();
+        archive
+            .by_name("OEBPS/content.opf")
+            .expect("content.opf exists")
+            .read_to_string(&mut content_opf)
+            .expect("read content.opf");
+        assert!(content_opf.contains("xml:lang=\"en-US\""));
+        assert!(content_opf.contains("<dc:language>en-US</dc:language>"));
+
+        let mut nav_xhtml = String::new();
+        archive
+            .by_name("OEBPS/nav.xhtml")
+            .expect("nav.xhtml exists")
+            .read_to_string(&mut nav_xhtml)
+            .expect("read nav.xhtml");
+        assert!(nav_xhtml.contains("xml:lang=\"en-US\""));
+
+        let mut chapter_xhtml = String::new();
+        archive
+            .by_name("OEBPS/chapter-1.xhtml")
+            .expect("chapter xhtml exists")
+            .read_to_string(&mut chapter_xhtml)
+            .expect("read chapter xhtml");
+        assert!(chapter_xhtml.contains("xml:lang=\"en-US\""));
 
         remove_temp_workspace(&workspace);
     }

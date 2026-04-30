@@ -173,6 +173,28 @@ export function SettingsPage() {
   const [registryApplying, setRegistryApplying] = useState(false);
   const [registryUpdateAvailable, setRegistryUpdateAvailable] = useState(false);
 
+  function getErrorMessage(error: unknown, fallback: string): string {
+    if (typeof error === "object" && error && "message" in error) {
+      return String((error as { message: string }).message);
+    }
+    if (typeof error === "string" && error.trim()) {
+      return error;
+    }
+    return fallback;
+  }
+
+  function createEmptyTaskRoute(taskType: string, seed?: { providerId: string; modelId: string }): TaskRoute {
+    return {
+      id: "",
+      taskType,
+      providerId: seed?.providerId || "",
+      modelId: seed?.modelId || "",
+      fallbackProviderId: "",
+      fallbackModelId: "",
+      maxRetries: 1,
+    };
+  }
+
   async function handleCreateBackup() {
     if (!projectRoot) { setBackupMessage("请先打开项目"); return; }
     setBackupCreating(true); setBackupMessage(null);
@@ -182,7 +204,7 @@ export function SettingsPage() {
       const list = await listBackups(projectRoot);
       setBackupList(list);
     } catch (e: unknown) {
-      setBackupMessage(`备份失败：${typeof e === 'object' && e && 'message' in e ? String((e as {message:string}).message) : String(e)}`);
+      setBackupMessage(`备份失败：${getErrorMessage(e, "未知错误")}`);
     } finally { setBackupCreating(false); }
   }
 
@@ -194,7 +216,7 @@ export function SettingsPage() {
       const result = await restoreBackup(projectRoot, backupPath);
       setBackupMessage(`恢复成功：${result.filesRestored} 个文件`);
     } catch (e: unknown) {
-      setBackupMessage(`恢复失败：${typeof e === 'object' && e && 'message' in e ? String((e as {message:string}).message) : String(e)}`);
+      setBackupMessage(`恢复失败：${getErrorMessage(e, "未知错误")}`);
     } finally { setBackupRestoring(false); }
   }
 
@@ -214,7 +236,7 @@ export function SettingsPage() {
         setBackupMessage(`完整性检查完成：发现 ${report.issues.length} 个问题`);
       }
     } catch (e: unknown) {
-      setBackupMessage(`完整性检查失败：${typeof e === "object" && e && "message" in e ? String((e as {message:string}).message) : String(e)}`);
+      setBackupMessage(`完整性检查失败：${getErrorMessage(e, "未知错误")}`);
     } finally {
       setIntegrityChecking(false);
     }
@@ -237,7 +259,7 @@ export function SettingsPage() {
       setSemanticResults(rows);
       setSemanticMessage(`语义检索完成：命中 ${rows.length} 条`);
     } catch (e: unknown) {
-      setSemanticMessage(`语义检索失败：${typeof e === "object" && e && "message" in e ? String((e as {message:string}).message) : String(e)}`);
+      setSemanticMessage(`语义检索失败：${getErrorMessage(e, "未知错误")}`);
     } finally {
       setSemanticSearching(false);
     }
@@ -254,7 +276,7 @@ export function SettingsPage() {
       const count = await rebuildVectorIndex(projectRoot);
       setSemanticMessage(`向量索引重建完成：${count} 条`);
     } catch (e: unknown) {
-      setSemanticMessage(`向量索引重建失败：${typeof e === "object" && e && "message" in e ? String((e as {message:string}).message) : String(e)}`);
+      setSemanticMessage(`向量索引重建失败：${getErrorMessage(e, "未知错误")}`);
     } finally {
       setSemanticRebuilding(false);
     }
@@ -300,11 +322,7 @@ export function SettingsPage() {
       } catch (err: unknown) {
         if (canceled) return;
         setWritingStyle(defaultWritingStyle());
-        setWritingStyleMessage(
-          typeof err === "object" && err && "message" in err
-            ? `加载写作风格失败：${String((err as { message: string }).message)}`
-            : "加载写作风格失败"
-        );
+        setWritingStyleMessage(`加载写作风格失败：${getErrorMessage(err, "未知错误")}`);
       } finally {
         if (!canceled) {
           setWritingStyleLoaded(true);
@@ -344,11 +362,7 @@ export function SettingsPage() {
       setGitHistory(history);
       setGitMessage("Git 仓库初始化完成");
     } catch (err: unknown) {
-      setGitMessage(
-        typeof err === "object" && err && "message" in err
-          ? String((err as { message: string }).message)
-          : "初始化 Git 仓库失败"
-      );
+      setGitMessage(getErrorMessage(err, "初始化 Git 仓库失败"));
     } finally {
       setGitBusy(false);
     }
@@ -373,11 +387,7 @@ export function SettingsPage() {
       setSnapshotMessage("");
       await refreshGitData();
     } catch (err: unknown) {
-      setGitMessage(
-        typeof err === "object" && err && "message" in err
-          ? String((err as { message: string }).message)
-          : "提交快照失败"
-      );
+      setGitMessage(getErrorMessage(err, "提交快照失败"));
     } finally {
       setGitBusy(false);
     }
@@ -403,11 +413,7 @@ export function SettingsPage() {
       setTimeout(() => setWritingStyleSaved(false), 2000);
     } catch (err: unknown) {
       setWritingStyleSaved(false);
-      setWritingStyleMessage(
-        typeof err === "object" && err && "message" in err
-          ? `保存写作风格失败：${String((err as { message: string }).message)}`
-          : "保存写作风格失败"
-      );
+      setWritingStyleMessage(`保存写作风格失败：${getErrorMessage(err, "未知错误")}`);
     } finally {
       setWritingStyleSaving(false);
     }
@@ -427,11 +433,7 @@ export function SettingsPage() {
       setLicenseKeyInput("");
       setLicenseMessage(`授权成功，当前等级：${status.tier}`);
     } catch (err: unknown) {
-      setLicenseMessage(
-        typeof err === "object" && err && "message" in err
-          ? String((err as { message: string }).message)
-          : "授权失败"
-      );
+      setLicenseMessage(getErrorMessage(err, "授权失败"));
     } finally {
       setLicenseBusy(false);
     }
@@ -444,16 +446,12 @@ export function SettingsPage() {
       const info = await checkAppUpdate();
       setUpdateInfo(info);
       if (info.available) {
-        setUpdateMessage(`发现可用更新：${info.currentVersion} -> ${info.targetVersion || "unknown"}`);
+        setUpdateMessage(`发现可用更新：${info.currentVersion} -> ${info.targetVersion || "未知版本"}`);
       } else {
         setUpdateMessage(`当前已是最新版本：${info.currentVersion}`);
       }
     } catch (err: unknown) {
-      setUpdateMessage(
-        typeof err === "object" && err && "message" in err
-          ? String((err as { message: string }).message)
-          : "检查更新失败"
-      );
+      setUpdateMessage(getErrorMessage(err, "检查更新失败"));
     } finally {
       setUpdateBusy(false);
     }
@@ -466,16 +464,12 @@ export function SettingsPage() {
       const info = await installAppUpdate();
       setUpdateInfo(info);
       if (info.available) {
-        setUpdateMessage(`更新包已安装：${info.currentVersion} -> ${info.targetVersion || "unknown"}，请重启应用生效`);
+        setUpdateMessage(`更新包已安装：${info.currentVersion} -> ${info.targetVersion || "未知版本"}，请重启应用生效`);
       } else {
         setUpdateMessage(`没有可安装的更新，当前版本 ${info.currentVersion}`);
       }
     } catch (err: unknown) {
-      setUpdateMessage(
-        typeof err === "object" && err && "message" in err
-          ? String((err as { message: string }).message)
-          : "安装更新失败"
-      );
+      setUpdateMessage(getErrorMessage(err, "安装更新失败"));
     } finally {
       setUpdateBusy(false);
     }
@@ -516,19 +510,19 @@ export function SettingsPage() {
   }
 
   function validateProviderInput(config: LlmProviderConfig): string | null {
-    if (!config.baseUrl.trim()) return "Base URL 不能为空";
+    if (!config.baseUrl.trim()) return "服务地址不能为空";
     try {
       const parsed = new URL(config.baseUrl);
       if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-        return "Base URL 必须是 http:// 或 https://";
+        return "服务地址必须是 http:// 或 https://";
       }
     } catch {
-      return "Base URL 格式不合法";
+      return "服务地址格式不合法";
     }
 
     if (config.id === "custom") {
-      if (!config.displayName.trim()) return "自定义 Provider 名称不能为空";
-      if (!config.protocol) return "请选择自定义 Provider 协议";
+      if (!config.displayName.trim()) return "自定义供应商名称不能为空";
+      if (!config.protocol) return "请选择自定义供应商协议";
     }
 
     return null;
@@ -570,6 +564,10 @@ export function SettingsPage() {
     return Array.from(new Set(values));
   }
 
+  function pickProviderFirstModel(providerId: string): string {
+    return collectProviderModelChoices(providerId)[0] || "";
+  }
+
   useEffect(() => {
     (async () => {
       setLoading(true);
@@ -606,7 +604,7 @@ export function SettingsPage() {
               endpointPath: existing?.endpointPath,
               defaultModel: existing?.defaultModel || preset.defaultModel,
               apiKey: existing?.apiKey,
-              authMode: existing?.authMode || (preset.id === "custom" ? "bearer" : "bearer"),
+              authMode: existing?.authMode || "bearer",
               authHeaderName: existing?.authHeaderName,
               anthropicVersion: existing?.anthropicVersion,
               betaHeaders: existing?.betaHeaders,
@@ -642,15 +640,7 @@ export function SettingsPage() {
           routeMap[task.value] = {
             route: existingRoute
               ? normalizeRoute({ ...existingRoute, taskType: task.value })
-              : {
-                  id: "",
-                  taskType: task.value,
-                  providerId: primaryRouteSeed?.providerId || "",
-                  modelId: primaryRouteSeed?.modelId || "",
-                  fallbackProviderId: "",
-                  fallbackModelId: "",
-                  maxRetries: 1,
-                },
+              : createEmptyTaskRoute(task.value, primaryRouteSeed || undefined),
             saving: false,
             deleting: false,
             error: null,
@@ -743,9 +733,7 @@ export function SettingsPage() {
         });
       }
     } catch (err: unknown) {
-      const msg = typeof err === "object" && err && "message" in err
-        ? String((err as { message: string }).message)
-        : "保存失败";
+      const msg = getErrorMessage(err, "保存失败");
       setVendors((prev) => ({
         ...prev,
         [preset.id]: { ...prev[preset.id], saving: false, validationError: msg },
@@ -775,9 +763,7 @@ export function SettingsPage() {
       const result = await testProviderConnection(preset.id);
       setVendors((prev) => ({ ...prev, [preset.id]: { ...prev[preset.id], testing: false, testResult: result } }));
     } catch (err: unknown) {
-      const msg = typeof err === "object" && err && "message" in err
-        ? String((err as { message: string }).message)
-        : "连接失败";
+      const msg = getErrorMessage(err, "连接失败");
       setVendors((prev) => ({ ...prev, [preset.id]: { ...prev[preset.id], testing: false, testResult: msg } }));
     }
   }
@@ -786,9 +772,7 @@ export function SettingsPage() {
     setVendors((prev) => ({ ...prev, [preset.id]: { ...prev[preset.id], refreshing: true, refreshResult: null, models: [], capabilities: null } }));
     try {
       const result = await refreshProviderModels(preset.id);
-      const [models] = await Promise.all([
-        getProviderModels(preset.id).catch(() => []),
-      ]);
+      const models = await getProviderModels(preset.id).catch(() => []);
       setVendors((prev) => ({
         ...prev,
         [preset.id]: {
@@ -800,9 +784,7 @@ export function SettingsPage() {
         },
       }));
     } catch (err: unknown) {
-      const msg = typeof err === "object" && err && "message" in err
-        ? String((err as { message: string }).message)
-        : "刷新失败";
+      const msg = getErrorMessage(err, "刷新失败");
       setVendors((prev) => ({ ...prev, [preset.id]: { ...prev[preset.id], refreshing: false, refreshResult: `✗ ${msg}` } }));
     }
   }
@@ -869,7 +851,7 @@ export function SettingsPage() {
   // ── Remote registry handlers ──
 
   async function handleCheckRegistry() {
-    if (!registryUrl.trim()) { setRegistryStatus("✗ 注册表 URL 不能为空"); return; }
+    if (!registryUrl.trim()) { setRegistryStatus("✗ 注册表地址不能为空"); return; }
     setRegistryChecking(true);
     setRegistryStatus(null);
     setRegistryUpdateAvailable(false);
@@ -883,9 +865,7 @@ export function SettingsPage() {
         setRegistryUpdateAvailable(false);
       }
     } catch (err: unknown) {
-      const msg = typeof err === "object" && err && "message" in err
-        ? String((err as { message: string }).message)
-        : "检查失败";
+      const msg = getErrorMessage(err, "检查失败");
       setRegistryStatus(`✗ ${msg}`);
       setRegistryUpdateAvailable(false);
     } finally {
@@ -901,9 +881,7 @@ export function SettingsPage() {
       setRegistryStatus(`✓ 更新已应用: 新增 ${result.added} / 更新 ${result.updated} (版本: ${result.version})`);
       setRegistryUpdateAvailable(false);
     } catch (err: unknown) {
-      const msg = typeof err === "object" && err && "message" in err
-        ? String((err as { message: string }).message)
-        : "应用失败";
+      const msg = getErrorMessage(err, "应用失败");
       setRegistryStatus(`✗ ${msg}`);
     } finally {
       setRegistryApplying(false);
@@ -923,7 +901,7 @@ export function SettingsPage() {
   }
 
   function handleTaskRouteProviderChange(taskType: string, providerId: string) {
-    const nextModelId = collectProviderModelChoices(providerId)[0] || "";
+    const nextModelId = pickProviderFirstModel(providerId);
     updateTaskRoute(taskType, {
       providerId,
       modelId: nextModelId,
@@ -932,7 +910,7 @@ export function SettingsPage() {
 
   function handleTaskRouteFallbackProviderChange(taskType: string, fallbackProviderId: string) {
     const fallbackModelId = fallbackProviderId
-      ? collectProviderModelChoices(fallbackProviderId)[0] || ""
+      ? pickProviderFirstModel(fallbackProviderId)
       : "";
     updateTaskRoute(taskType, {
       fallbackProviderId,
@@ -948,7 +926,7 @@ export function SettingsPage() {
     if (!route.providerId.trim()) {
       setTaskRoutes((prev) => ({
         ...prev,
-        [taskType]: { ...prev[taskType], error: "请选择 Provider" },
+        [taskType]: { ...prev[taskType], error: "请选择供应商" },
       }));
       return;
     }
@@ -956,7 +934,7 @@ export function SettingsPage() {
     if (!route.modelId.trim()) {
       setTaskRoutes((prev) => ({
         ...prev,
-        [taskType]: { ...prev[taskType], error: "请输入模型 ID" },
+        [taskType]: { ...prev[taskType], error: "请输入模型ID" },
       }));
       return;
     }
@@ -986,9 +964,7 @@ export function SettingsPage() {
       }));
       setTaskRouteMessage(`已保存任务路由：${taskType}`);
     } catch (err: unknown) {
-      const msg = typeof err === "object" && err && "message" in err
-        ? String((err as { message: string }).message)
-        : "保存任务路由失败";
+      const msg = getErrorMessage(err, "保存任务路由失败");
       setTaskRoutes((prev) => ({
         ...prev,
         [taskType]: { ...prev[taskType], saving: false, error: msg },
@@ -1010,24 +986,14 @@ export function SettingsPage() {
         ...prev,
         [taskType]: {
           ...prev[taskType],
-          route: {
-            id: "",
-            taskType,
-            providerId: "",
-            modelId: "",
-            fallbackProviderId: "",
-            fallbackModelId: "",
-            maxRetries: 1,
-          },
+          route: createEmptyTaskRoute(taskType),
           deleting: false,
           error: null,
         },
       }));
       setTaskRouteMessage(`已删除任务路由：${taskType}`);
     } catch (err: unknown) {
-      const msg = typeof err === "object" && err && "message" in err
-        ? String((err as { message: string }).message)
-        : "删除任务路由失败";
+      const msg = getErrorMessage(err, "删除任务路由失败");
       setTaskRoutes((prev) => ({
         ...prev,
         [taskType]: { ...prev[taskType], deleting: false, error: msg },
@@ -1055,11 +1021,10 @@ export function SettingsPage() {
   ];
 
   const configuredProviderIdSet = new Set(configuredProviderIds);
-  const providerIdsForRouting = configuredProviderIds.length > 0
-    ? VENDOR_PRESETS
-      .map((preset) => preset.id)
-      .filter((providerId) => configuredProviderIdSet.has(providerId))
-    : VENDOR_PRESETS.map((preset) => preset.id);
+  const providerIdsForRouting = VENDOR_PRESETS
+    .map((preset) => preset.id)
+    .filter((providerId) => configuredProviderIdSet.has(providerId));
+  const hasConfiguredProvidersForRouting = providerIdsForRouting.length > 0;
 
   function toProviderLabel(providerId: string): string {
     const preset = VENDOR_PRESETS.find((item) => item.id === providerId);
@@ -1125,7 +1090,7 @@ export function SettingsPage() {
                     </div>
                     <div className="flex items-center gap-2">
                       <span className={`inline-block w-2 h-2 rounded-full ${config.apiKey ? "bg-success" : "bg-surface-500"}`} />
-                      <span className="text-xs text-surface-400">{config.apiKey ? "API Key 已配置" : "未配置 API Key"}</span>
+                      <span className="text-xs text-surface-400">{config.apiKey ? "API 密钥已配置" : "未配置 API 密钥"}</span>
                     </div>
                     <button
                       onClick={() => setVendors((prev) => ({ ...prev, [preset.id]: { ...prev[preset.id], expanded: !prev[preset.id].expanded } }))}
@@ -1138,10 +1103,10 @@ export function SettingsPage() {
                       <div className="space-y-3 pt-2 border-t border-surface-700">
                         {preset.id === "custom" && (
                           <Input
-                            label="Provider 名称"
+                            label="供应商名称"
                             value={config.displayName}
                             onChange={(e) => updateVendor(preset.id, { displayName: e.target.value })}
-                            placeholder="My Custom Provider"
+                            placeholder="我的自定义供应商"
                           />
                         )}
                         {preset.id === "custom" && (
@@ -1150,14 +1115,14 @@ export function SettingsPage() {
                             value={config.protocol}
                             onChange={(e) => updateVendor(preset.id, { protocol: e.target.value })}
                             options={[
-                              { value: "custom_openai_compatible", label: "Custom OpenAI Compatible" },
-                              { value: "custom_anthropic_compatible", label: "Custom Anthropic Compatible" },
+                              { value: "custom_openai_compatible", label: "自定义 OpenAI 兼容" },
+                              { value: "custom_anthropic_compatible", label: "自定义 Anthropic 兼容" },
                             ]}
                           />
                         )}
-                        <Input label="Base URL" value={config.baseUrl} onChange={(e) => updateVendor(preset.id, { baseUrl: e.target.value })} placeholder={preset.defaultBaseUrl} />
+                        <Input label="服务地址" value={config.baseUrl} onChange={(e) => updateVendor(preset.id, { baseUrl: e.target.value })} placeholder={preset.defaultBaseUrl} />
                         <ApiKeyInput
-                          label="API Key"
+                          label="API 密钥"
                           value={v.apiKeyInput}
                           onChange={(val) =>
                             setVendors((prev) => ({
@@ -1214,9 +1179,9 @@ export function SettingsPage() {
                               {[
                                 { key: "textResponse" as const, label: "文本生成" },
                                 { key: "streaming" as const, label: "流式" },
-                                { key: "jsonObject" as const, label: "JSON Object" },
-                                { key: "tools" as const, label: "Tools" },
-                                { key: "thinking" as const, label: "Thinking" },
+                                { key: "jsonObject" as const, label: "JSON 对象" },
+                                { key: "tools" as const, label: "工具调用" },
+                                { key: "thinking" as const, label: "推理能力" },
                               ].map(({ key, label }) => (
                                 <span
                                   key={key}
@@ -1267,7 +1232,7 @@ export function SettingsPage() {
             <p className="text-xs text-surface-400">从远程服务器拉取最新模型元数据</p>
             <div className="flex gap-2">
               <Input
-                label="注册表 URL"
+                label="注册表地址"
                 value={registryUrl}
                 onChange={(e) => setRegistryUrl(e.target.value)}
                 placeholder="https://updates.novelforge.app/llm-model-registry.json"
@@ -1298,7 +1263,12 @@ export function SettingsPage() {
       {activeTab === "routing" && (
         <Card padding="lg" className="space-y-4">
           <h2 className="text-base font-semibold text-surface-100">任务路由配置</h2>
-          <p className="text-sm text-surface-400">按任务类型指定 Provider / Model，保存后 AI 调用会按路由命中。</p>
+          <p className="text-sm text-surface-400">按任务类型指定供应商与模型，保存后 AI 调用会按路由命中。</p>
+          {!hasConfiguredProvidersForRouting && (
+            <div className="px-3 py-2 rounded-lg text-sm bg-warning/10 text-warning border border-warning/30">
+              请先在“模型设置”中保存至少一个供应商，再配置任务路由。
+            </div>
+          )}
           {taskRouteMessage && (
             <div className="px-3 py-2 rounded-lg text-sm bg-success/10 text-success border border-success/20">
               {taskRouteMessage}
@@ -1314,7 +1284,7 @@ export function SettingsPage() {
                 const route = state.route;
                 const routeProviderOptions = buildRouteProviderOptions(route.providerId || "");
                 const fallbackProviderOptions = [
-                  { value: "", label: "不使用 fallback" },
+                  { value: "", label: "不使用兜底" },
                   ...buildRouteProviderOptions(route.fallbackProviderId || ""),
                 ];
                 const modelOptions = buildRouteModelOptions(route.providerId || "", route.modelId || "");
@@ -1330,11 +1300,11 @@ export function SettingsPage() {
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                       <Select
-                        label="Provider"
+                        label="供应商"
                         value={route.providerId || ""}
                         onChange={(e) => handleTaskRouteProviderChange(task.value, e.target.value)}
                         options={routeProviderOptions}
-                        placeholder="选择 Provider"
+                        placeholder="选择供应商"
                       />
                       {modelOptions.length > 0 ? (
                         <Select
@@ -1353,14 +1323,14 @@ export function SettingsPage() {
                         />
                       )}
                       <Select
-                        label="Fallback Provider"
+                        label="兜底供应商"
                         value={route.fallbackProviderId || ""}
                         onChange={(e) => handleTaskRouteFallbackProviderChange(task.value, e.target.value)}
                         options={fallbackProviderOptions}
                       />
                       {fallbackModelOptions.length > 0 ? (
                         <Select
-                          label="Fallback 模型 ID"
+                          label="兜底模型ID"
                           value={route.fallbackModelId || ""}
                           onChange={(e) => updateTaskRoute(task.value, { fallbackModelId: e.target.value })}
                           options={fallbackModelOptions}
@@ -1368,7 +1338,7 @@ export function SettingsPage() {
                         />
                       ) : (
                         <Input
-                          label="Fallback 模型 ID"
+                          label="兜底模型ID"
                           value={route.fallbackModelId || ""}
                           onChange={(e) => updateTaskRoute(task.value, { fallbackModelId: e.target.value })}
                           placeholder="可留空"
@@ -1403,7 +1373,7 @@ export function SettingsPage() {
                         variant="primary"
                         size="sm"
                         onClick={() => void handleSaveTaskRoute(task.value)}
-                        disabled={state.saving}
+                        disabled={state.saving || !hasConfiguredProvidersForRouting}
                       >
                         {state.saving ? "保存中..." : "保存路由"}
                       </Button>
@@ -1584,7 +1554,7 @@ export function SettingsPage() {
         <Card padding="lg" className="space-y-4">
           <h2 className="text-base font-semibold text-surface-100">数据与备份</h2>
           <p className="text-sm text-surface-400">项目数据默认保存在本地。支持手动备份和恢复。</p>
-          <p className="text-xs text-surface-500">备份包含 project.json、数据库、章节正文和蓝图文件。API Key 不会进入备份包。</p>
+          <p className="text-xs text-surface-500">备份包含 project.json、数据库、章节正文和蓝图文件。API 密钥不会进入备份包。</p>
           <div className="flex gap-3">
             <Button variant="secondary" loading={backupCreating} onClick={() => void handleCreateBackup()}>
               {backupCreating ? "备份中..." : "创建备份"}
@@ -1807,7 +1777,7 @@ export function SettingsPage() {
             <h3 className="text-sm font-semibold text-surface-100">应用更新</h3>
             <div className="text-xs text-surface-400">
               当前版本：{updateInfo?.currentVersion || "0.1.0"}
-              {updateInfo?.available ? ` / 可更新至 ${updateInfo.targetVersion || "unknown"}` : ""}
+              {updateInfo?.available ? ` / 可更新至 ${updateInfo.targetVersion || "未知"}` : ""}
             </div>
             <div className="flex gap-2">
               <Button variant="secondary" onClick={() => void handleCheckUpdate()} disabled={updateBusy}>
@@ -1832,7 +1802,7 @@ export function SettingsPage() {
               <div>
                 <div className="text-surface-200 font-medium">v0.1.0 (2026-04-27)</div>
                 <ul className="text-surface-400 list-disc list-inside mt-1 space-y-0.5">
-                  <li>Sprint 5: API Key 安全存储 + 多供应商配置</li>
+                  <li>阶段 5：API 密钥安全存储 + 多供应商配置</li>
                   <li>Windows Credential Manager 密钥存储</li>
                   <li>8 供应商卡片配置界面</li>
                 </ul>

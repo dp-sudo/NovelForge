@@ -44,6 +44,52 @@ impl Default for AiService {
 }
 
 impl AiService {
+    fn provider_not_found_error(provider_id: &str) -> AppErrorDto {
+        AppErrorDto::new(
+            "PROVIDER_NOT_FOUND",
+            &format!("未找到供应商 '{}'", provider_id),
+            true,
+        )
+    }
+
+    fn load_provider_from_db(
+        conn: &rusqlite::Connection,
+        provider_id: &str,
+    ) -> Result<ProviderConfig, AppErrorDto> {
+        app_database::load_provider(conn, provider_id)?
+            .ok_or_else(|| Self::provider_not_found_error(provider_id))
+    }
+
+    fn load_provider_with_api_key(provider_id: &str) -> Result<ProviderConfig, AppErrorDto> {
+        let conn = app_database::open_or_create()?;
+        let mut config = Self::load_provider_from_db(&conn, provider_id)?;
+        if let Ok(Some(key)) = credential_manager::load_api_key(provider_id) {
+            config.api_key = Some(key);
+        }
+        Ok(config)
+    }
+
+    fn build_route_resolution(
+        canonical_task_type: String,
+        provider_id: String,
+        model_id: String,
+        route: Option<TaskRoute>,
+    ) -> TaskRouteResolution {
+        let attempts = Self::build_attempt_chain(&provider_id, &model_id, route.as_ref())
+            .into_iter()
+            .map(|(provider_id, model_id)| TaskRouteAttempt {
+                provider_id,
+                model_id,
+            })
+            .collect::<Vec<_>>();
+        TaskRouteResolution {
+            canonical_task_type,
+            provider_id,
+            model_id,
+            attempts,
+        }
+    }
+
     fn is_usable_route(route: &TaskRoute) -> bool {
         !route.provider_id.trim().is_empty() && !route.model_id.trim().is_empty()
     }
@@ -118,17 +164,7 @@ impl AiService {
 
     /// Reload one provider adapter from app DB + credential store.
     pub async fn reload_provider(&self, provider_id: &str) -> Result<(), AppErrorDto> {
-        let conn = app_database::open_or_create()?;
-        let mut config = app_database::load_provider(&conn, provider_id)?.ok_or_else(|| {
-            AppErrorDto::new(
-                "PROVIDER_NOT_FOUND",
-                &format!("Provider '{}' not found", provider_id),
-                true,
-            )
-        })?;
-        if let Ok(Some(key)) = credential_manager::load_api_key(provider_id) {
-            config.api_key = Some(key);
-        }
+        let config = Self::load_provider_with_api_key(provider_id)?;
         self.register_provider(config).await;
         Ok(())
     }
@@ -154,18 +190,12 @@ impl AiService {
         }
 
         let conn = app_database::open_or_create()?;
-        let provider = app_database::load_provider(&conn, provider_id)?.ok_or_else(|| {
-            AppErrorDto::new(
-                "PROVIDER_NOT_FOUND",
-                &format!("Provider '{}' not found", provider_id),
-                true,
-            )
-        })?;
+        let provider = Self::load_provider_from_db(&conn, provider_id)?;
 
         provider.default_model.ok_or_else(|| {
             AppErrorDto::new(
                 "MODEL_NOT_CONFIGURED",
-                &format!("Provider '{}' has no default model configured", provider_id),
+                &format!("供应商 '{}' 未配置默认模型", provider_id),
                 true,
             )
         })
@@ -181,7 +211,7 @@ impl AiService {
             return Ok((r.provider_id.clone(), r.model_id.clone(), Some(r.clone())));
         }
 
-        // Unknown skill/task types can explicitly fallback to a dedicated "custom" route.
+        // 未知技能/任务类型可显式回退到 "custom" 路由。
         if !task_routing::is_core_task_type(&canonical_task) {
             if let Some(custom_route) = Self::pick_task_route(&routes, "custom") {
                 let mut inferred = custom_route.clone();
@@ -194,7 +224,7 @@ impl AiService {
             }
         }
 
-        // Compatibility for old behavior: `custom` can still fallback to first route.
+        // 兼容旧行为：`custom` 仍可回退到第一条可用路由。
         if canonical_task == "custom" {
             if let Some(first) = routes.iter().find(|r| Self::is_usable_route(r)) {
                 return Ok((
@@ -208,7 +238,7 @@ impl AiService {
         Err(AppErrorDto::new(
             "TASK_ROUTE_NOT_FOUND",
             &format!(
-                "No route configured for task type '{}'. 请在「设置 > 任务路由」配置该任务，或配置 'custom' 作为兜底路由。",
+                "任务类型 '{}' 尚未配置路由。请在「设置 > 任务路由」配置该任务，或配置 'custom' 作为兜底路由。",
                 canonical_task
             ),
             true,
@@ -227,7 +257,7 @@ impl AiService {
             }
             return Err(AppErrorDto::new(
                 "LLM_NO_PROVIDER",
-                "No provider specified and no task type for route resolution",
+                "未指定供应商，且缺少用于路由解析的任务类型",
                 true,
             ));
         }
@@ -242,19 +272,12 @@ impl AiService {
     pub fn inspect_task_route(task_type: &str) -> Result<TaskRouteResolution, AppErrorDto> {
         let canonical_task_type = task_routing::canonical_task_type(task_type).into_owned();
         let (provider_id, model_id, route) = Self::resolve_route(&canonical_task_type)?;
-        let attempts = Self::build_attempt_chain(&provider_id, &model_id, route.as_ref())
-            .into_iter()
-            .map(|(provider_id, model_id)| TaskRouteAttempt {
-                provider_id,
-                model_id,
-            })
-            .collect::<Vec<_>>();
-        Ok(TaskRouteResolution {
+        Ok(Self::build_route_resolution(
             canonical_task_type,
             provider_id,
             model_id,
-            attempts,
-        })
+            route,
+        ))
     }
 
     pub fn inspect_task_route_with_skill_registry(
@@ -269,19 +292,12 @@ impl AiService {
         };
         let (provider_id, model_id, route) =
             Self::resolve_with_skill_override(&req, skill_registry)?;
-        let attempts = Self::build_attempt_chain(&provider_id, &model_id, route.as_ref())
-            .into_iter()
-            .map(|(provider_id, model_id)| TaskRouteAttempt {
-                provider_id,
-                model_id,
-            })
-            .collect::<Vec<_>>();
-        Ok(TaskRouteResolution {
+        Ok(Self::build_route_resolution(
             canonical_task_type,
             provider_id,
             model_id,
-            attempts,
-        })
+            route,
+        ))
     }
 
     /// Resolve target with skill taskRoute override support.
@@ -379,7 +395,7 @@ impl AiService {
         let (provider_id, model, route) = match skill_registry {
             Some(registry) => {
                 let guard = registry.read().map_err(|err| {
-                    AppErrorDto::new("SKILLS_LOCK_FAILED", "skill registry lock failed", false)
+                    AppErrorDto::new("SKILLS_LOCK_FAILED", "技能注册表加锁失败", false)
                         .with_detail(err.to_string())
                 })?;
                 Self::resolve_with_skill_override(&req, &guard)?
@@ -424,7 +440,7 @@ impl AiService {
                 } else {
                     last_error = Some(AppErrorDto::new(
                         "LLM_ADAPTER_NOT_FOUND",
-                        &format!("Provider '{}' 未注册", attempt_provider),
+                        &format!("供应商 '{}' 未注册", attempt_provider),
                         true,
                     ));
                     continue;
@@ -432,7 +448,7 @@ impl AiService {
             }
 
             let terminal_error = last_error.unwrap_or_else(|| {
-                AppErrorDto::new("LLM_GENERATE_FAILED", "All providers failed", false)
+                AppErrorDto::new("LLM_GENERATE_FAILED", "所有供应商均调用失败", false)
             });
             let error_text = if with_pipeline_error_envelope {
                 Self::encode_pipeline_stream_error(&terminal_error)
@@ -460,7 +476,7 @@ impl AiService {
         let adapter = guard.get(provider_id).ok_or_else(|| {
             AppErrorDto::new(
                 "LLM_ADAPTER_NOT_FOUND",
-                &format!("Provider '{}' not registered", provider_id),
+                &format!("供应商 '{}' 未注册", provider_id),
                 true,
             )
         })?;
