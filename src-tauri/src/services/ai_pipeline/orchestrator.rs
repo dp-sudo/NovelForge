@@ -148,11 +148,33 @@ impl<'a> PipelineOrchestrator<'a> {
                 meta: None,
             },
         );
-        let route =
-            AiService::inspect_task_route(self.canonical_task).map_err(|err| StageError {
+        let (route, selected_skills) = {
+            let guard = self.skill_registry.read().map_err(|err| StageError {
                 phase: PHASE_ROUTE,
-                error: err,
+                error: AppErrorDto::new("SKILLS_LOCK_FAILED", "skill registry lock failed", false)
+                    .with_detail(err.to_string()),
             })?;
+            let selected = guard
+                .select_skills_for_task(self.canonical_task)
+                .map_err(|err| StageError {
+                    phase: PHASE_ROUTE,
+                    error: err,
+                })?;
+            let resolved =
+                AiService::inspect_task_route_with_skill_registry(self.canonical_task, &guard)
+                    .map_err(|err| StageError {
+                        phase: PHASE_ROUTE,
+                        error: err,
+                    })?;
+            (resolved, selected)
+        };
+        let route_override_meta = selected_skills.route_override.as_ref().map(|route| {
+            json!({
+                "provider": route.provider,
+                "model": route.model,
+                "reason": route.reason,
+            })
+        });
         self.pipeline_service.emit_event(
             self.app_handle,
             AiPipelineEvent {
@@ -167,6 +189,13 @@ impl<'a> PipelineOrchestrator<'a> {
                     "providerId": route.provider_id.clone(),
                     "modelId": route.model_id.clone(),
                     "attempts": route.attempts.clone(),
+                    "selectedSkills": {
+                        "workflow": selected_skills.workflow_skills.len(),
+                        "capability": selected_skills.capability_skills.len(),
+                        "policy": selected_skills.policy_skills.len(),
+                        "review": selected_skills.review_skills.len(),
+                    },
+                    "routeOverride": route_override_meta,
                 })),
             },
         );
@@ -266,7 +295,7 @@ impl<'a> PipelineOrchestrator<'a> {
         };
         let mut rx = self
             .ai_service
-            .stream_generate_for_pipeline(req, None)
+            .stream_generate_for_pipeline(req, Some(self.skill_registry))
             .await
             .map_err(|err| StageError {
                 phase: PHASE_GENERATE,

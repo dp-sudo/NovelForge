@@ -5,6 +5,7 @@ use std::sync::RwLock;
 use serde::{Deserialize, Serialize};
 
 use crate::errors::AppErrorDto;
+use crate::services::task_routing;
 
 /// ── SkillManifest (extended, .md frontmatter-aligned) ──
 
@@ -47,7 +48,7 @@ pub struct SkillManifest {
     #[serde(default, alias = "affects_layers")]
     pub affects_layers: Vec<String>,
     /// Optional task route override: if set, overrides global llm_task_routes.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, alias = "task_route", skip_serializing_if = "Option::is_none")]
     pub task_route: Option<SkillTaskRouteOverride>,
 }
 
@@ -55,10 +56,28 @@ pub struct SkillManifest {
 #[serde(rename_all = "camelCase")]
 pub struct SkillTaskRouteOverride {
     pub task_type: String,
-    #[serde(default)]
+    #[serde(default, alias = "provider", alias = "provider_id")]
     pub provider_id: String,
-    #[serde(default)]
+    #[serde(default, alias = "model", alias = "model_id")]
     pub model_id: String,
+    #[serde(default)]
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct RouteOverride {
+    pub provider: String,
+    pub model: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct SelectedSkills {
+    pub workflow_skills: Vec<SkillManifest>,
+    pub capability_skills: Vec<SkillManifest>,
+    pub policy_skills: Vec<SkillManifest>,
+    pub review_skills: Vec<SkillManifest>,
+    pub route_override: Option<RouteOverride>,
 }
 
 fn default_true() -> bool {
@@ -249,6 +268,61 @@ impl SkillRegistry {
                 .with_detail(e.to_string())
         })?;
         Ok(guard.iter().find(|s| s.id == id).cloned())
+    }
+
+    pub fn select_skills_for_task(&self, task_type: &str) -> Result<SelectedSkills, AppErrorDto> {
+        let canonical_task = task_routing::canonical_task_type(task_type).into_owned();
+        let guard = self.manifests.read().map_err(|e| {
+            AppErrorDto::new("SKILLS_LOCK_FAILED", "Skill registry lock failed", false)
+                .with_detail(e.to_string())
+        })?;
+
+        let mut selected = SelectedSkills::default();
+        for skill in guard.iter() {
+            let matched_by_trigger = skill
+                .trigger_conditions
+                .iter()
+                .any(|condition| task_pattern_matches(condition, &canonical_task));
+            let matched_by_route = skill
+                .task_route
+                .as_ref()
+                .map(|route| route_matches_task(route, &canonical_task))
+                .unwrap_or(false);
+            let should_activate = skill.always_on || matched_by_trigger || matched_by_route;
+            if !should_activate {
+                continue;
+            }
+
+            match skill.skill_class.as_deref().unwrap_or("") {
+                "workflow" => selected.workflow_skills.push(skill.clone()),
+                "capability" => selected.capability_skills.push(skill.clone()),
+                "policy" => selected.policy_skills.push(skill.clone()),
+                "review" => selected.review_skills.push(skill.clone()),
+                _ => {}
+            }
+
+            if selected.route_override.is_none() {
+                if let Some(route) = skill.task_route.as_ref() {
+                    if !route_matches_task(route, &canonical_task) {
+                        continue;
+                    }
+                    let provider = route.provider_id.trim().to_string();
+                    let model = route.model_id.trim().to_string();
+                    if provider.is_empty() && model.is_empty() {
+                        continue;
+                    }
+                    selected.route_override = Some(RouteOverride {
+                        provider,
+                        model,
+                        reason: route
+                            .reason
+                            .clone()
+                            .unwrap_or_else(|| format!("skill '{}' task_route override", skill.id)),
+                    });
+                }
+            }
+        }
+        Ok(selected)
     }
 
     /// Read the full .md content of a skill (for editing).
@@ -579,6 +653,34 @@ fn normalize_optional_string(value: String) -> Option<String> {
     }
 }
 
+fn route_matches_task(route: &SkillTaskRouteOverride, canonical_task: &str) -> bool {
+    let route_task = route.task_type.trim();
+    if route_task.is_empty() {
+        return true;
+    }
+    task_pattern_matches(route_task, canonical_task)
+}
+
+fn task_pattern_matches(pattern: &str, canonical_task: &str) -> bool {
+    let normalized = pattern.trim();
+    if normalized.is_empty() {
+        return false;
+    }
+    if normalized == "*" || normalized.eq_ignore_ascii_case("all") {
+        return true;
+    }
+    if let Some(prefix) = normalized.strip_suffix(".*") {
+        let canonical_prefix = task_routing::canonical_task_type(prefix).into_owned();
+        if canonical_prefix.is_empty() {
+            return false;
+        }
+        let dotted = format!("{canonical_prefix}.");
+        return canonical_task.starts_with(&dotted);
+    }
+    let canonical_pattern = task_routing::canonical_task_type(normalized).into_owned();
+    canonical_pattern == canonical_task
+}
+
 // ── File format helpers ──
 
 /// Split a .md string into (frontmatter_yaml, body_markdown).
@@ -805,5 +907,80 @@ mod tests {
             )
             .expect_err("should reject invalid class");
         assert_eq!(err.code, "SKILLS_INVALID_SKILL_CLASS");
+    }
+
+    fn build_manifest(id: &str, class: &str) -> SkillManifest {
+        SkillManifest {
+            id: id.to_string(),
+            name: format!("{id} name"),
+            description: "desc".to_string(),
+            version: 1,
+            source: "user".to_string(),
+            category: "utility".to_string(),
+            tags: Vec::new(),
+            input_schema: serde_json::json!({"type":"object"}),
+            output_schema: serde_json::json!({"type":"object"}),
+            requires_user_confirmation: true,
+            writes_to_project: false,
+            author: None,
+            icon: None,
+            created_at: "2026-04-30T00:00:00Z".to_string(),
+            updated_at: "2026-04-30T00:00:00Z".to_string(),
+            skill_class: Some(class.to_string()),
+            bundle_ids: Vec::new(),
+            always_on: false,
+            trigger_conditions: Vec::new(),
+            required_contexts: Vec::new(),
+            state_writes: Vec::new(),
+            automation_tier: None,
+            scene_tags: Vec::new(),
+            affects_layers: Vec::new(),
+            task_route: None,
+        }
+    }
+
+    #[test]
+    fn select_skills_for_task_applies_always_on_trigger_and_route_override() {
+        let registry = create_test_registry("selection");
+
+        let mut policy = build_manifest("policy.term-lock", "policy");
+        policy.always_on = true;
+        registry
+            .create_skill(&policy, "policy body")
+            .expect("create policy");
+
+        let mut capability = build_manifest("capability.scene", "capability");
+        capability.trigger_conditions = vec!["chapter.plan".to_string()];
+        registry
+            .create_skill(&capability, "capability body")
+            .expect("create capability");
+
+        let mut workflow = build_manifest("workflow.custom", "workflow");
+        workflow.trigger_conditions = vec!["custom.scene.render".to_string()];
+        workflow.task_route = Some(SkillTaskRouteOverride {
+            task_type: "custom.scene.render".to_string(),
+            provider_id: "provider-override".to_string(),
+            model_id: "model-override".to_string(),
+            reason: Some("high precision scene".to_string()),
+        });
+        registry
+            .create_skill(&workflow, "workflow body")
+            .expect("create workflow");
+
+        let chapter_selected = registry
+            .select_skills_for_task("chapter.plan")
+            .expect("select chapter skills");
+        assert_eq!(chapter_selected.policy_skills.len(), 1);
+        assert_eq!(chapter_selected.capability_skills.len(), 1);
+        assert!(chapter_selected.route_override.is_none());
+
+        let custom_selected = registry
+            .select_skills_for_task("custom.scene.render")
+            .expect("select custom skills");
+        assert_eq!(custom_selected.workflow_skills.len(), 1);
+        let route_override = custom_selected.route_override.expect("route override");
+        assert_eq!(route_override.provider, "provider-override");
+        assert_eq!(route_override.model, "model-override");
+        assert_eq!(route_override.reason, "high precision scene");
     }
 }

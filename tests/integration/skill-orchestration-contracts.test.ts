@@ -52,3 +52,26 @@ test("技能契约：技能管理支持按 skillClass 展示和筛选", async ()
   assert.match(list, /skillClass/);
   assert.match(card, /SKILL_CLASS_LABELS/);
 });
+
+test("技能运行期契约：orchestrator 传入 registry 并启用 route override 诊断", async () => {
+  const orchestrator = await readRepoFile("src-tauri/src/services/ai_pipeline/orchestrator.rs");
+  assert.match(orchestrator, /inspect_task_route_with_skill_registry/);
+  assert.match(orchestrator, /select_skills_for_task/);
+  assert.match(orchestrator, /stream_generate_for_pipeline\(req, Some\(self\.skill_registry\)\)/);
+});
+
+test("技能运行期契约：ai_service 消费选择器 route_override", async () => {
+  const aiService = await readRepoFile("src-tauri/src/services/ai_service.rs");
+  assert.match(aiService, /select_skills_for_task/);
+  assert.match(aiService, /inspect_task_route_with_skill_registry/);
+  assert.match(aiService, /SKILL_ROUTE_OVERRIDE/);
+  assert.match(aiService, /stream_generate_for_pipeline_uses_skill_route_override/);
+});
+
+test("技能运行期契约：PromptResolver 注入 capability\\/policy\\/review 技能栈", async () => {
+  const resolver = await readRepoFile("src-tauri/src/services/ai_pipeline/prompt_resolver.rs");
+  assert.match(resolver, /Policy Skill Context/);
+  assert.match(resolver, /Capability Skill Context/);
+  assert.match(resolver, /Review Skill Context/);
+  assert.match(resolver, /collect_runtime_skill_context/);
+});

@@ -11,7 +11,7 @@ use crate::infra::path_utils::resolve_project_relative_path;
 use crate::services::ai_pipeline::continuity_pack::ContinuityPack;
 use crate::services::ai_pipeline_service::RunAiTaskPipelineInput;
 use crate::services::context_service::CollectedContext;
-use crate::services::skill_registry::SkillRegistry;
+use crate::services::skill_registry::{SelectedSkills, SkillManifest, SkillRegistry};
 
 #[derive(Clone, Default)]
 pub struct PromptResolver;
@@ -22,6 +22,13 @@ struct PromptRenderContext {
     context: BTreeMap<String, String>,
     task_meta: BTreeMap<String, String>,
     merged: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Default)]
+struct RuntimeSkillPromptContext {
+    policy_lines: Vec<String>,
+    capability_lines: Vec<String>,
+    review_lines: Vec<String>,
 }
 
 impl PromptRenderContext {
@@ -73,9 +80,16 @@ impl PromptResolver {
             }
             None => return Err(Self::template_not_found_error(canonical_task)),
         };
+        let selected_skills = guard.select_skills_for_task(canonical_task)?;
+        let skill_context = self.collect_runtime_skill_context(&guard, &selected_skills)?;
 
-        let render_context =
-            self.build_render_context(context, continuity_pack, canonical_task, input);
+        let render_context = self.build_render_context(
+            context,
+            continuity_pack,
+            canonical_task,
+            input,
+            &skill_context,
+        );
         Self::validate_required_inputs(canonical_task, &render_context)?;
         Self::render_template(canonical_task, &template, &render_context)
     }
@@ -112,6 +126,7 @@ impl PromptResolver {
         continuity_pack: &ContinuityPack,
         canonical_task: &str,
         input: &RunAiTaskPipelineInput,
+        skill_context: &RuntimeSkillPromptContext,
     ) -> PromptRenderContext {
         let mut render = PromptRenderContext::default();
         let user_instruction = input.user_instruction.trim().to_string();
@@ -122,8 +137,10 @@ impl PromptResolver {
         } else {
             selected_text.clone()
         };
-        let project_context = Self::continuity_pack_to_project_context(continuity_pack);
-        let chapter_context = Self::continuity_pack_to_chapter_context(continuity_pack);
+        let project_context =
+            Self::continuity_pack_to_project_context(continuity_pack, skill_context);
+        let chapter_context =
+            Self::continuity_pack_to_chapter_context(continuity_pack, skill_context);
         let target_words = context
             .related_context
             .chapter
@@ -161,7 +178,10 @@ impl PromptResolver {
         render
     }
 
-    fn continuity_pack_to_project_context(pack: &ContinuityPack) -> String {
+    fn continuity_pack_to_project_context(
+        pack: &ContinuityPack,
+        skill_context: &RuntimeSkillPromptContext,
+    ) -> String {
         let mut parts = Vec::new();
         Self::push_context_section(
             &mut parts,
@@ -174,6 +194,16 @@ impl PromptResolver {
             "Lexicon Policy Context",
             &pack.lexicon_policy_context,
         );
+        Self::push_context_section(
+            &mut parts,
+            "Policy Skill Context",
+            &skill_context.policy_lines,
+        );
+        Self::push_context_section(
+            &mut parts,
+            "Review Skill Context",
+            &skill_context.review_lines,
+        );
         Self::push_context_section(&mut parts, "Promise Context", &pack.promise_context);
         if parts.is_empty() {
             String::new()
@@ -182,7 +212,10 @@ impl PromptResolver {
         }
     }
 
-    fn continuity_pack_to_chapter_context(pack: &ContinuityPack) -> String {
+    fn continuity_pack_to_chapter_context(
+        pack: &ContinuityPack,
+        skill_context: &RuntimeSkillPromptContext,
+    ) -> String {
         let mut parts = Vec::new();
         Self::push_context_section(&mut parts, "State Context", &pack.state_context);
         Self::push_context_section(&mut parts, "Window Plan Context", &pack.window_plan_context);
@@ -191,11 +224,50 @@ impl PromptResolver {
             "Recent Continuity Context",
             &pack.recent_continuity_context,
         );
+        Self::push_context_section(
+            &mut parts,
+            "Capability Skill Context",
+            &skill_context.capability_lines,
+        );
         if parts.is_empty() {
             String::new()
         } else {
             parts.join("\n")
         }
+    }
+
+    fn collect_runtime_skill_context(
+        &self,
+        registry: &SkillRegistry,
+        selected_skills: &SelectedSkills,
+    ) -> Result<RuntimeSkillPromptContext, AppErrorDto> {
+        Ok(RuntimeSkillPromptContext {
+            policy_lines: Self::collect_skill_templates(registry, &selected_skills.policy_skills)?,
+            capability_lines: Self::collect_skill_templates(
+                registry,
+                &selected_skills.capability_skills,
+            )?,
+            review_lines: Self::collect_skill_templates(registry, &selected_skills.review_skills)?,
+        })
+    }
+
+    fn collect_skill_templates(
+        registry: &SkillRegistry,
+        skills: &[SkillManifest],
+    ) -> Result<Vec<String>, AppErrorDto> {
+        let mut sections = Vec::new();
+        for skill in skills {
+            let Some(template) = registry.read_skill_prompt_template(&skill.id)? else {
+                continue;
+            };
+            let normalized = template.trim();
+            if normalized.is_empty() {
+                continue;
+            }
+            sections.push(format!("### Skill: {}", skill.id));
+            sections.push(normalized.to_string());
+        }
+        Ok(sections)
     }
 
     fn push_context_section(parts: &mut Vec<String>, heading: &str, lines: &[String]) {
@@ -669,6 +741,39 @@ mod tests {
         Arc::new(RwLock::new(reg))
     }
 
+    fn runtime_skill_manifest(
+        id: &str,
+        class: &str,
+    ) -> crate::services::skill_registry::SkillManifest {
+        crate::services::skill_registry::SkillManifest {
+            id: id.to_string(),
+            name: format!("{id} name"),
+            description: "runtime skill".to_string(),
+            version: 1,
+            source: "user".to_string(),
+            category: "utility".to_string(),
+            tags: Vec::new(),
+            input_schema: serde_json::json!({"type":"object"}),
+            output_schema: serde_json::json!({"type":"object"}),
+            requires_user_confirmation: true,
+            writes_to_project: false,
+            author: None,
+            icon: None,
+            created_at: "2026-04-30T00:00:00Z".to_string(),
+            updated_at: "2026-04-30T00:00:00Z".to_string(),
+            skill_class: Some(class.to_string()),
+            bundle_ids: Vec::new(),
+            always_on: false,
+            trigger_conditions: Vec::new(),
+            required_contexts: Vec::new(),
+            state_writes: Vec::new(),
+            automation_tier: None,
+            scene_tags: Vec::new(),
+            affects_layers: Vec::new(),
+            task_route: None,
+        }
+    }
+
     #[test]
     fn all_core_tasks_render_without_unresolved_placeholders() {
         let resolver = PromptResolver;
@@ -808,5 +913,53 @@ mod tests {
         assert!(rendered.contains("Lexicon Policy Context"));
         assert!(rendered.contains("锁定术语: 灵火"));
         assert!(rendered.contains("禁用词: 然而"));
+    }
+
+    #[test]
+    fn runtime_skill_stack_is_injected_into_prompt_context() {
+        let resolver = PromptResolver;
+        let context = sample_context();
+        let continuity_pack = ContinuityPack::default();
+        let registry = create_registry_with_builtin_templates();
+
+        {
+            let guard = registry.read().expect("lock registry");
+
+            let mut policy = runtime_skill_manifest("runtime.policy.guard", "policy");
+            policy.always_on = true;
+            guard
+                .create_skill(&policy, "严格遵守术语锁定策略")
+                .expect("create runtime policy skill");
+
+            let mut capability = runtime_skill_manifest("runtime.capability.scene", "capability");
+            capability.trigger_conditions = vec!["chapter.draft".to_string()];
+            guard
+                .create_skill(&capability, "强化场景调度与动作连续性")
+                .expect("create runtime capability skill");
+
+            let mut review = runtime_skill_manifest("runtime.review.logic", "review");
+            review.trigger_conditions = vec!["chapter.draft".to_string()];
+            guard
+                .create_skill(&review, "输出前做逻辑冲突复核")
+                .expect("create runtime review skill");
+        }
+
+        let input = sample_input("chapter.draft");
+        let rendered = resolver
+            .resolve_or_build_prompt(
+                &registry,
+                &context,
+                &continuity_pack,
+                "chapter.draft",
+                &input,
+            )
+            .expect("render prompt with runtime skills");
+
+        assert!(rendered.contains("Policy Skill Context"));
+        assert!(rendered.contains("Capability Skill Context"));
+        assert!(rendered.contains("Review Skill Context"));
+        assert!(rendered.contains("### Skill: runtime.policy.guard"));
+        assert!(rendered.contains("### Skill: runtime.capability.scene"));
+        assert!(rendered.contains("### Skill: runtime.review.logic"));
     }
 }

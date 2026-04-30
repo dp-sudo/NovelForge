@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock as StdRwLock};
 
 use tokio::sync::{mpsc, RwLock};
 
@@ -238,9 +238,37 @@ impl AiService {
     }
 
     /// Inspect task route resolution and computed retry/fallback chain for diagnostics.
+    #[allow(dead_code)]
     pub fn inspect_task_route(task_type: &str) -> Result<TaskRouteResolution, AppErrorDto> {
         let canonical_task_type = task_routing::canonical_task_type(task_type).into_owned();
         let (provider_id, model_id, route) = Self::resolve_route(&canonical_task_type)?;
+        let attempts = Self::build_attempt_chain(&provider_id, &model_id, route.as_ref())
+            .into_iter()
+            .map(|(provider_id, model_id)| TaskRouteAttempt {
+                provider_id,
+                model_id,
+            })
+            .collect::<Vec<_>>();
+        Ok(TaskRouteResolution {
+            canonical_task_type,
+            provider_id,
+            model_id,
+            attempts,
+        })
+    }
+
+    pub fn inspect_task_route_with_skill_registry(
+        task_type: &str,
+        skill_registry: &SkillRegistry,
+    ) -> Result<TaskRouteResolution, AppErrorDto> {
+        let canonical_task_type = task_routing::canonical_task_type(task_type).into_owned();
+        let req = UnifiedGenerateRequest {
+            model: "default".to_string(),
+            task_type: Some(canonical_task_type.clone()),
+            ..Default::default()
+        };
+        let (provider_id, model_id, route) =
+            Self::resolve_with_skill_override(&req, skill_registry)?;
         let attempts = Self::build_attempt_chain(&provider_id, &model_id, route.as_ref())
             .into_iter()
             .map(|(provider_id, model_id)| TaskRouteAttempt {
@@ -263,37 +291,57 @@ impl AiService {
         req: &UnifiedGenerateRequest,
         skill_registry: &SkillRegistry,
     ) -> Result<(String, String, Option<TaskRoute>), AppErrorDto> {
-        // Check if a skill with taskRoute override exists
-        if let Some(ref task_type) = req.task_type {
-            if let Ok(Some(skill)) = skill_registry.get_skill(task_type) {
-                if let Some(ref route_override) = skill.task_route {
-                    let pid = if route_override.provider_id.is_empty() {
-                        // No override → use global route
-                        return Self::resolve_request_target(req);
-                    } else {
-                        route_override.provider_id.clone()
-                    };
-                    let mid = if route_override.model_id.is_empty() {
+        if let Some(task_type) = req.task_type.as_deref() {
+            let selected = skill_registry.select_skills_for_task(task_type)?;
+            if let Some(route_override) = selected.route_override {
+                let provider = route_override.provider.trim().to_string();
+                let model = route_override.model.trim().to_string();
+                if !provider.is_empty() {
+                    let resolved_model = if model.is_empty() {
                         "default".to_string()
                     } else {
-                        route_override.model_id.clone()
+                        model.clone()
                     };
-                    let fake_route = TaskRoute {
-                        id: String::new(),
-                        task_type: route_override.task_type.clone(),
-                        provider_id: pid.clone(),
-                        model_id: mid.clone(),
-                        fallback_provider_id: None,
-                        fallback_model_id: None,
-                        max_retries: 1,
-                        created_at: None,
-                        updated_at: None,
-                    };
-                    return Ok((pid, mid, Some(fake_route)));
+                    log::info!(
+                        "[SKILL_ROUTE_OVERRIDE] task={} provider={} model={} reason={}",
+                        task_type,
+                        provider,
+                        resolved_model,
+                        route_override.reason
+                    );
+                    let route = Self::build_override_route(task_type, &provider, &resolved_model);
+                    return Ok((provider, resolved_model, Some(route)));
+                }
+                if !model.is_empty() {
+                    let (default_provider, _default_model, _default_route) =
+                        Self::resolve_request_target(req)?;
+                    log::info!(
+                        "[SKILL_ROUTE_OVERRIDE] task={} provider={} model={} reason={}",
+                        task_type,
+                        default_provider,
+                        model,
+                        route_override.reason
+                    );
+                    let route = Self::build_override_route(task_type, &default_provider, &model);
+                    return Ok((default_provider, model, Some(route)));
                 }
             }
         }
         Self::resolve_request_target(req)
+    }
+
+    fn build_override_route(task_type: &str, provider: &str, model: &str) -> TaskRoute {
+        TaskRoute {
+            id: String::new(),
+            task_type: task_routing::canonical_task_type(task_type).into_owned(),
+            provider_id: provider.to_string(),
+            model_id: model.to_string(),
+            fallback_provider_id: None,
+            fallback_model_id: None,
+            max_retries: 1,
+            created_at: None,
+            updated_at: None,
+        }
     }
 
     fn encode_pipeline_stream_error(error: &AppErrorDto) -> String {
@@ -317,7 +365,7 @@ impl AiService {
     pub async fn stream_generate_for_pipeline(
         &self,
         req: UnifiedGenerateRequest,
-        skill_registry: Option<&SkillRegistry>,
+        skill_registry: Option<&Arc<StdRwLock<SkillRegistry>>>,
     ) -> Result<mpsc::Receiver<StreamChunk>, AppErrorDto> {
         self.stream_generate_inner(req, skill_registry, true).await
     }
@@ -325,11 +373,17 @@ impl AiService {
     async fn stream_generate_inner(
         &self,
         req: UnifiedGenerateRequest,
-        skill_registry: Option<&SkillRegistry>,
+        skill_registry: Option<&Arc<StdRwLock<SkillRegistry>>>,
         with_pipeline_error_envelope: bool,
     ) -> Result<mpsc::Receiver<StreamChunk>, AppErrorDto> {
         let (provider_id, model, route) = match skill_registry {
-            Some(reg) => Self::resolve_with_skill_override(&req, reg)?,
+            Some(registry) => {
+                let guard = registry.read().map_err(|err| {
+                    AppErrorDto::new("SKILLS_LOCK_FAILED", "skill registry lock failed", false)
+                        .with_detail(err.to_string())
+                })?;
+                Self::resolve_with_skill_override(&req, &guard)?
+            }
             None => Self::resolve_request_target(&req)?,
         };
         let attempts = Self::build_attempt_chain(&provider_id, &model, route.as_ref());
@@ -418,6 +472,53 @@ impl AiService {
 mod tests {
     use super::AiService;
     use crate::errors::AppErrorDto;
+    use crate::services::skill_registry::{SkillManifest, SkillRegistry, SkillTaskRouteOverride};
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn create_test_registry(name: &str) -> SkillRegistry {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let root: PathBuf =
+            std::env::temp_dir().join(format!("novelforge-ai-service-test-{name}-{unique}"));
+        let skills_dir = root.join("skills");
+        let builtin_dir = root.join("builtin");
+        std::fs::create_dir_all(&skills_dir).expect("create skills dir");
+        std::fs::create_dir_all(&builtin_dir).expect("create builtin dir");
+        SkillRegistry::new(skills_dir, builtin_dir)
+    }
+
+    fn build_manifest(id: &str, class: &str) -> SkillManifest {
+        SkillManifest {
+            id: id.to_string(),
+            name: format!("{id} name"),
+            description: "desc".to_string(),
+            version: 1,
+            source: "user".to_string(),
+            category: "utility".to_string(),
+            tags: Vec::new(),
+            input_schema: serde_json::json!({"type":"object"}),
+            output_schema: serde_json::json!({"type":"object"}),
+            requires_user_confirmation: true,
+            writes_to_project: false,
+            author: None,
+            icon: None,
+            created_at: "2026-04-30T00:00:00Z".to_string(),
+            updated_at: "2026-04-30T00:00:00Z".to_string(),
+            skill_class: Some(class.to_string()),
+            bundle_ids: Vec::new(),
+            always_on: false,
+            trigger_conditions: Vec::new(),
+            required_contexts: Vec::new(),
+            state_writes: Vec::new(),
+            automation_tier: None,
+            scene_tags: Vec::new(),
+            affects_layers: Vec::new(),
+            task_route: None,
+        }
+    }
 
     #[test]
     fn pipeline_stream_error_roundtrip() {
@@ -434,5 +535,27 @@ mod tests {
     #[test]
     fn decode_pipeline_stream_error_rejects_plain_message() {
         assert!(AiService::decode_pipeline_stream_error("just message").is_none());
+    }
+
+    #[test]
+    fn stream_generate_for_pipeline_uses_skill_route_override() {
+        let registry = create_test_registry("route-override");
+        let mut workflow = build_manifest("workflow.scene.render", "workflow");
+        workflow.trigger_conditions = vec!["custom.scene.render".to_string()];
+        workflow.task_route = Some(SkillTaskRouteOverride {
+            task_type: "custom.scene.render".to_string(),
+            provider_id: "provider-override".to_string(),
+            model_id: "model-override".to_string(),
+            reason: Some("precision scene rendering".to_string()),
+        });
+        registry
+            .create_skill(&workflow, "workflow body")
+            .expect("create workflow skill");
+
+        let resolution =
+            AiService::inspect_task_route_with_skill_registry("custom.scene.render", &registry)
+                .expect("resolve route with skill override");
+        assert_eq!(resolution.provider_id, "provider-override");
+        assert_eq!(resolution.model_id, "model-override");
     }
 }
