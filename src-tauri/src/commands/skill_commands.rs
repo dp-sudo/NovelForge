@@ -1,7 +1,7 @@
 use tauri::State;
 
 use crate::errors::AppErrorDto;
-use crate::services::skill_registry::SkillManifest;
+use crate::services::skill_registry::{SkillManifest, SkillManifestPatch};
 use crate::state::AppState;
 
 // ── List all skills ──
@@ -102,6 +102,15 @@ pub async fn create_skill(
         icon: input.icon,
         created_at: now.clone(),
         updated_at: now,
+        skill_class: None,
+        bundle_ids: Vec::new(),
+        always_on: false,
+        trigger_conditions: Vec::new(),
+        required_contexts: Vec::new(),
+        state_writes: Vec::new(),
+        automation_tier: None,
+        scene_tags: Vec::new(),
+        affects_layers: Vec::new(),
         task_route: None,
     };
 
@@ -113,19 +122,28 @@ pub async fn create_skill(
     Ok(manifest)
 }
 
-// ── Update an existing skill's content ──
+// ── Update an existing skill's content and/or manifest metadata ──
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateSkillInput {
+    pub id: String,
+    #[serde(default)]
+    pub body: Option<String>,
+    #[serde(default)]
+    pub manifest: Option<SkillManifestPatch>,
+}
 
 #[tauri::command]
 pub async fn update_skill(
-    id: String,
-    body: String,
+    input: UpdateSkillInput,
     state: State<'_, AppState>,
 ) -> Result<SkillManifest, AppErrorDto> {
     let reg = state.skill_registry.read().map_err(|e| {
         AppErrorDto::new("SKILLS_LOCK_FAILED", "Skill registry lock failed", false)
             .with_detail(e.to_string())
     })?;
-    reg.update_skill(&id, &body)
+    reg.update_skill(&input.id, input.body.as_deref(), input.manifest)
 }
 
 // ── Delete a skill (user/imported only) ──

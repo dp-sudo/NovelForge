@@ -8,12 +8,12 @@ import { listSkills, importSkillFile, refreshSkills, type SkillManifest } from "
 
 const CATEGORIES = [
   { key: "", label: "全部" },
-  { key: "writing", label: "写作" },
-  { key: "character", label: "角色" },
-  { key: "world", label: "世界观" },
-  { key: "plot", label: "剧情" },
-  { key: "review", label: "审稿" },
-  { key: "utility", label: "工具" },
+  { key: "workflow", label: "Workflow" },
+  { key: "capability", label: "Capability" },
+  { key: "extractor", label: "Extractor" },
+  { key: "review", label: "Review" },
+  { key: "policy", label: "Policy" },
+  { key: "__unclassified__", label: "未分类" },
 ];
 
 export function SkillsManager() {
@@ -100,7 +100,9 @@ export function SkillsManager() {
 
   const selected = skills.find((s) => s.id === selectedId);
   const filteredSkills = categoryFilter
-    ? skills.filter((s) => s.category === categoryFilter)
+    ? categoryFilter === "__unclassified__"
+      ? skills.filter((s) => !s.skillClass)
+      : skills.filter((s) => s.skillClass === categoryFilter)
     : skills;
 
   return (

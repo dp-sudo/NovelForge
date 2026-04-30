@@ -18,7 +18,10 @@ export function SkillList({ skills, filter }: SkillListProps) {
           s.name.toLowerCase().includes(q) ||
           s.id.toLowerCase().includes(q) ||
           s.description.toLowerCase().includes(q) ||
-          s.tags.some((t) => t.toLowerCase().includes(q)),
+          s.tags.some((t) => t.toLowerCase().includes(q)) ||
+          (s.skillClass || "").toLowerCase().includes(q) ||
+          s.bundleIds.some((item) => item.toLowerCase().includes(q)) ||
+          s.triggerConditions.some((item) => item.toLowerCase().includes(q)),
       )
     : skills;
 
@@ -35,12 +38,11 @@ export function SkillList({ skills, filter }: SkillListProps) {
       {filtered.map((skill) => (
         <SkillCard
           key={skill.id}
-          id={skill.id}
           name={skill.name}
           description={skill.description}
           source={skill.source}
           icon={skill.icon}
-          category={skill.category}
+          skillClass={skill.skillClass}
           active={selectedId === skill.id}
           onClick={() => setSelectedId(skill.id)}
         />

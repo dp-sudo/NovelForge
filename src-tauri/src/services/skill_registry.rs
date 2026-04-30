@@ -28,6 +28,24 @@ pub struct SkillManifest {
     pub icon: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+    #[serde(default, alias = "skill_class")]
+    pub skill_class: Option<String>,
+    #[serde(default, alias = "bundle_ids")]
+    pub bundle_ids: Vec<String>,
+    #[serde(default, alias = "always_on")]
+    pub always_on: bool,
+    #[serde(default, alias = "trigger_conditions")]
+    pub trigger_conditions: Vec<String>,
+    #[serde(default, alias = "required_contexts")]
+    pub required_contexts: Vec<String>,
+    #[serde(default, alias = "state_writes")]
+    pub state_writes: Vec<String>,
+    #[serde(default, alias = "automation_tier")]
+    pub automation_tier: Option<String>,
+    #[serde(default, alias = "scene_tags")]
+    pub scene_tags: Vec<String>,
+    #[serde(default, alias = "affects_layers")]
+    pub affects_layers: Vec<String>,
     /// Optional task route override: if set, overrides global llm_task_routes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub task_route: Option<SkillTaskRouteOverride>,
@@ -47,9 +65,43 @@ fn default_true() -> bool {
     true
 }
 
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillManifestPatch {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub category: Option<String>,
+    #[serde(default)]
+    pub tags: Option<Vec<String>>,
+    #[serde(default)]
+    pub icon: Option<String>,
+    #[serde(default, alias = "skill_class")]
+    pub skill_class: Option<String>,
+    #[serde(default, alias = "bundle_ids")]
+    pub bundle_ids: Option<Vec<String>>,
+    #[serde(default, alias = "always_on")]
+    pub always_on: Option<bool>,
+    #[serde(default, alias = "trigger_conditions")]
+    pub trigger_conditions: Option<Vec<String>>,
+    #[serde(default, alias = "required_contexts")]
+    pub required_contexts: Option<Vec<String>>,
+    #[serde(default, alias = "state_writes")]
+    pub state_writes: Option<Vec<String>>,
+    #[serde(default, alias = "automation_tier")]
+    pub automation_tier: Option<String>,
+    #[serde(default, alias = "scene_tags")]
+    pub scene_tags: Option<Vec<String>>,
+    #[serde(default, alias = "affects_layers")]
+    pub affects_layers: Option<Vec<String>>,
+}
+
 /// Parsed skill file: metadata + body text.
 pub struct SkillFile {
     pub manifest: SkillManifest,
+    pub body: String,
 }
 
 /// ── SkillRegistry (filesystem-backed) ──
@@ -243,8 +295,13 @@ impl SkillRegistry {
         Ok(())
     }
 
-    /// Update an existing skill's content file.
-    pub fn update_skill(&self, id: &str, body: &str) -> Result<SkillManifest, AppErrorDto> {
+    /// Update an existing skill's content file or manifest metadata.
+    pub fn update_skill(
+        &self,
+        id: &str,
+        body: Option<&str>,
+        manifest_patch: Option<SkillManifestPatch>,
+    ) -> Result<SkillManifest, AppErrorDto> {
         let path = self.skills_dir.join(format!("{}.md", id));
         if !path.exists() {
             return Err(AppErrorDto::new(
@@ -257,10 +314,14 @@ impl SkillRegistry {
         // Read existing manifest to preserve id, source, created_at
         let existing = SkillRegistry::parse_file(&path)?;
         let mut manifest = existing.manifest;
+        if let Some(patch) = manifest_patch {
+            apply_manifest_patch(&mut manifest, patch)?;
+        }
         manifest.updated_at = crate::infra::time::now_iso();
         manifest.version += 1;
 
-        let content = render_skill_file(&manifest, body);
+        let next_body = body.unwrap_or(existing.body.as_str());
+        let content = render_skill_file(&manifest, next_body);
         fs::write(&path, &content).map_err(|e| {
             AppErrorDto::new("SKILLS_WRITE_FAILED", "Cannot write skill file", true)
                 .with_detail(e.to_string())
@@ -381,7 +442,7 @@ impl SkillRegistry {
                 .with_detail(e.to_string())
         })?;
 
-        let (frontmatter_str, _body) = split_frontmatter(&content)?;
+        let (frontmatter_str, body) = split_frontmatter(&content)?;
 
         let mut manifest: SkillManifest = serde_yaml::from_str(frontmatter_str).map_err(|e| {
             AppErrorDto::new(
@@ -400,7 +461,10 @@ impl SkillRegistry {
             manifest.category = "utility".to_string();
         }
 
-        Ok(SkillFile { manifest })
+        Ok(SkillFile {
+            manifest,
+            body: body.to_string(),
+        })
     }
 }
 
@@ -414,6 +478,105 @@ pub fn initialize_global_registry(
     let reg = SkillRegistry::new(skills_dir, builtin_dir.to_path_buf());
     reg.initialize()?;
     Ok(reg)
+}
+
+const ALLOWED_SKILL_CLASSES: [&str; 5] =
+    ["workflow", "capability", "extractor", "review", "policy"];
+const ALLOWED_AUTOMATION_TIERS: [&str; 3] = ["auto", "supervised", "confirm"];
+
+fn apply_manifest_patch(
+    manifest: &mut SkillManifest,
+    patch: SkillManifestPatch,
+) -> Result<(), AppErrorDto> {
+    if let Some(name) = patch.name {
+        manifest.name = name;
+    }
+    if let Some(description) = patch.description {
+        manifest.description = description;
+    }
+    if let Some(category) = patch.category {
+        manifest.category = category;
+    }
+    if let Some(tags) = patch.tags {
+        manifest.tags = trim_items(tags);
+    }
+    if let Some(icon) = patch.icon {
+        manifest.icon = normalize_optional_string(icon);
+    }
+    if let Some(skill_class) = patch.skill_class {
+        manifest.skill_class = validate_skill_class(skill_class)?;
+    }
+    if let Some(bundle_ids) = patch.bundle_ids {
+        manifest.bundle_ids = trim_items(bundle_ids);
+    }
+    if let Some(always_on) = patch.always_on {
+        manifest.always_on = always_on;
+    }
+    if let Some(trigger_conditions) = patch.trigger_conditions {
+        manifest.trigger_conditions = trim_items(trigger_conditions);
+    }
+    if let Some(required_contexts) = patch.required_contexts {
+        manifest.required_contexts = trim_items(required_contexts);
+    }
+    if let Some(state_writes) = patch.state_writes {
+        manifest.state_writes = trim_items(state_writes);
+    }
+    if let Some(automation_tier) = patch.automation_tier {
+        manifest.automation_tier = validate_automation_tier(automation_tier)?;
+    }
+    if let Some(scene_tags) = patch.scene_tags {
+        manifest.scene_tags = trim_items(scene_tags);
+    }
+    if let Some(affects_layers) = patch.affects_layers {
+        manifest.affects_layers = trim_items(affects_layers);
+    }
+
+    Ok(())
+}
+
+fn validate_skill_class(value: String) -> Result<Option<String>, AppErrorDto> {
+    let normalized = normalize_optional_string(value);
+    match normalized {
+        Some(ref class) if !ALLOWED_SKILL_CLASSES.contains(&class.as_str()) => {
+            Err(AppErrorDto::new(
+                "SKILLS_INVALID_SKILL_CLASS",
+                "Invalid skill class. Expected workflow/capability/extractor/review/policy",
+                true,
+            ))
+        }
+        _ => Ok(normalized),
+    }
+}
+
+fn validate_automation_tier(value: String) -> Result<Option<String>, AppErrorDto> {
+    let normalized = normalize_optional_string(value);
+    match normalized {
+        Some(ref tier) if !ALLOWED_AUTOMATION_TIERS.contains(&tier.as_str()) => {
+            Err(AppErrorDto::new(
+                "SKILLS_INVALID_AUTOMATION_TIER",
+                "Invalid automation tier. Expected auto/supervised/confirm",
+                true,
+            ))
+        }
+        _ => Ok(normalized),
+    }
+}
+
+fn trim_items(items: Vec<String>) -> Vec<String> {
+    items
+        .into_iter()
+        .map(|item| item.trim().to_string())
+        .filter(|item| !item.is_empty())
+        .collect()
+}
+
+fn normalize_optional_string(value: String) -> Option<String> {
+    let normalized = value.trim().to_string();
+    if normalized.is_empty() {
+        None
+    } else {
+        Some(normalized)
+    }
 }
 
 // ── File format helpers ──
@@ -502,4 +665,145 @@ fn validate_id(id: &str) -> Result<(), AppErrorDto> {
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn create_test_registry(name: &str) -> SkillRegistry {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let root: PathBuf =
+            std::env::temp_dir().join(format!("novelforge-skill-test-{name}-{unique}"));
+        let skills_dir = root.join("skills");
+        let builtin_dir = root.join("builtin");
+        std::fs::create_dir_all(&skills_dir).expect("create skills dir");
+        std::fs::create_dir_all(&builtin_dir).expect("create builtin dir");
+        SkillRegistry::new(skills_dir, builtin_dir)
+    }
+
+    #[test]
+    fn update_skill_manifest_roundtrip_succeeds() {
+        let registry = create_test_registry("roundtrip");
+        let manifest = SkillManifest {
+            id: "test.skill".to_string(),
+            name: "Test Skill".to_string(),
+            description: "desc".to_string(),
+            version: 1,
+            source: "user".to_string(),
+            category: "utility".to_string(),
+            tags: vec!["alpha".to_string()],
+            input_schema: serde_json::json!({"type":"object"}),
+            output_schema: serde_json::json!({"type":"object"}),
+            requires_user_confirmation: true,
+            writes_to_project: false,
+            author: Some("tester".to_string()),
+            icon: Some("A".to_string()),
+            created_at: "2026-04-30T00:00:00Z".to_string(),
+            updated_at: "2026-04-30T00:00:00Z".to_string(),
+            skill_class: None,
+            bundle_ids: Vec::new(),
+            always_on: false,
+            trigger_conditions: Vec::new(),
+            required_contexts: Vec::new(),
+            state_writes: Vec::new(),
+            automation_tier: None,
+            scene_tags: Vec::new(),
+            affects_layers: Vec::new(),
+            task_route: None,
+        };
+        registry
+            .create_skill(&manifest, "original body")
+            .expect("create skill");
+
+        let updated = registry
+            .update_skill(
+                "test.skill",
+                Some("updated body"),
+                Some(SkillManifestPatch {
+                    skill_class: Some("workflow".to_string()),
+                    bundle_ids: Some(vec!["chapter-core".to_string()]),
+                    always_on: Some(true),
+                    trigger_conditions: Some(vec!["chapter.plan".to_string()]),
+                    required_contexts: Some(vec!["canon".to_string()]),
+                    state_writes: Some(vec!["plot.progress".to_string()]),
+                    automation_tier: Some("confirm".to_string()),
+                    scene_tags: Some(vec!["battle".to_string(), "dialogue".to_string()]),
+                    affects_layers: Some(vec!["canon".to_string(), "state".to_string()]),
+                    ..Default::default()
+                }),
+            )
+            .expect("update skill");
+
+        assert_eq!(updated.skill_class.as_deref(), Some("workflow"));
+        assert_eq!(updated.bundle_ids, vec!["chapter-core"]);
+        assert!(updated.always_on);
+        assert_eq!(updated.trigger_conditions, vec!["chapter.plan"]);
+        assert_eq!(updated.required_contexts, vec!["canon"]);
+        assert_eq!(updated.state_writes, vec!["plot.progress"]);
+        assert_eq!(updated.automation_tier.as_deref(), Some("confirm"));
+        assert_eq!(updated.scene_tags, vec!["battle", "dialogue"]);
+        assert_eq!(updated.affects_layers, vec!["canon", "state"]);
+        assert_eq!(updated.version, 2);
+
+        let content = registry
+            .read_skill_content("test.skill")
+            .expect("read skill content")
+            .expect("skill exists");
+        assert!(content.contains("skillClass: workflow"));
+        assert!(content.contains("bundleIds:"));
+        assert!(content.contains("updated body"));
+    }
+
+    #[test]
+    fn update_skill_rejects_invalid_skill_class() {
+        let registry = create_test_registry("invalid-class");
+        let manifest = SkillManifest {
+            id: "invalid.class".to_string(),
+            name: "Invalid".to_string(),
+            description: "desc".to_string(),
+            version: 1,
+            source: "user".to_string(),
+            category: "utility".to_string(),
+            tags: Vec::new(),
+            input_schema: serde_json::json!({"type":"object"}),
+            output_schema: serde_json::json!({"type":"object"}),
+            requires_user_confirmation: true,
+            writes_to_project: false,
+            author: None,
+            icon: None,
+            created_at: "2026-04-30T00:00:00Z".to_string(),
+            updated_at: "2026-04-30T00:00:00Z".to_string(),
+            skill_class: None,
+            bundle_ids: Vec::new(),
+            always_on: false,
+            trigger_conditions: Vec::new(),
+            required_contexts: Vec::new(),
+            state_writes: Vec::new(),
+            automation_tier: None,
+            scene_tags: Vec::new(),
+            affects_layers: Vec::new(),
+            task_route: None,
+        };
+        registry
+            .create_skill(&manifest, "body")
+            .expect("create skill");
+
+        let err = registry
+            .update_skill(
+                "invalid.class",
+                None,
+                Some(SkillManifestPatch {
+                    skill_class: Some("unknown".to_string()),
+                    ..Default::default()
+                }),
+            )
+            .expect_err("should reject invalid class");
+        assert_eq!(err.code, "SKILLS_INVALID_SKILL_CLASS");
+    }
 }

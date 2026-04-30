@@ -1,10 +1,9 @@
 interface SkillCardProps {
-  id: string;
   name: string;
   description: string;
   source: "builtin" | "user" | "imported";
   icon?: string;
-  category: string;
+  skillClass?: "workflow" | "capability" | "extractor" | "review" | "policy";
   active: boolean;
   onClick: () => void;
 }
@@ -21,7 +20,23 @@ const SOURCE_COLORS: Record<string, string> = {
   imported: "bg-warning/10 text-warning border-warning/30",
 };
 
-export function SkillCard({ id, name, description, source, icon, active, onClick }: SkillCardProps) {
+const SKILL_CLASS_LABELS: Record<string, string> = {
+  workflow: "Workflow",
+  capability: "Capability",
+  extractor: "Extractor",
+  review: "Review",
+  policy: "Policy",
+};
+
+const SKILL_CLASS_COLORS: Record<string, string> = {
+  workflow: "bg-primary/15 text-primary border-primary/40",
+  capability: "bg-success/15 text-success border-success/40",
+  extractor: "bg-warning/15 text-warning border-warning/40",
+  review: "bg-info/15 text-info border-info/40",
+  policy: "bg-error/15 text-error border-error/40",
+};
+
+export function SkillCard({ name, description, source, icon, skillClass, active, onClick }: SkillCardProps) {
   return (
     <button
       onClick={onClick}
@@ -38,6 +53,13 @@ export function SkillCard({ id, name, description, source, icon, active, onClick
             <span className="text-sm font-medium truncate">{name}</span>
             <span className={`text-[10px] px-1.5 py-0.5 rounded-full border ${SOURCE_COLORS[source] || SOURCE_COLORS.builtin}`}>
               {SOURCE_LABELS[source] || source}
+            </span>
+            <span
+              className={`text-[10px] px-1.5 py-0.5 rounded-full border ${
+                skillClass ? SKILL_CLASS_COLORS[skillClass] || "bg-surface-700 text-surface-300 border-surface-600" : "bg-surface-700 text-surface-300 border-surface-600"
+              }`}
+            >
+              {skillClass ? SKILL_CLASS_LABELS[skillClass] || skillClass : "Unclassified"}
             </span>
           </div>
           <p className="text-xs text-surface-500 mt-0.5 truncate">{description}</p>

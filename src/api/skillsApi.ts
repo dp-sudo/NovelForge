@@ -18,6 +18,15 @@ export interface SkillManifest {
   icon?: string;
   createdAt: string;
   updatedAt: string;
+  skillClass?: "workflow" | "capability" | "extractor" | "review" | "policy";
+  bundleIds: string[];
+  alwaysOn: boolean;
+  triggerConditions: string[];
+  requiredContexts: string[];
+  stateWrites: string[];
+  automationTier?: "auto" | "supervised" | "confirm";
+  sceneTags: string[];
+  affectsLayers: string[];
 }
 
 export interface CreateSkillInput {
@@ -28,6 +37,29 @@ export interface CreateSkillInput {
   tags?: string[];
   icon?: string;
   body: string;
+}
+
+export interface SkillManifestPatch {
+  name?: string;
+  description?: string;
+  category?: string;
+  tags?: string[];
+  icon?: string;
+  skillClass?: SkillManifest["skillClass"] | "";
+  bundleIds?: string[];
+  alwaysOn?: boolean;
+  triggerConditions?: string[];
+  requiredContexts?: string[];
+  stateWrites?: string[];
+  automationTier?: SkillManifest["automationTier"] | "";
+  sceneTags?: string[];
+  affectsLayers?: string[];
+}
+
+export interface UpdateSkillInput {
+  id: string;
+  body?: string;
+  manifest?: SkillManifestPatch;
 }
 
 // ── Commands ──
@@ -48,8 +80,8 @@ export async function createSkill(input: CreateSkillInput): Promise<SkillManifes
   return invokeCommand<SkillManifest>("create_skill", { input });
 }
 
-export async function updateSkill(id: string, body: string): Promise<SkillManifest> {
-  return invokeCommand<SkillManifest>("update_skill", { id, body });
+export async function updateSkill(input: UpdateSkillInput): Promise<SkillManifest> {
+  return invokeCommand<SkillManifest>("update_skill", { input });
 }
 
 export async function deleteSkill(id: string): Promise<void> {
