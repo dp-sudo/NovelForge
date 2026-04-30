@@ -1,5 +1,6 @@
 import { invokeCommand } from "./tauriClient.js";
 import type {
+  AiStrategyProfile,
   LlmProviderConfig,
   RefreshResult,
   ModelRecord,
@@ -9,6 +10,7 @@ import type {
 } from "../types/ai.js";
 
 export type {
+  AiStrategyProfile,
   LlmProviderConfig,
   RefreshResult,
   ModelRecord,
@@ -141,6 +143,21 @@ export async function saveWritingStyle(
 
 export async function getWritingStyle(projectRoot: string): Promise<WritingStyle> {
   return invokeCommand<WritingStyle>("get_writing_style", {
+    input: { projectRoot },
+  });
+}
+
+export async function saveAiStrategyProfile(
+  projectRoot: string,
+  profile: AiStrategyProfile,
+): Promise<void> {
+  await invokeCommand<void>("save_ai_strategy_profile", {
+    input: { projectRoot, profile },
+  });
+}
+
+export async function getAiStrategyProfile(projectRoot: string): Promise<AiStrategyProfile> {
+  return invokeCommand<AiStrategyProfile>("get_ai_strategy_profile", {
     input: { projectRoot },
   });
 }

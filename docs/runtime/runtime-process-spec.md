@@ -1,9 +1,9 @@
 # NovelForge 运行流程文档（Main / Renderer / API / Service）
 
 ## 1. 文档信息
-- 版本：v0.7
-- 状态：S18（AI Pipeline v1 已接入编辑器主链路）
-- 最后更新：2026-04-29
+- 版本：v0.8
+- 状态：S18（AI Pipeline v1 + 项目级 AI 策略权威源）
+- 最后更新：2026-04-30
 
 ## 2. 运行时角色
 ### 2.1 Main（Tauri + Rust）
@@ -21,7 +21,7 @@
 - 关键链路：
   - `projectApi` / `chapterApi` / `contextApi`
   - `pipelineApi`（run/cancel/stream）
-  - `settingsApi`（Provider/路由/编辑器设置/写作风格/Git/授权/更新）
+  - `settingsApi`（Provider/路由/编辑器设置/写作风格/项目级 AI 策略/Git/授权/更新）
   - `skillsApi`（技能管理）
 
 ### 2.4 兼容层
@@ -100,6 +100,7 @@
 ### 4.7 设置、备份与发布能力
 - 编辑器设置：`load_editor_settings/save_editor_settings`（app DB）。
 - 写作风格：`get_writing_style/save_writing_style`（项目库 `projects.writing_style`）。
+- 项目级 AI 策略：`get_ai_strategy_profile/save_ai_strategy_profile`（项目库 `projects.ai_strategy_profile`）。
 - 备份与完整性：`create_backup/list_backups/restore_backup/check_project_integrity`。
 - Git 快照：`init_project_repository/get_project_repository_status/commit_project_snapshot/list_project_history`。
 - 授权与更新：`get_license_status/activate_license/check_app_update/install_app_update`。
@@ -116,6 +117,7 @@
 ## 6. 当前已知流程差异
 - 问题3修复：编辑器 AI 主链路为 `run_ai_task_pipeline + ai:pipeline:event`；旧流式命令不再是可用接口。
 - 结构化抽取采用规则启发式，仍需人工确认，不自动直接写核心资产表。
+- 项目级 AI 策略运行期真相源为项目库，不在 `project.json` 日常保存路径双写。
 
 ## 7. 文档维护规则
 以下变化必须同步更新本文档：

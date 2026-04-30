@@ -1,9 +1,9 @@
 # NovelForge API 集成文档（Frontend <-> Tauri <-> Rust）
 
 ## 1. 文档信息
-- 版本：v0.7
-- 状态：S18（AI Pipeline v1 + 结构化草案池闭环）
-- 最后更新：2026-04-29
+- 版本：v0.8
+- 状态：S18（AI Pipeline v1 + 结构化草案池闭环 + 项目级 AI 策略）
+- 最后更新：2026-04-30
 - 代码基线：`src/api/*`、`src-tauri/src/commands/*`
 
 ## 2. 集成原则（当前）
@@ -32,6 +32,8 @@
 - `clear_recent_projects() -> void`
 - `save_writing_style(input: { projectRoot, writingStyle }) -> void`
 - `get_writing_style(input: { projectRoot }) -> WritingStyle`
+- `save_ai_strategy_profile(input: { projectRoot, profile }) -> void`
+- `get_ai_strategy_profile(input: { projectRoot }) -> AiStrategyProfile`
 - `init_project_repository(projectRoot) -> GitRepositoryStatus`
 - `get_project_repository_status(projectRoot) -> GitRepositoryStatus`
 - `commit_project_snapshot(input: { projectRoot, message? }) -> GitSnapshotResult`
@@ -118,6 +120,9 @@
 - 编辑器设置：
   - `load_editor_settings() -> EditorSettings`
   - `save_editor_settings(settings) -> void`
+- 项目级 AI 策略：
+  - `save_ai_strategy_profile(input: { projectRoot, profile }) -> void`
+  - `get_ai_strategy_profile(input: { projectRoot }) -> AiStrategyProfile`
 - 兼容命令：
   - 问题4修复：`load_provider_config`, `save_provider_config`（compatibility-only，已标注 deprecated）
 - 授权：
@@ -191,6 +196,7 @@ interface AppErrorDto {
 - 问题2修复：模块化 AI 命令（`ai_generate_*`、`ai_scan_consistency`、`generate_blueprint_suggestion`）已从 Rust command 面移除。
 - 问题4修复：compatibility-only 命令仅用于历史兼容，不作为官方接入路径。
 - 结构化抽取结果默认仅入草案池，需显式确认命令才落核心资产表。
+- 项目级 AI 策略运行期真相源为 `project.sqlite.projects.ai_strategy_profile`（不走 `project.json` 日常双写）。
 
 ## 8. 最小回归链路
 1. 新建项目 -> 新建章节 -> 保存正文 -> 恢复草稿。

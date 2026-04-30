@@ -150,6 +150,8 @@ pub fn run() {
             commands::project_commands::clear_recent_projects,
             commands::project_commands::save_writing_style,
             commands::project_commands::get_writing_style,
+            commands::project_commands::save_ai_strategy_profile,
+            commands::project_commands::get_ai_strategy_profile,
             commands::project_commands::init_project_repository,
             commands::project_commands::get_project_repository_status,
             commands::project_commands::commit_project_snapshot,

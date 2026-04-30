@@ -128,6 +128,32 @@ export function defaultWritingStyle(): WritingStyle {
   };
 }
 
+export interface AiStrategyProfile {
+  automationDefault: "auto" | "supervised" | "confirm";
+  reviewStrictness: number;
+  defaultWorkflowStack: string[];
+  alwaysOnPolicySkills: string[];
+  defaultCapabilityBundles: string[];
+  stateWritePolicy: "chapter_confirmed" | "manual_only";
+  continuityPackDepth: "minimal" | "standard" | "deep";
+  chapterGenerationMode: "draft_only" | "plan_draft" | "plan_scene_draft";
+  windowPlanningHorizon: number;
+}
+
+export function defaultAiStrategyProfile(): AiStrategyProfile {
+  return {
+    automationDefault: "supervised",
+    reviewStrictness: 4,
+    defaultWorkflowStack: ["chapter.plan", "chapter.draft"],
+    alwaysOnPolicySkills: [],
+    defaultCapabilityBundles: [],
+    stateWritePolicy: "chapter_confirmed",
+    continuityPackDepth: "standard",
+    chapterGenerationMode: "plan_scene_draft",
+    windowPlanningHorizon: 10,
+  };
+}
+
 // ── CapabilityReport ──
 
 export interface CapabilityReport {

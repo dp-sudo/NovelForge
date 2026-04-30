@@ -44,6 +44,10 @@ fn project_migrations() -> Vec<Migration> {
             version: "0003_pipeline_draft_pool",
             sql: include_str!("../../migrations/project/0003_pipeline_draft_pool.sql"),
         },
+        Migration {
+            version: "0004_ai_strategy_profile",
+            sql: include_str!("../../migrations/project/0004_ai_strategy_profile.sql"),
+        },
     ]
 }
 

@@ -3,7 +3,9 @@ use tauri::State;
 
 use crate::errors::AppErrorDto;
 use crate::infra::recent_projects::RecentProjectItem;
-use crate::services::project_service::{CreateProjectInput, ProjectOpenResult, WritingStyle};
+use crate::services::project_service::{
+    AiStrategyProfile, CreateProjectInput, ProjectOpenResult, WritingStyle,
+};
 use crate::state::AppState;
 
 #[derive(Debug, Deserialize)]
@@ -43,6 +45,19 @@ pub struct SaveWritingStyleInput {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GetWritingStyleInput {
+    pub project_root: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveAiStrategyProfileInput {
+    pub project_root: String,
+    pub profile: AiStrategyProfile,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetAiStrategyProfileInput {
     pub project_root: String,
 }
 
@@ -123,6 +138,26 @@ pub async fn get_writing_style(
     state: State<'_, AppState>,
 ) -> Result<WritingStyle, AppErrorDto> {
     state.project_service.get_writing_style(&input.project_root)
+}
+
+#[tauri::command]
+pub async fn save_ai_strategy_profile(
+    input: SaveAiStrategyProfileInput,
+    state: State<'_, AppState>,
+) -> Result<(), AppErrorDto> {
+    state
+        .project_service
+        .save_ai_strategy_profile(&input.project_root, &input.profile)
+}
+
+#[tauri::command]
+pub async fn get_ai_strategy_profile(
+    input: GetAiStrategyProfileInput,
+    state: State<'_, AppState>,
+) -> Result<AiStrategyProfile, AppErrorDto> {
+    state
+        .project_service
+        .get_ai_strategy_profile(&input.project_root)
 }
 
 #[tauri::command]

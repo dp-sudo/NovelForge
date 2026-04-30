@@ -1,9 +1,9 @@
 # NovelForge Windows 桌面端技术架构文档
 
 ## 1. 文档信息
-- 版本：v0.6
-- 状态：S18（AI Pipeline v1 + 结构化草案池 + 写作风格 + 技能管理）
-- 最后更新：2026-04-28
+- 版本：v0.7
+- 状态：S18（AI Pipeline v1 + 结构化草案池 + 写作风格/项目级 AI 策略 + 技能管理）
+- 最后更新：2026-04-30
 - 代码基线：`src/` + `src-tauri/src/`
 
 ## 2. 架构目标
@@ -40,6 +40,7 @@
   - AI Pipeline：`run_ai_task_pipeline`, `cancel_ai_task_pipeline`。
   - 结构化确认：`apply_asset_candidate`, `apply_structured_draft`。
   - 写作风格：`save_writing_style`, `get_writing_style`。
+  - 项目级 AI 策略：`save_ai_strategy_profile`, `get_ai_strategy_profile`。
   - 技能管理：`get_skill`, `get_skill_content`, `create_skill`, `update_skill`, `delete_skill`, `import_skill_file`, `reset_builtin_skill`, `refresh_skills`。
 
 ### 4.4 Service 层（`src-tauri/src/services/*`）
@@ -56,7 +57,7 @@
 
 ### 4.5 Infra 层（`src-tauri/src/infra/*`）
 - `migrator.rs` + `migrations/*`：项目库/应用库迁移管理。
-- `database.rs`：项目库初始化与兼容补列（含 `projects.writing_style`）。
+- `database.rs`：项目库初始化与兼容补列（含 `projects.writing_style`、`projects.ai_strategy_profile`）。
 - `app_database.rs`：应用级 Provider/模型/路由/编辑器配置存储。
 - `credential_manager.rs`：API Key 与系统凭据管理。
 - `fs_utils.rs`：原子写入（temp + rename）。
@@ -87,8 +88,9 @@
   - `project/0001_init.sql`
   - `project/0002_task_route_unique.sql`（任务类型 canonical + 去重 + 唯一索引）
   - `project/0003_pipeline_draft_pool.sql`（Pipeline run 审计 + 草案池）
+  - `project/0004_ai_strategy_profile.sql`（项目级 AI 策略配置列）
 - 兼容补列：
-  - `database.rs::ensure_compatible_schema()` 在打开/初始化时补齐 `projects.writing_style` 等历史缺列。
+  - `database.rs::ensure_compatible_schema()` 在打开/初始化时补齐 `projects.writing_style`、`projects.ai_strategy_profile` 等历史缺列。
 
 ### 5.3 应用级数据库（`%LOCALAPPDATA%\\NovelForge\\novelforge.db`）
 - 表：`llm_providers`, `llm_models`, `llm_model_refresh_logs`, `llm_task_routes`, `llm_model_registry_state`, `app_settings`
@@ -131,6 +133,7 @@
 
 ## 7. 命令面（按域摘要）
 - Project：项目创建/打开/最近项目 + 写作风格保存读取 + Git 仓库与快照。
+- Project：项目创建/打开/最近项目 + 写作风格/项目级 AI 策略保存读取 + Git 仓库与快照。
 - Chapter：章节 CRUD、重排、自动保存/恢复、快照、卷管理。
 - AI：pipeline run/cancel，模块化 AI 任务通过前端 API 薄封装统一转发到 pipeline（legacy stream 命令已移除）。
 - Context：上下文聚合、资产候选采纳、结构化草案确认。

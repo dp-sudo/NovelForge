@@ -79,6 +79,36 @@ impl Default for WritingStyle {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AiStrategyProfile {
+    pub automation_default: String,
+    pub review_strictness: i64,
+    pub default_workflow_stack: Vec<String>,
+    pub always_on_policy_skills: Vec<String>,
+    pub default_capability_bundles: Vec<String>,
+    pub state_write_policy: String,
+    pub continuity_pack_depth: String,
+    pub chapter_generation_mode: String,
+    pub window_planning_horizon: i64,
+}
+
+impl Default for AiStrategyProfile {
+    fn default() -> Self {
+        Self {
+            automation_default: "supervised".to_string(),
+            review_strictness: 4,
+            default_workflow_stack: vec!["chapter.plan".to_string(), "chapter.draft".to_string()],
+            always_on_policy_skills: vec![],
+            default_capability_bundles: vec![],
+            state_write_policy: "chapter_confirmed".to_string(),
+            continuity_pack_depth: "standard".to_string(),
+            chapter_generation_mode: "plan_scene_draft".to_string(),
+            window_planning_horizon: 10,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectJson {
@@ -242,6 +272,12 @@ impl ProjectService {
                     .with_detail(err.to_string())
                     .with_suggested_action("请检查默认写作风格配置")
             })?;
+        let ai_strategy_profile_json = serde_json::to_string(&AiStrategyProfile::default())
+            .map_err(|err| {
+                AppErrorDto::new("PROJECT_CREATE_FAILED", "创建项目失败", true)
+                    .with_detail(err.to_string())
+                    .with_suggested_action("请检查默认 AI 策略配置")
+            })?;
 
         let conn = open_database(project_root_path).map_err(|err| {
             AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false)
@@ -251,8 +287,11 @@ impl ProjectService {
         conn
       .execute(
         "
-        INSERT INTO projects(id, name, author, genre, narrative_pov, writing_style, target_words, current_words, project_path, schema_version, created_at, updated_at)
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+        INSERT INTO projects(
+          id, name, author, genre, narrative_pov, writing_style, ai_strategy_profile,
+          target_words, current_words, project_path, schema_version, created_at, updated_at
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
         ",
         params![
           project_json.project_id,
@@ -261,6 +300,7 @@ impl ProjectService {
           project_json.genre,
           project_json.settings.default_narrative_pov.clone(),
           writing_style_json,
+          ai_strategy_profile_json,
           project_json.target_words,
           0_i64,
           project_root_path.to_string_lossy().to_string(),
@@ -414,6 +454,64 @@ impl ProjectService {
             None => Ok(WritingStyle::default()),
         }
     }
+
+    pub fn save_ai_strategy_profile(
+        &self,
+        project_root: &str,
+        profile: &AiStrategyProfile,
+    ) -> Result<(), AppErrorDto> {
+        let project_root_path = Path::new(project_root);
+        let conn = open_database(project_root_path).map_err(|err| {
+            AppErrorDto::new("DB_OPEN_FAILED", "无法打开项目数据库", false)
+                .with_detail(err.to_string())
+        })?;
+        let project_id = get_project_id(&conn)?;
+        let profile_json = serde_json::to_string(profile).map_err(|err| {
+            AppErrorDto::new("STRATEGY_SERIALIZE_FAILED", "无法序列化 AI 策略配置", true)
+                .with_detail(err.to_string())
+        })?;
+        let now = now_iso();
+        conn.execute(
+            "UPDATE projects SET ai_strategy_profile = ?1, updated_at = ?2 WHERE id = ?3",
+            params![profile_json, now, project_id],
+        )
+        .map_err(|err| {
+            AppErrorDto::new("STRATEGY_SAVE_FAILED", "保存 AI 策略失败", true)
+                .with_detail(err.to_string())
+        })?;
+        Ok(())
+    }
+
+    pub fn get_ai_strategy_profile(
+        &self,
+        project_root: &str,
+    ) -> Result<AiStrategyProfile, AppErrorDto> {
+        let project_root_path = Path::new(project_root);
+        let conn = open_database(project_root_path).map_err(|err| {
+            AppErrorDto::new("DB_OPEN_FAILED", "无法打开项目数据库", false)
+                .with_detail(err.to_string())
+        })?;
+        let project_id = get_project_id(&conn)?;
+        let profile_json: Option<String> = conn
+            .query_row(
+                "SELECT ai_strategy_profile FROM projects WHERE id = ?1",
+                params![project_id],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .map_err(|err| {
+                AppErrorDto::new("STRATEGY_READ_FAILED", "读取 AI 策略失败", true)
+                    .with_detail(err.to_string())
+            })?;
+
+        match profile_json {
+            Some(raw) if raw.trim().is_empty() => Ok(AiStrategyProfile::default()),
+            Some(raw) => serde_json::from_str::<AiStrategyProfile>(&raw).map_err(|err| {
+                AppErrorDto::new("STRATEGY_PARSE_FAILED", "AI 策略配置损坏", true)
+                    .with_detail(err.to_string())
+            }),
+            None => Ok(AiStrategyProfile::default()),
+        }
+    }
 }
 
 fn reject_dev_watch_conflict(project_root: &Path) -> Result<(), AppErrorDto> {
@@ -552,7 +650,7 @@ mod tests {
 
     use uuid::Uuid;
 
-    use super::{CreateProjectInput, ProjectService, WritingStyle};
+    use super::{AiStrategyProfile, CreateProjectInput, ProjectService, WritingStyle};
     use crate::infra::database::open_database;
     use crate::services::chapter_service::{ChapterInput, ChapterService};
 
@@ -674,6 +772,53 @@ mod tests {
             .get_writing_style(&create_result.project_root)
             .expect("get saved writing style should succeed");
         assert_eq!(loaded_style, custom_style);
+
+        remove_temp_workspace(&workspace);
+    }
+
+    #[test]
+    fn ai_strategy_profile_save_and_get_roundtrip_succeeds() {
+        let workspace = create_temp_workspace();
+        let service = ProjectService;
+
+        let create_result = service
+            .create_project(CreateProjectInput {
+                name: "策略测试".to_string(),
+                author: Some("测试作者".to_string()),
+                genre: "玄幻".to_string(),
+                target_words: Some(90_000),
+                save_directory: workspace.to_string_lossy().to_string(),
+            })
+            .expect("create project should succeed");
+
+        let default_profile = service
+            .get_ai_strategy_profile(&create_result.project_root)
+            .expect("get default ai strategy profile should succeed");
+        assert_eq!(default_profile, AiStrategyProfile::default());
+
+        let custom_profile = AiStrategyProfile {
+            automation_default: "confirm".to_string(),
+            review_strictness: 5,
+            default_workflow_stack: vec![
+                "chapter.plan".to_string(),
+                "chapter.draft".to_string(),
+                "consistency.scan".to_string(),
+            ],
+            always_on_policy_skills: vec!["term-lock".to_string()],
+            default_capability_bundles: vec!["emotion-flow".to_string()],
+            state_write_policy: "manual_only".to_string(),
+            continuity_pack_depth: "deep".to_string(),
+            chapter_generation_mode: "plan_draft".to_string(),
+            window_planning_horizon: 12,
+        };
+        service
+            .save_ai_strategy_profile(&create_result.project_root, &custom_profile)
+            .expect("save ai strategy profile should succeed");
+
+        let loaded_profile = service
+            .get_ai_strategy_profile(&create_result.project_root)
+            .expect("get saved ai strategy profile should succeed");
+        assert_eq!(loaded_profile, custom_profile);
 
         remove_temp_workspace(&workspace);
     }
