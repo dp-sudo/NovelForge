@@ -1,9 +1,9 @@
 # NovelForge UI 设计文档（MVP）
 
 ## 1. 文档信息
-- 版本：v0.6
-- 状态：S18（编辑器 AI Pipeline + 结构化草案确认闭环 + 设置页技能/写作风格）
-- 最后更新：2026-04-28
+- 版本：v0.7
+- 状态：S19（编辑器 AI Pipeline + 结构化草案确认闭环 + 设置页 AI 策略入口）
+- 最后更新：2026-04-30
 - 代码基线：`src/pages/*`、`src/components/*`、`src/api/*`
 
 ## 2. UI 目标
@@ -91,6 +91,7 @@
   - 模型配置
   - 任务路由
   - 技能管理
+  - AI 策略
   - 编辑器
   - 写作风格
   - 数据与备份
@@ -109,6 +110,9 @@
 - 写作风格：
   - 语言风格、描写密度、对话比例、句子节奏、氛围、心理描写深度。
   - 保存到项目级 `writing_style`。
+- AI 策略：
+  - 项目级 `AiStrategyProfile` 配置面板（工作流栈、审查严格度、能力包、自动持久化策略、连续性/生成模式）。
+  - 通过 `get_ai_strategy_profile/save_ai_strategy_profile` 读写项目库 `projects.ai_strategy_profile`。
 - 数据与备份：
   - 备份/恢复、完整性检查、Git 初始化与快照提交、历史查看。
 - 关于：

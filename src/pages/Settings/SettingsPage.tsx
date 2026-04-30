@@ -57,9 +57,10 @@ import {
   type CapabilityReport,
 } from "../../types/ai";
 import { SkillsManager } from "../../components/skills/SkillsManager.js";
+import { AiStrategyPanel } from "../../components/settings/AiStrategyPanel";
 import { TASK_ROUTE_OPTIONS, canonicalTaskType } from "../../utils/taskRouting.js";
 
-type TabKey = "model" | "routing" | "skills" | "editor" | "writing" | "backup" | "about";
+type TabKey = "model" | "routing" | "skills" | "aiStrategy" | "editor" | "writing" | "backup" | "about";
 
 interface VendorFormState {
   config: LlmProviderConfig;
@@ -1046,6 +1047,7 @@ export function SettingsPage() {
     { key: "model", label: "模型配置" },
     { key: "routing", label: "任务路由" },
     { key: "skills", label: "技能管理" },
+    { key: "aiStrategy", label: "AI 策略" },
     { key: "editor", label: "编辑器" },
     { key: "writing", label: "写作风格" },
     { key: "backup", label: "数据与备份" },
@@ -1424,6 +1426,10 @@ export function SettingsPage() {
             <SkillsManager />
           </div>
         </Card>
+      )}
+
+      {activeTab === "aiStrategy" && (
+        <AiStrategyPanel projectRoot={projectRoot} />
       )}
 
       {activeTab === "editor" && (

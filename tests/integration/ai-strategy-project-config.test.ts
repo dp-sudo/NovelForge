@@ -37,3 +37,19 @@ test("AI 策略契约：项目迁移包含 ai_strategy_profile 字段", async ()
   );
   assert.match(migration, /ALTER TABLE projects ADD COLUMN ai_strategy_profile TEXT;/);
 });
+
+test("AI 策略设置契约：SettingsPage 暴露 AI 策略页签与面板入口", async () => {
+  const page = await readRepoFile("src/pages/Settings/SettingsPage.tsx");
+  assert.match(page, /"aiStrategy"/);
+  assert.match(page, /AiStrategyPanel/);
+});
+
+test("AI 策略设置契约：AiStrategyPanel 包含关键配置区与保存动作", async () => {
+  const panel = await readRepoFile("src/components/settings/AiStrategyPanel.tsx");
+  assert.match(panel, /AI 策略配置/);
+  assert.match(panel, /默认工作流栈/);
+  assert.match(panel, /审查严格度/);
+  assert.match(panel, /默认能力包/);
+  assert.match(panel, /自动持久化策略/);
+  assert.match(panel, /保存 AI 策略/);
+});
