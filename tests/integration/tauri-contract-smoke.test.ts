@@ -61,7 +61,10 @@ test("问题2契约验证：run_ai_task_pipeline payload 形状保持前后端�
   assert.match(pipelineApi, /projectRoot:\s*input\.projectRoot/);
   assert.match(pipelineApi, /taskType:\s*input\.taskType/);
   assert.match(pipelineApi, /userInstruction:\s*input\.userInstruction\s*\?\?\s*""/);
-  assert.match(pipelineApi, /autoPersist:\s*input\.autoPersist\s*\?\?\s*false/);
+  assert.match(pipelineApi, /const policy = resolvePersistPolicy\(input\);/);
+  assert.match(pipelineApi, /autoPersist:\s*policy\.autoPersist/);
+  assert.match(pipelineApi, /persistMode:\s*policy\.persistMode/);
+  assert.match(pipelineApi, /automationTier:\s*policy\.automationTier/);
   assert.match(
     pipelineApi,
     /invokeCommand<void>\("cancel_ai_task_pipeline",\s*\{\s*requestId\s*\}\s*\)/

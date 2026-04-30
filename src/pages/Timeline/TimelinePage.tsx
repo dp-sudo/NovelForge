@@ -136,6 +136,8 @@ export function TimelinePage() {
                   projectRoot,
                   taskType: "timeline.review",
                   autoPersist: true,
+                  persistMode: "derived_review",
+                  automationTier: "auto",
                   uiAction: "timeline.ai.review",
                   userInstruction: aiPrompt,
                 });

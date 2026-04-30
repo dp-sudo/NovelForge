@@ -153,6 +153,13 @@
   - `run_ai_task_pipeline(input) -> requestId`
   - `cancel_ai_task_pipeline(requestId) -> void`
   - 前端流式入口：`streamTaskPipeline(input, options)`（监听 `ai:pipeline:event`）。
+  - `run_ai_task_pipeline.input` 持久化字段：
+    - `autoPersist?: boolean`（兼容桥，保留）
+    - `persistMode?: "none" | "formal" | "derived_review"`（显式持久化语义）
+    - `automationTier?: "auto" | "supervised" | "confirm"`（显式自动化档位）
+  - 兼容规则：
+    - 当 `persistMode` 存在时，以 `persistMode` 语义为准（覆盖 `autoPersist`）。
+    - 当仅有 `autoPersist: true` 时，前端按任务类型推断 `persistMode`，默认 `automationTier = "supervised"`。
 - AI 功能任务（前端薄封装，统一走 pipeline）：
   - `generateBlueprintSuggestion` -> `runModuleAiTask(taskType="blueprint.generate_step")`
   - `aiGenerateCharacter` -> `runModuleAiTask(taskType="character.create")`

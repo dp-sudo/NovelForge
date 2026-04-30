@@ -162,6 +162,18 @@ export async function getAiStrategyProfile(projectRoot: string): Promise<AiStrat
   });
 }
 
+// Keep document-driven naming for project-level strategy APIs.
+export async function saveProjectAiStrategy(
+  projectRoot: string,
+  profile: AiStrategyProfile,
+): Promise<void> {
+  return saveAiStrategyProfile(projectRoot, profile);
+}
+
+export async function getProjectAiStrategy(projectRoot: string): Promise<AiStrategyProfile> {
+  return getAiStrategyProfile(projectRoot);
+}
+
 // —— Git integration ——
 
 export async function initProjectRepository(projectRoot: string): Promise<GitRepositoryStatus> {

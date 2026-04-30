@@ -34,6 +34,12 @@ test("问题5编排回归：全书生成阶段顺序稳定且可追踪", () => {
   assert.ok(stages.every((stage) => stage.request.projectRoot === "F:/demo"));
   assert.equal(stages[0]?.request.autoPersist, true);
   assert.equal(stages.at(-1)?.request.autoPersist, true);
+  assert.equal(stages[0]?.request.persistMode, "formal");
+  assert.equal(stages[0]?.request.automationTier, "supervised");
+  assert.equal(stages[8]?.request.persistMode, "formal");
+  assert.equal(stages[8]?.request.automationTier, "confirm");
+  assert.equal(stages[13]?.request.persistMode, "formal");
+  assert.equal(stages[13]?.request.automationTier, "auto");
 });
 
 test("问题5编排回归：蓝图与种子阶段提示词强制 JSON 回填协议", () => {

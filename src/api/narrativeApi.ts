@@ -59,6 +59,8 @@ export async function aiGenerateNarrativeObligation(
     taskType: "narrative.create_obligation",
     userInstruction: userDescription,
     autoPersist: true,
+    persistMode: "formal",
+    automationTier: "confirm",
     uiAction: "ai_generate_narrative_obligation",
   });
 }

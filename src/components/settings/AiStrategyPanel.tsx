@@ -5,8 +5,8 @@ import { Input } from "../forms/Input";
 import { Select } from "../forms/Select";
 import { Textarea } from "../forms/Textarea";
 import {
-  getAiStrategyProfile,
-  saveAiStrategyProfile,
+  getProjectAiStrategy,
+  saveProjectAiStrategy,
 } from "../../api/settingsApi";
 import {
   defaultAiStrategyProfile,
@@ -41,20 +41,23 @@ function StrictnessControl({ value, onChange }: StrictnessControlProps) {
       <label className="text-sm text-surface-200 block mb-2">审查严格度</label>
       <div className="flex items-center gap-3">
         <div className="flex gap-1.5 flex-1">
-          {REVIEW_LEVEL_LABELS.map((label, index) => (
-            <button
-              key={label}
-              type="button"
-              onClick={() => onChange(index)}
-              className={`px-3 py-2 rounded-lg text-xs border transition-colors ${
-                index === value
-                  ? "bg-primary text-white border-primary"
-                  : "bg-surface-800 text-surface-300 border-surface-600 hover:border-surface-500"
-              }`}
-            >
-              {index} · {label}
-            </button>
-          ))}
+          {REVIEW_LEVEL_LABELS.map((label, index) => {
+            const level = index + 1;
+            return (
+              <button
+                key={label}
+                type="button"
+                onClick={() => onChange(level)}
+                className={`px-3 py-2 rounded-lg text-xs border transition-colors ${
+                  level === value
+                    ? "bg-primary text-white border-primary"
+                    : "bg-surface-800 text-surface-300 border-surface-600 hover:border-surface-500"
+                }`}
+              >
+                {level} · {label}
+              </button>
+            );
+          })}
         </div>
       </div>
       <p className="text-xs text-surface-400 mt-2">
@@ -109,7 +112,7 @@ export function AiStrategyPanel({ projectRoot }: AiStrategyPanelProps) {
 
     (async () => {
       try {
-        const next = await getAiStrategyProfile(projectRoot);
+        const next = await getProjectAiStrategy(projectRoot);
         if (!canceled) {
           setProfile(next);
         }
@@ -143,7 +146,7 @@ export function AiStrategyPanel({ projectRoot }: AiStrategyPanelProps) {
     setSaving(true);
     setMessage(null);
     try {
-      await saveAiStrategyProfile(projectRoot, profile);
+      await saveProjectAiStrategy(projectRoot, profile);
       setSaved(true);
       setMessage("AI 策略已保存");
       setTimeout(() => setSaved(false), 2000);

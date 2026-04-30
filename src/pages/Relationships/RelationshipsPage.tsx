@@ -235,6 +235,8 @@ export function RelationshipsPage() {
                   projectRoot,
                   taskType: "relationship.review",
                   autoPersist: true,
+                  persistMode: "derived_review",
+                  automationTier: "auto",
                   uiAction: "relationship.ai.review",
                   userInstruction: aiPrompt,
                 });

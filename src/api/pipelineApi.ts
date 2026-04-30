@@ -25,6 +25,10 @@ export type AiPipelinePhase =
 
 export type AiPipelineEventType = "start" | "delta" | "progress" | "done" | "error";
 
+export type PersistMode = "none" | "formal" | "derived_review";
+
+export type AutomationTier = "auto" | "supervised" | "confirm";
+
 export interface RunTaskPipelineInput {
   projectRoot: string;
   taskType: string;
@@ -35,7 +39,19 @@ export interface RunTaskPipelineInput {
   chapterContent?: string;
   blueprintStepKey?: string;
   blueprintStepTitle?: string;
+  // legacy bridge: keep `autoPersist` for existing callers while migrating to explicit policy fields.
   autoPersist?: boolean;
+  /**
+   * Compatibility bridge inference:
+   * 1) if only `autoPersist: true` is provided:
+   *    - taskType includes "review" => derived_review
+   *    - taskType includes "blueprint" => formal
+   *    - otherwise => formal
+   * 2) automationTier defaults to supervised when omitted.
+   * 3) when both autoPersist and persistMode exist, persistMode wins.
+   */
+  persistMode?: PersistMode;
+  automationTier?: AutomationTier;
 }
 
 export interface AiPipelineEvent {
@@ -71,6 +87,31 @@ function createPipelineStartTimeoutError(timeoutMs: number): PipelineStartTimeou
     message: `AI 请求启动超时（>${timeoutMs}ms），请重试`,
     recoverable: true,
   };
+}
+
+function inferPersistModeFromLegacy(taskType: string): PersistMode {
+  const normalizedTaskType = taskType.toLowerCase();
+  if (normalizedTaskType.includes("review")) {
+    return "derived_review";
+  }
+  if (normalizedTaskType.includes("blueprint")) {
+    return "formal";
+  }
+  return "formal";
+}
+
+function resolvePersistPolicy(input: RunTaskPipelineInput): {
+  autoPersist: boolean;
+  persistMode?: PersistMode;
+  automationTier: AutomationTier;
+} {
+  let persistMode = input.persistMode;
+  if (!persistMode && input.autoPersist) {
+    persistMode = inferPersistModeFromLegacy(input.taskType);
+  }
+  const automationTier = input.automationTier ?? "supervised";
+  const autoPersist = persistMode ? persistMode !== "none" : (input.autoPersist ?? false);
+  return { autoPersist, persistMode, automationTier };
 }
 
 function trackRequestId(requestId: string): void {
@@ -127,6 +168,7 @@ export async function runTaskPipeline(
   options: RunTaskPipelineOptions = {},
 ): Promise<string> {
   const timeoutMs = Math.max(options.timeoutMs ?? DEFAULT_START_TIMEOUT_MS, MIN_EVENT_TIMEOUT_MS);
+  const policy = resolvePersistPolicy(input);
   const requestPromise = invokeCommand<string>("run_ai_task_pipeline", {
     input: {
       projectRoot: input.projectRoot,
@@ -138,7 +180,9 @@ export async function runTaskPipeline(
       chapterContent: input.chapterContent,
       blueprintStepKey: input.blueprintStepKey,
       blueprintStepTitle: input.blueprintStepTitle,
-      autoPersist: input.autoPersist ?? false,
+      autoPersist: policy.autoPersist,
+      persistMode: policy.persistMode,
+      automationTier: policy.automationTier,
     },
   });
   const requestId = await withTimeout(

@@ -1,6 +1,16 @@
-import { streamTaskPipeline, type RunTaskPipelineInput } from "./pipelineApi.js";
+import {
+  streamTaskPipeline,
+  type AutomationTier,
+  type PersistMode,
+  type RunTaskPipelineInput,
+} from "./pipelineApi.js";
 
-export async function runModuleAiTask(input: RunTaskPipelineInput): Promise<string> {
+export interface RunModuleAiTaskInput extends RunTaskPipelineInput {
+  persistMode?: PersistMode;
+  automationTier?: AutomationTier;
+}
+
+export async function runModuleAiTask(input: RunModuleAiTaskInput): Promise<string> {
   // 问题2修复(命令面收敛): 模块 AI 统一走 run_ai_task_pipeline + ai:pipeline:event。
   let output = "";
   for await (const event of streamTaskPipeline(input, { timeoutMs: 180000 })) {

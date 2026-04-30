@@ -35,6 +35,10 @@ pub struct RunAiTaskPipelineInput {
     pub blueprint_step_title: Option<String>,
     #[serde(default)]
     pub auto_persist: bool,
+    #[serde(default)]
+    pub persist_mode: Option<String>,
+    #[serde(default)]
+    pub automation_tier: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

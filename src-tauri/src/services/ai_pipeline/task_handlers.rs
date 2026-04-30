@@ -1827,6 +1827,8 @@ mod tests {
             blueprint_step_key: None,
             blueprint_step_title: None,
             auto_persist: true,
+            persist_mode: None,
+            automation_tier: None,
         }
     }
 

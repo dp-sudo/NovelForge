@@ -269,6 +269,8 @@ export function buildBookStages(input: RunBookGenerationInput): BookStage[] {
       blueprintStepKey: stage.stepKey,
       blueprintStepTitle: stage.stepTitle,
       autoPersist: true,
+      persistMode: "formal",
+      automationTier: "supervised",
     },
   }));
 
@@ -281,6 +283,8 @@ export function buildBookStages(input: RunBookGenerationInput): BookStage[] {
         taskType: "character.create",
         userInstruction: buildCharacterSeedInstruction(base),
         autoPersist: true,
+        persistMode: "formal",
+        automationTier: "confirm",
       },
     },
     {
@@ -291,6 +295,8 @@ export function buildBookStages(input: RunBookGenerationInput): BookStage[] {
         taskType: "world.create_rule",
         userInstruction: buildWorldSeedInstruction(base),
         autoPersist: true,
+        persistMode: "formal",
+        automationTier: "confirm",
       },
     },
     {
@@ -301,6 +307,8 @@ export function buildBookStages(input: RunBookGenerationInput): BookStage[] {
         taskType: "plot.create_node",
         userInstruction: buildPlotSeedInstruction(base),
         autoPersist: true,
+        persistMode: "formal",
+        automationTier: "confirm",
       },
     },
     {
@@ -311,6 +319,8 @@ export function buildBookStages(input: RunBookGenerationInput): BookStage[] {
         taskType: "glossary.create_term",
         userInstruction: buildGlossarySeedInstruction(base),
         autoPersist: true,
+        persistMode: "formal",
+        automationTier: "confirm",
       },
     },
     {
@@ -321,6 +331,8 @@ export function buildBookStages(input: RunBookGenerationInput): BookStage[] {
         taskType: "narrative.create_obligation",
         userInstruction: buildNarrativeSeedInstruction(base),
         autoPersist: true,
+        persistMode: "formal",
+        automationTier: "confirm",
       },
     },
   );
@@ -334,6 +346,8 @@ export function buildBookStages(input: RunBookGenerationInput): BookStage[] {
         chapterId: input.chapterId,
         userInstruction: base,
         autoPersist: true,
+        persistMode: "formal",
+        automationTier: "auto",
       },
     });
   }

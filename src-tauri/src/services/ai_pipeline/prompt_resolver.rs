@@ -576,6 +576,8 @@ mod tests {
                 blueprint_step_key: None,
                 blueprint_step_title: None,
                 auto_persist: false,
+                persist_mode: None,
+                automation_tier: None,
             },
             "chapter.plan" => RunAiTaskPipelineInput {
                 project_root: "F:\\NovelForge".to_string(),
@@ -588,6 +590,8 @@ mod tests {
                 blueprint_step_key: None,
                 blueprint_step_title: None,
                 auto_persist: false,
+                persist_mode: None,
+                automation_tier: None,
             },
             "chapter.continue" => RunAiTaskPipelineInput {
                 project_root: "F:\\NovelForge".to_string(),
@@ -600,6 +604,8 @@ mod tests {
                 blueprint_step_key: None,
                 blueprint_step_title: None,
                 auto_persist: false,
+                persist_mode: None,
+                automation_tier: None,
             },
             "chapter.rewrite" | "prose.naturalize" => RunAiTaskPipelineInput {
                 project_root: "F:\\NovelForge".to_string(),
@@ -612,6 +618,8 @@ mod tests {
                 blueprint_step_key: None,
                 blueprint_step_title: None,
                 auto_persist: false,
+                persist_mode: None,
+                automation_tier: None,
             },
             "character.create"
             | "world.create_rule"
@@ -628,6 +636,8 @@ mod tests {
                 blueprint_step_key: None,
                 blueprint_step_title: None,
                 auto_persist: false,
+                persist_mode: None,
+                automation_tier: None,
             },
             "consistency.scan" => RunAiTaskPipelineInput {
                 project_root: "F:\\NovelForge".to_string(),
@@ -640,6 +650,8 @@ mod tests {
                 blueprint_step_key: None,
                 blueprint_step_title: None,
                 auto_persist: true,
+                persist_mode: None,
+                automation_tier: None,
             },
             "blueprint.generate_step" => RunAiTaskPipelineInput {
                 project_root: "F:\\NovelForge".to_string(),
@@ -652,6 +664,8 @@ mod tests {
                 blueprint_step_key: Some("step-03-premise".to_string()),
                 blueprint_step_title: Some("故事母题".to_string()),
                 auto_persist: true,
+                persist_mode: None,
+                automation_tier: None,
             },
             "timeline.review" | "relationship.review" | "dashboard.review" | "export.review" => {
                 RunAiTaskPipelineInput {
@@ -665,6 +679,8 @@ mod tests {
                     blueprint_step_key: None,
                     blueprint_step_title: None,
                     auto_persist: false,
+                    persist_mode: None,
+                    automation_tier: None,
                 }
             }
             "custom" => RunAiTaskPipelineInput {
@@ -678,6 +694,8 @@ mod tests {
                 blueprint_step_key: None,
                 blueprint_step_title: None,
                 auto_persist: false,
+                persist_mode: None,
+                automation_tier: None,
             },
             _ => panic!("unexpected task type: {}", task_type),
         }
@@ -740,6 +758,8 @@ mod tests {
             blueprint_step_key: None,
             blueprint_step_title: None,
             auto_persist: false,
+            persist_mode: None,
+            automation_tier: None,
         };
 
         let err = resolver
