@@ -11,6 +11,7 @@ use crate::errors::AppErrorDto;
 use crate::infra::database::open_database;
 use crate::infra::path_utils::resolve_project_relative_path;
 use crate::infra::time::now_iso;
+use crate::services::chapter_service::ChapterService;
 use crate::services::import_service::{extract_asset_candidates, AssetExtractionCandidate};
 use crate::services::project_service::{get_project_id, WritingStyle};
 use crate::services::story_state_service::StoryStateService;
@@ -449,6 +450,382 @@ impl ContextService {
             global_context: global,
             related_context: related,
         })
+    }
+
+    pub fn get_constitution_context(&self, context: &CollectedContext) -> Vec<String> {
+        let global = &context.global_context;
+        let mut lines = Vec::new();
+
+        lines.push(format!("作品名称: {}", global.project_name));
+        lines.push(format!("题材: {}", global.genre));
+        if let Some(pov) = &global.narrative_pov {
+            if !pov.trim().is_empty() {
+                lines.push(format!("叙事视角: {}", pov.trim()));
+            }
+        }
+        if let Some(style) = &global.writing_style {
+            lines.push(format!(
+                "写作风格: 语言={}、描写密度={}、对话比例={}、句式节奏={}、氛围={}、心理深度={}",
+                style.language_style,
+                style.description_density,
+                style.dialogue_ratio,
+                style.sentence_rhythm,
+                style.atmosphere,
+                style.psychological_depth
+            ));
+        }
+
+        for step in &global.blueprint_summary {
+            if step.status != "completed" {
+                continue;
+            }
+            let content = step.content.as_deref().unwrap_or("").trim();
+            if content.is_empty() {
+                continue;
+            }
+            lines.push(format!(
+                "蓝图约束[{}] {}: {}",
+                step.step_key,
+                step.title,
+                preview_text(content, 220)
+            ));
+        }
+
+        lines
+    }
+
+    pub fn get_canon_context(&self, context: &CollectedContext) -> Vec<String> {
+        let related = &context.related_context;
+        let mut lines = Vec::new();
+
+        if let Some(chapter) = &related.chapter {
+            lines.push(format!(
+                "当前章节: 第{}章《{}》",
+                chapter.chapter_index, chapter.title
+            ));
+            if !chapter.summary.trim().is_empty() {
+                lines.push(format!(
+                    "章节摘要: {}",
+                    preview_text(chapter.summary.trim(), 180)
+                ));
+            }
+        }
+        if let Some(previous) = &related.previous_chapter_summary {
+            if !previous.trim().is_empty() {
+                lines.push(format!("前章承接: {}", preview_text(previous.trim(), 180)));
+            }
+        }
+
+        for character in related.characters.iter().take(20) {
+            let mut line = format!("角色[{}]: {}", character.role_type, character.name);
+            if let Some(motivation) = &character.motivation {
+                let trimmed = motivation.trim();
+                if !trimmed.is_empty() {
+                    line.push_str(&format!("；动机={}", preview_text(trimmed, 90)));
+                }
+            }
+            if let Some(arc_stage) = &character.arc_stage {
+                let trimmed = arc_stage.trim();
+                if !trimmed.is_empty() {
+                    line.push_str(&format!("；弧线={}", preview_text(trimmed, 48)));
+                }
+            }
+            lines.push(line);
+        }
+
+        for rule in related.world_rules.iter().take(20) {
+            lines.push(format!(
+                "世界规则[{}]: {} - {}",
+                rule.category,
+                rule.title,
+                preview_text(rule.description.trim(), 120)
+            ));
+        }
+
+        for node in related.plot_nodes.iter().take(20) {
+            let mut line = format!("剧情节点[{}]: {}", node.node_type, node.title);
+            if let Some(goal) = &node.goal {
+                let trimmed = goal.trim();
+                if !trimmed.is_empty() {
+                    line.push_str(&format!("；目标={}", preview_text(trimmed, 80)));
+                }
+            }
+            if let Some(conflict) = &node.conflict {
+                let trimmed = conflict.trim();
+                if !trimmed.is_empty() {
+                    line.push_str(&format!("；冲突={}", preview_text(trimmed, 80)));
+                }
+            }
+            lines.push(line);
+        }
+
+        for edge in related.relationship_edges.iter().take(30) {
+            let mut line = format!(
+                "关系: {} -> {} [{}]",
+                edge.source_name, edge.target_name, edge.relationship_type
+            );
+            if let Some(description) = &edge.description {
+                let trimmed = description.trim();
+                if !trimmed.is_empty() {
+                    line.push_str(&format!(": {}", preview_text(trimmed, 120)));
+                }
+            }
+            lines.push(line);
+        }
+
+        lines
+    }
+
+    pub fn get_state_summary(
+        &self,
+        project_root: &str,
+    ) -> Result<Vec<StoryStateSummary>, AppErrorDto> {
+        StoryStateService::default()
+            .list_latest_states(project_root, None, None)
+            .map(|rows| {
+                rows.into_iter()
+                    .map(|row| StoryStateSummary {
+                        subject_type: row.subject_type,
+                        subject_id: row.subject_id,
+                        state_kind: row.state_kind,
+                        payload: row.payload_json,
+                    })
+                    .collect()
+            })
+    }
+
+    pub fn get_promise_context(&self, project_root: &str) -> Result<Vec<String>, AppErrorDto> {
+        let conn = open_database(Path::new(project_root)).map_err(|err| {
+            AppErrorDto::new("DB_OPEN_FAILED", "无法打开项目数据库", false)
+                .with_detail(err.to_string())
+        })?;
+        let project_id = get_project_id(&conn)?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT obligation_type, description, expected_payoff_chapter_id, payoff_status
+                 FROM narrative_obligations
+                 WHERE project_id = ?1
+                   AND (actual_payoff_chapter_id IS NULL OR actual_payoff_chapter_id = '')
+                   AND (payoff_status IS NULL OR payoff_status NOT IN ('fulfilled', 'closed'))
+                 ORDER BY updated_at DESC, created_at DESC
+                 LIMIT 20",
+            )
+            .map_err(|err| {
+                AppErrorDto::new("DB_QUERY_FAILED", "查询叙事义务失败", true)
+                    .with_detail(err.to_string())
+            })?;
+        let rows = stmt
+            .query_map(params![project_id], |row| {
+                let obligation_type = row.get::<_, String>(0)?;
+                let description = row.get::<_, String>(1)?;
+                let expected_payoff_chapter_id = row.get::<_, Option<String>>(2)?;
+                let payoff_status = row.get::<_, Option<String>>(3)?;
+                Ok((
+                    obligation_type,
+                    description,
+                    expected_payoff_chapter_id,
+                    payoff_status,
+                ))
+            })
+            .map_err(|err| {
+                AppErrorDto::new("DB_QUERY_FAILED", "查询叙事义务失败", true)
+                    .with_detail(err.to_string())
+            })?;
+
+        let mut lines = Vec::new();
+        for row in rows {
+            let (obligation_type, description, expected_payoff_chapter_id, payoff_status) = row
+                .map_err(|err| {
+                    AppErrorDto::new("DB_QUERY_FAILED", "查询叙事义务失败", true)
+                        .with_detail(err.to_string())
+                })?;
+            let mut line = format!(
+                "叙事义务[{}]: {}",
+                obligation_type.trim(),
+                preview_text(description.trim(), 180)
+            );
+            if let Some(expected) = expected_payoff_chapter_id {
+                let expected = expected.trim();
+                if !expected.is_empty() {
+                    line.push_str(&format!("；期望兑现章节ID={}", expected));
+                }
+            }
+            if let Some(status) = payoff_status {
+                let status = status.trim();
+                if !status.is_empty() {
+                    line.push_str(&format!("；状态={}", status));
+                }
+            }
+            lines.push(line);
+        }
+
+        Ok(lines)
+    }
+
+    pub fn get_window_plan(
+        &self,
+        project_root: &str,
+        chapter_id: Option<&str>,
+        context: &CollectedContext,
+    ) -> Result<Vec<String>, AppErrorDto> {
+        let chapter_id = chapter_id.map(str::trim).unwrap_or("");
+        if chapter_id.is_empty() {
+            if let Some(chapter) = &context.related_context.chapter {
+                let mut lines = vec![format!(
+                    "当前窗口: 第{}章《{}》",
+                    chapter.chapter_index, chapter.title
+                )];
+                if chapter.target_words > 0 {
+                    lines.push(format!(
+                        "窗口字数目标: {} 字，当前 {} 字",
+                        chapter.target_words, chapter.current_words
+                    ));
+                }
+                if !chapter.summary.trim().is_empty() {
+                    lines.push(format!(
+                        "窗口计划摘要: {}",
+                        preview_text(chapter.summary.trim(), 180)
+                    ));
+                }
+                if let Some(previous) = &context.related_context.previous_chapter_summary {
+                    if !previous.trim().is_empty() {
+                        lines.push(format!("前章承接: {}", preview_text(previous.trim(), 180)));
+                    }
+                }
+                return Ok(lines);
+            }
+            return Ok(Vec::new());
+        }
+
+        let snapshot = ChapterService
+            .get_window_plan_snapshot(project_root, chapter_id)
+            .map_err(|err| {
+                AppErrorDto::new("CONTEXT_COLLECT_FAILED", "查询章节窗口计划失败", true)
+                    .with_detail(format!("{}: {}", err.code, err.message))
+            })?;
+
+        let mut lines = vec![format!(
+            "当前窗口: 第{}章《{}》",
+            snapshot.chapter_index, snapshot.title
+        )];
+        if snapshot.target_words > 0 {
+            lines.push(format!(
+                "窗口字数目标: {} 字，当前 {} 字",
+                snapshot.target_words, snapshot.current_words
+            ));
+        }
+        if !snapshot.summary.trim().is_empty() {
+            lines.push(format!(
+                "窗口计划摘要: {}",
+                preview_text(snapshot.summary.trim(), 180)
+            ));
+        }
+        if let Some(previous) = snapshot.previous_chapter_summary {
+            if !previous.trim().is_empty() {
+                lines.push(format!("前章承接: {}", preview_text(previous.trim(), 180)));
+            }
+        }
+        Ok(lines)
+    }
+
+    pub fn get_recent_continuity(
+        &self,
+        project_root: &str,
+        chapter_id: Option<&str>,
+    ) -> Result<Vec<String>, AppErrorDto> {
+        let conn = open_database(Path::new(project_root)).map_err(|err| {
+            AppErrorDto::new("DB_OPEN_FAILED", "无法打开项目数据库", false)
+                .with_detail(err.to_string())
+        })?;
+        let project_id = get_project_id(&conn)?;
+
+        let chapter_index = if let Some(chapter_id) = chapter_id.map(str::trim) {
+            if chapter_id.is_empty() {
+                None
+            } else {
+                conn.query_row(
+                    "SELECT chapter_index FROM chapters
+                     WHERE id = ?1 AND project_id = ?2 AND is_deleted = 0",
+                    params![chapter_id, &project_id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .optional()
+                .map_err(|err| {
+                    AppErrorDto::new("DB_QUERY_FAILED", "查询近期章节失败", true)
+                        .with_detail(err.to_string())
+                })?
+            }
+        } else {
+            None
+        };
+
+        let max_index = match chapter_index {
+            Some(index) => Some(index),
+            None => conn
+                .query_row(
+                    "SELECT MAX(chapter_index) FROM chapters WHERE project_id = ?1 AND is_deleted = 0",
+                    params![&project_id],
+                    |row| row.get::<_, Option<i64>>(0),
+                )
+                .map_err(|err| {
+                    AppErrorDto::new("DB_QUERY_FAILED", "查询近期章节失败", true)
+                        .with_detail(err.to_string())
+                })?,
+        };
+        let Some(max_index) = max_index else {
+            return Ok(Vec::new());
+        };
+        let min_index = (max_index - 2).max(1);
+
+        let mut stmt = conn
+            .prepare(
+                "SELECT chapter_index, title, summary
+                 FROM chapters
+                 WHERE project_id = ?1
+                   AND is_deleted = 0
+                   AND chapter_index >= ?2
+                   AND chapter_index <= ?3
+                 ORDER BY chapter_index DESC
+                 LIMIT 3",
+            )
+            .map_err(|err| {
+                AppErrorDto::new("DB_QUERY_FAILED", "查询近期章节失败", true)
+                    .with_detail(err.to_string())
+            })?;
+        let rows = stmt
+            .query_map(params![&project_id, min_index, max_index], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+                ))
+            })
+            .map_err(|err| {
+                AppErrorDto::new("DB_QUERY_FAILED", "查询近期章节失败", true)
+                    .with_detail(err.to_string())
+            })?;
+
+        let mut entries = rows.collect::<Result<Vec<_>, _>>().map_err(|err| {
+            AppErrorDto::new("DB_QUERY_FAILED", "查询近期章节失败", true)
+                .with_detail(err.to_string())
+        })?;
+        entries.reverse();
+
+        let mut lines = Vec::new();
+        for (chapter_index, title, summary) in entries {
+            let summary = summary.trim();
+            if summary.is_empty() {
+                lines.push(format!("第{}章《{}》", chapter_index, title));
+            } else {
+                lines.push(format!(
+                    "第{}章《{}》: {}",
+                    chapter_index,
+                    title,
+                    preview_text(summary, 180)
+                ));
+            }
+        }
+        Ok(lines)
     }
 
     /// Apply an extracted candidate into structured assets with chapter linkage.
@@ -2325,6 +2702,18 @@ fn strip_frontmatter(content: &str) -> String {
         return content[(offset + 9)..].trim().to_string();
     }
     content.to_string()
+}
+
+fn preview_text(value: &str, max_chars: usize) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    let chars = trimmed.chars().collect::<Vec<_>>();
+    if chars.len() <= max_chars {
+        return trimmed.to_string();
+    }
+    format!("{}...", chars[..max_chars].iter().collect::<String>())
 }
 
 #[cfg(test)]

@@ -62,6 +62,18 @@ pub struct SaveChapterOutput {
     pub updated_at: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WindowPlanSnapshot {
+    pub chapter_id: String,
+    pub chapter_index: i64,
+    pub title: String,
+    pub summary: String,
+    pub target_words: i64,
+    pub current_words: i64,
+    pub previous_chapter_summary: Option<String>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AutosaveDraftInput {
@@ -391,6 +403,79 @@ impl ChapterService {
             volume_id: None,
             version: 1,
             updated_at: created_at,
+        })
+    }
+
+    pub fn get_window_plan_snapshot(
+        &self,
+        project_root: &str,
+        chapter_id: &str,
+    ) -> Result<WindowPlanSnapshot, AppErrorDto> {
+        let project_root_path = Path::new(project_root);
+        let conn = open_database(project_root_path).map_err(|err| {
+            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false)
+                .with_detail(err.to_string())
+                .with_suggested_action("请检查 database/project.sqlite 是否存在并可读写")
+        })?;
+        let project_id = get_project_id(&conn)?;
+
+        let (current_id, chapter_index, title, summary, target_words, current_words) = conn
+            .query_row(
+                "SELECT id, chapter_index, title, summary, target_words, current_words
+                 FROM chapters
+                 WHERE id = ?1 AND project_id = ?2 AND is_deleted = 0",
+                params![chapter_id, project_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, Option<String>>(3)?.unwrap_or_default(),
+                        row.get::<_, Option<i64>>(4)?.unwrap_or(0),
+                        row.get::<_, Option<i64>>(5)?.unwrap_or(0),
+                    ))
+                },
+            )
+            .optional()
+            .map_err(|err| {
+                AppErrorDto::new("CHAPTER_QUERY_FAILED", "查询章节窗口计划失败", true)
+                    .with_detail(err.to_string())
+            })?
+            .ok_or_else(|| AppErrorDto::new("CHAPTER_NOT_FOUND", "章节不存在", true))?;
+
+        let previous_chapter_summary = if chapter_index > 1 {
+            conn.query_row(
+                "SELECT summary FROM chapters
+                 WHERE project_id = ?1 AND chapter_index = ?2 AND is_deleted = 0",
+                params![project_id, chapter_index - 1],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()
+            .map_err(|err| {
+                AppErrorDto::new("CHAPTER_QUERY_FAILED", "查询章节窗口计划失败", true)
+                    .with_detail(err.to_string())
+            })?
+            .flatten()
+            .and_then(|value| {
+                let trimmed = value.trim().to_string();
+                if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(trimmed)
+                }
+            })
+        } else {
+            None
+        };
+
+        Ok(WindowPlanSnapshot {
+            chapter_id: current_id,
+            chapter_index,
+            title,
+            summary,
+            target_words,
+            current_words,
+            previous_chapter_summary,
         })
     }
 

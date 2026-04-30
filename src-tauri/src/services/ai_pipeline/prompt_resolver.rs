@@ -8,6 +8,7 @@ use rusqlite::params;
 use crate::errors::AppErrorDto;
 use crate::infra::database::open_database;
 use crate::infra::path_utils::resolve_project_relative_path;
+use crate::services::ai_pipeline::continuity_pack::ContinuityPack;
 use crate::services::ai_pipeline_service::RunAiTaskPipelineInput;
 use crate::services::context_service::CollectedContext;
 use crate::services::skill_registry::SkillRegistry;
@@ -52,6 +53,7 @@ impl PromptResolver {
         &self,
         skill_registry: &Arc<RwLock<SkillRegistry>>,
         context: &CollectedContext,
+        continuity_pack: &ContinuityPack,
         canonical_task: &str,
         input: &RunAiTaskPipelineInput,
     ) -> Result<String, AppErrorDto> {
@@ -72,7 +74,8 @@ impl PromptResolver {
             None => return Err(Self::template_not_found_error(canonical_task)),
         };
 
-        let render_context = self.build_render_context(context, canonical_task, input);
+        let render_context =
+            self.build_render_context(context, continuity_pack, canonical_task, input);
         Self::validate_required_inputs(canonical_task, &render_context)?;
         Self::render_template(canonical_task, &template, &render_context)
     }
@@ -106,6 +109,7 @@ impl PromptResolver {
     fn build_render_context(
         &self,
         context: &CollectedContext,
+        continuity_pack: &ContinuityPack,
         canonical_task: &str,
         input: &RunAiTaskPipelineInput,
     ) -> PromptRenderContext {
@@ -118,8 +122,8 @@ impl PromptResolver {
         } else {
             selected_text.clone()
         };
-        let chapter_context = Self::chapter_context_to_string(context);
-        let project_context = Self::context_to_string(context);
+        let project_context = Self::continuity_pack_to_project_context(continuity_pack);
+        let chapter_context = Self::continuity_pack_to_chapter_context(continuity_pack);
         let target_words = context
             .related_context
             .chapter
@@ -155,6 +159,51 @@ impl PromptResolver {
         render.set_task_meta("uiAction", normalize_optional(input.ui_action.as_deref()));
 
         render
+    }
+
+    fn continuity_pack_to_project_context(pack: &ContinuityPack) -> String {
+        let mut parts = Vec::new();
+        Self::push_context_section(
+            &mut parts,
+            "Constitution Context",
+            &pack.constitution_context,
+        );
+        Self::push_context_section(&mut parts, "Canon Context", &pack.canon_context);
+        Self::push_context_section(
+            &mut parts,
+            "Lexicon Policy Context",
+            &pack.lexicon_policy_context,
+        );
+        Self::push_context_section(&mut parts, "Promise Context", &pack.promise_context);
+        if parts.is_empty() {
+            String::new()
+        } else {
+            parts.join("\n")
+        }
+    }
+
+    fn continuity_pack_to_chapter_context(pack: &ContinuityPack) -> String {
+        let mut parts = Vec::new();
+        Self::push_context_section(&mut parts, "State Context", &pack.state_context);
+        Self::push_context_section(&mut parts, "Window Plan Context", &pack.window_plan_context);
+        Self::push_context_section(
+            &mut parts,
+            "Recent Continuity Context",
+            &pack.recent_continuity_context,
+        );
+        if parts.is_empty() {
+            String::new()
+        } else {
+            parts.join("\n")
+        }
+    }
+
+    fn push_context_section(parts: &mut Vec<String>, heading: &str, lines: &[String]) {
+        if lines.is_empty() {
+            return;
+        }
+        parts.push(format!("## {}", heading));
+        parts.extend(lines.iter().cloned());
     }
 
     // 问题1修复: 缺参硬校验，避免关键输入为空仍静默放行。
@@ -269,101 +318,6 @@ impl PromptResolver {
             .as_ref()
             .map(|chapter| chapter.summary.trim().to_string())
             .unwrap_or_default()
-    }
-
-    pub fn context_to_string(context: &CollectedContext) -> String {
-        let global = &context.global_context;
-        let related = &context.related_context;
-        let mut parts = vec![];
-
-        parts.push(format!("作品名称：{}", global.project_name));
-        parts.push(format!("题材：{}", global.genre));
-        if let Some(ref pov) = global.narrative_pov {
-            parts.push(format!("叙事视角：{}", pov));
-        }
-        if let Some(ref style) = global.writing_style {
-            parts.push(format!(
-                "写作风格：语言={}、描写密度={}、对话比例={}、句式节奏={}、氛围={}、心理深度={}",
-                style.language_style,
-                style.description_density,
-                style.dialogue_ratio,
-                style.sentence_rhythm,
-                style.atmosphere,
-                style.psychological_depth
-            ));
-        }
-        for step in &global.blueprint_summary {
-            if step.status == "completed" {
-                if let Some(ref content) = step.content {
-                    let preview: String = content.chars().take(200).collect();
-                    parts.push(format!("[蓝图] {}: {}", step.title, preview));
-                }
-            }
-        }
-        if let Some(ref ch) = related.chapter {
-            parts.push(format!(
-                "当前章节：{}（序号{}，目标{}字，当前{}字）",
-                ch.title, ch.chapter_index, ch.target_words, ch.current_words
-            ));
-            if !ch.summary.is_empty() {
-                parts.push(format!("当前章节摘要：{}", ch.summary));
-            }
-        }
-        if let Some(ref prev) = related.previous_chapter_summary {
-            if !prev.trim().is_empty() {
-                parts.push(format!("前章摘要：{}", prev.trim()));
-            }
-        }
-        for node in &related.plot_nodes {
-            parts.push(format!("剧情节点：{}", node.title));
-        }
-        for ch in &related.characters {
-            parts.push(format!("角色：{}", ch.name));
-        }
-        for edge in &related.relationship_edges {
-            let mut line = format!(
-                "关系：{} -> {} [{}]",
-                edge.source_name, edge.target_name, edge.relationship_type
-            );
-            if let Some(ref description) = edge.description {
-                if !description.trim().is_empty() {
-                    line.push_str(&format!("：{}", description.trim()));
-                }
-            }
-            parts.push(line);
-        }
-        for rule in &related.world_rules {
-            let preview: String = rule.description.chars().take(120).collect();
-            parts.push(format!("世界规则：{}", preview));
-        }
-        parts.join("\n")
-    }
-
-    fn chapter_context_to_string(context: &CollectedContext) -> String {
-        let related = &context.related_context;
-        let mut parts = Vec::new();
-
-        if let Some(ref chapter) = related.chapter {
-            parts.push(format!("标题：{}", chapter.title));
-            parts.push(format!("章节序号：{}", chapter.chapter_index));
-            parts.push(format!("目标字数：{}", chapter.target_words));
-            parts.push(format!("当前字数：{}", chapter.current_words));
-            if !chapter.summary.trim().is_empty() {
-                parts.push(format!("摘要：{}", chapter.summary.trim()));
-            }
-        }
-
-        if let Some(ref prev) = related.previous_chapter_summary {
-            if !prev.trim().is_empty() {
-                parts.push(format!("前章摘要：{}", prev.trim()));
-            }
-        }
-
-        if parts.is_empty() {
-            String::new()
-        } else {
-            parts.join("\n")
-        }
     }
 
     pub fn requires_global_only_context(task_type: &str) -> bool {
@@ -517,6 +471,7 @@ mod tests {
     use uuid::Uuid;
 
     use super::*;
+    use crate::services::ai_pipeline::continuity_pack::ContinuityPack;
     use crate::services::context_service::{
         BlueprintStepSummary, ChapterSummary, CollectedContext, GlobalContext, RelatedContext,
     };
@@ -718,12 +673,13 @@ mod tests {
     fn all_core_tasks_render_without_unresolved_placeholders() {
         let resolver = PromptResolver;
         let context = sample_context();
+        let continuity_pack = ContinuityPack::default();
         let registry = create_registry_with_builtin_templates();
 
         for task in CORE_TASK_ROUTE_TYPES {
             let input = sample_input(task);
             let rendered = resolver
-                .resolve_or_build_prompt(&registry, &context, task, &input)
+                .resolve_or_build_prompt(&registry, &context, &continuity_pack, task, &input)
                 .unwrap_or_else(|err| {
                     panic!("task {} render failed: {} {}", task, err.code, err.message)
                 });
@@ -745,6 +701,7 @@ mod tests {
     fn missing_required_input_returns_missing_required_input() {
         let resolver = PromptResolver;
         let context = sample_context();
+        let continuity_pack = ContinuityPack::default();
         let registry = create_registry_with_builtin_templates();
 
         let input = RunAiTaskPipelineInput {
@@ -763,7 +720,13 @@ mod tests {
         };
 
         let err = resolver
-            .resolve_or_build_prompt(&registry, &context, "character.create", &input)
+            .resolve_or_build_prompt(
+                &registry,
+                &context,
+                &continuity_pack,
+                "character.create",
+                &input,
+            )
             .expect_err("should reject missing userDescription");
         assert_eq!(err.code, "MISSING_REQUIRED_INPUT");
     }
@@ -772,11 +735,18 @@ mod tests {
     fn unknown_task_returns_prompt_template_not_found() {
         let resolver = PromptResolver;
         let context = sample_context();
+        let continuity_pack = ContinuityPack::default();
         let registry = create_registry_with_builtin_templates();
         let input = sample_input("chapter.draft");
 
         let err = resolver
-            .resolve_or_build_prompt(&registry, &context, "unknown.task", &input)
+            .resolve_or_build_prompt(
+                &registry,
+                &context,
+                &continuity_pack,
+                "unknown.task",
+                &input,
+            )
             .expect_err("unknown task must fail");
         assert_eq!(err.code, "PROMPT_TEMPLATE_NOT_FOUND");
     }
@@ -785,6 +755,7 @@ mod tests {
     fn custom_task_uses_fallback_when_template_missing() {
         let resolver = PromptResolver;
         let context = sample_context();
+        let continuity_pack = ContinuityPack::default();
         let registry = create_registry_with_builtin_templates();
         let input = sample_input("custom");
 
@@ -800,11 +771,42 @@ mod tests {
         }
 
         let rendered = resolver
-            .resolve_or_build_prompt(&registry, &context, "custom", &input)
+            .resolve_or_build_prompt(&registry, &context, &continuity_pack, "custom", &input)
             .expect("custom should fallback instead of failing");
 
         assert!(rendered.contains("专业的创意写作助手"));
         assert!(rendered.contains("用户请求："));
         assert!(!rendered.contains("{customUserQuery}"));
+    }
+
+    #[test]
+    fn continuity_pack_includes_lexicon_policy() {
+        let resolver = PromptResolver;
+        let context = sample_context();
+        let registry = create_registry_with_builtin_templates();
+        let input = sample_input("chapter.draft");
+        let continuity_pack = ContinuityPack {
+            constitution_context: vec!["作品名称: 长夜行舟".to_string()],
+            canon_context: Vec::new(),
+            lexicon_policy_context: vec!["锁定术语: 灵火".to_string(), "禁用词: 然而".to_string()],
+            state_context: Vec::new(),
+            promise_context: Vec::new(),
+            window_plan_context: Vec::new(),
+            recent_continuity_context: Vec::new(),
+        };
+
+        let rendered = resolver
+            .resolve_or_build_prompt(
+                &registry,
+                &context,
+                &continuity_pack,
+                "chapter.draft",
+                &input,
+            )
+            .expect("render should include continuity sections");
+
+        assert!(rendered.contains("Lexicon Policy Context"));
+        assert!(rendered.contains("锁定术语: 灵火"));
+        assert!(rendered.contains("禁用词: 然而"));
     }
 }

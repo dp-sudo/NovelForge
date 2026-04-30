@@ -5,6 +5,7 @@ use serde_json::json;
 use crate::adapters::llm_types::{ContentBlock, Message, UnifiedGenerateRequest};
 use crate::errors::AppErrorDto;
 use crate::services::ai_pipeline::audit_store::PipelineAuditStore;
+use crate::services::ai_pipeline::continuity_pack::ContinuityPackCompiler;
 use crate::services::ai_pipeline::prompt_resolver::PromptResolver;
 use crate::services::ai_pipeline::task_handlers::TaskHandlers;
 use crate::services::ai_pipeline_service::{
@@ -12,6 +13,7 @@ use crate::services::ai_pipeline_service::{
 };
 use crate::services::ai_service::{AiService, TaskRouteResolution};
 use crate::services::context_service::ContextService;
+use crate::services::project_service::ProjectService;
 use crate::services::skill_registry::SkillRegistry;
 
 pub const PHASE_VALIDATE: &str = "validate";
@@ -175,6 +177,16 @@ impl<'a> PipelineOrchestrator<'a> {
                 error: err,
             })?;
 
+        let continuity_depth = self.resolve_continuity_pack_depth();
+        let continuity_pack = ContinuityPackCompiler::default().compile(
+            &self.input.project_root,
+            self.canonical_task,
+            &continuity_depth,
+            &context,
+            self.context_service,
+            self.input.chapter_id.as_deref(),
+        );
+
         self.audit_store.touch_pipeline_phase(
             &self.input.project_root,
             self.request_id,
@@ -190,7 +202,9 @@ impl<'a> PipelineOrchestrator<'a> {
                 error_code: None,
                 message: Some("building prompt".to_string()),
                 recoverable: None,
-                meta: None,
+                meta: Some(json!({
+                    "continuityDepth": continuity_depth,
+                })),
             },
         );
         let prompt = self
@@ -198,6 +212,7 @@ impl<'a> PipelineOrchestrator<'a> {
             .resolve_or_build_prompt(
                 self.skill_registry,
                 &context,
+                &continuity_pack,
                 self.canonical_task,
                 self.input,
             )
@@ -532,5 +547,20 @@ impl<'a> PipelineOrchestrator<'a> {
             ));
         }
         Ok(normalized)
+    }
+
+    fn resolve_continuity_pack_depth(&self) -> String {
+        match ProjectService.get_ai_strategy_profile(&self.input.project_root) {
+            Ok(profile) => profile.continuity_pack_depth,
+            Err(err) => {
+                log::warn!(
+                    "[CONTINUITY_PACK] failed to load ai strategy profile for {}: {} {}",
+                    self.input.project_root,
+                    err.code,
+                    err.message
+                );
+                "standard".to_string()
+            }
+        }
     }
 }
