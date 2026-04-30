@@ -14,6 +14,7 @@ use crate::infra::path_utils::{
 };
 use crate::infra::time::now_iso;
 use crate::services::project_service::get_project_id;
+use crate::services::story_state_service::StoryStateService;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -480,6 +481,13 @@ impl ChapterService {
 
         let draft_path = draft_path_from_content(project_root_path, &chapter_row.content_path)?;
         let _ = fs::remove_file(draft_path);
+
+        StoryStateService::default().record_window_progress(
+            project_root,
+            chapter_id,
+            chapter_row.chapter_index,
+            current_words,
+        )?;
 
         Ok(SaveChapterOutput {
             current_words,
@@ -1194,9 +1202,11 @@ mod tests {
     use std::thread::sleep;
     use std::time::Duration;
 
+    use rusqlite::params;
     use uuid::Uuid;
 
     use super::{ChapterInput, ChapterService};
+    use crate::infra::database::open_database;
     use crate::services::project_service::{CreateProjectInput, ProjectService};
 
     fn create_temp_workspace() -> PathBuf {
@@ -1243,6 +1253,20 @@ mod tests {
             .expect("save content");
         assert_eq!(save.version, 2);
         assert!(save.current_words > 0);
+        let conn = open_database(std::path::Path::new(&project.project_root)).expect("open db");
+        let state_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM story_state
+                 WHERE subject_type = 'window'
+                   AND subject_id = 'current_window'
+                   AND state_kind = 'progress'
+                   AND source_chapter_id = ?1
+                   AND status = 'active'",
+                params![&chapter.id],
+                |row| row.get(0),
+            )
+            .expect("query story state count");
+        assert_eq!(state_count, 1);
 
         remove_temp_workspace(&workspace);
     }

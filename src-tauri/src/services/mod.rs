@@ -21,6 +21,7 @@ pub mod project_service;
 pub mod search_service;
 pub mod settings_service;
 pub mod skill_registry;
+pub mod story_state_service;
 pub mod task_routing;
 pub mod vector_service;
 pub mod world_service;

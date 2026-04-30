@@ -1179,6 +1179,103 @@ git commit -m "feat: add rolling blueprint and derived review loop"
 
 ---
 
+### Task 9.5: 明确 chapter-plan 章节选择策略并补齐手动来源落库
+
+**Files:**
+- Modify: `src/pages/Blueprint/BlueprintPage.tsx`
+- Modify: `src/api/bookPipelineApi.ts`
+- Modify: `src-tauri/src/services/character_service.rs`
+- Modify: `src-tauri/src/services/world_service.rs`
+- Modify: `src-tauri/src/services/plot_service.rs`
+- Modify: `src-tauri/src/services/glossary_service.rs`
+- Modify: `src-tauri/src/services/narrative_service.rs`
+- Test: `tests/integration/book-pipeline-orchestration.test.ts`
+- Test: `tests/integration/runtime-chain-full.test.ts`
+- Test: `src-tauri/src/services/context_service.rs`
+
+- [ ] **Step 1: 写失败测试，锁定 chapter-plan 与手动 provenance 契约**
+
+```ts
+test("蓝图晋升契约：chapter-plan 存在显式 chapterId 解析策略", async () => {
+  const page = await fs.readFile(path.join(process.cwd(), "src/pages/Blueprint/BlueprintPage.tsx"), "utf8");
+  assert.match(page, /resolvePromotionChapterId/);
+  assert.match(page, /请选择章节以生成章节计划/);
+});
+
+test("来源契约：手动 CRUD 服务写入 user_input provenance", async () => {
+  const files = [
+    "src-tauri/src/services/character_service.rs",
+    "src-tauri/src/services/world_service.rs",
+    "src-tauri/src/services/plot_service.rs",
+    "src-tauri/src/services/glossary_service.rs",
+    "src-tauri/src/services/narrative_service.rs",
+  ];
+  for (const file of files) {
+    const raw = await fs.readFile(path.join(process.cwd(), file), "utf8");
+    assert.match(raw, /entity_provenance/);
+    assert.match(raw, /user_input/);
+  }
+});
+```
+
+- [ ] **Step 2: 运行测试，确认当前实现仍缺口**
+
+Run:
+```powershell
+node --import tsx --test tests/integration/book-pipeline-orchestration.test.ts tests/integration/runtime-chain-full.test.ts
+```
+
+Expected:
+```text
+not ok - 蓝图晋升契约：chapter-plan 存在显式 chapterId 解析策略
+```
+
+- [ ] **Step 3: 在蓝图晋升入口定义 chapterId 解析策略**
+
+策略顺序（只用于 `chapter-plan`）：
+1. 用户在蓝图页显式选择章节（首选）
+2. 当前活动章节（若存在）
+3. `listChapters` 后按 `chapterIndex` 选择第一个可规划章节
+4. 若仍为空：跳过 `chapter-plan`，显示提示，不阻断其他晋升步骤
+
+实现约束：
+- `buildPromotionStages` 仅在拿到 `chapterId` 时追加 `chapter-plan`
+- UI 提示必须可见，避免静默失败
+
+- [ ] **Step 4: 在手动 CRUD 服务统一写入 provenance(user_input)**
+
+实现约束：
+- 触发范围：`character/world/plot/glossary/narrative` 的手动创建（必要时覆盖手动关键更新）
+- 写入表：`entity_provenance`
+- 固定来源：`source_kind = "user_input"`
+- `source_ref` 建议格式：`manual_crud:<entity_type>:<action>`
+- 不改 AI pipeline 既有来源写入逻辑，避免双写冲突
+
+- [ ] **Step 5: 运行验证**
+
+Run:
+```powershell
+node --import tsx --test tests/integration/book-pipeline-orchestration.test.ts tests/integration/runtime-chain-full.test.ts
+cargo test collect_editor_context_exposes_provenance_and_defaults_to_user_input -- --exact
+npm run typecheck:web
+```
+
+Expected:
+```text
+ok
+collect_editor_context_exposes_provenance_and_defaults_to_user_input
+Found 0 errors.
+```
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add src/pages/Blueprint/BlueprintPage.tsx src/api/bookPipelineApi.ts src-tauri/src/services/character_service.rs src-tauri/src/services/world_service.rs src-tauri/src/services/plot_service.rs src-tauri/src/services/glossary_service.rs src-tauri/src/services/narrative_service.rs tests/integration/book-pipeline-orchestration.test.ts tests/integration/runtime-chain-full.test.ts src-tauri/src/services/context_service.rs
+git commit -m "feat: define chapter-plan chapter selection and persist manual provenance"
+```
+
+---
+
 ### Task 10: 文档同步与全链路验证
 
 **Files:**
@@ -1246,6 +1343,7 @@ git commit -m "docs: sync ai production system architecture"
 - Continuity Pack：Task 6
 - Skill manifest / API / UI / runtime：Task 7, Task 8
 - 长篇滚动蓝图与派生审阅层：Task 9
+- `chapter-plan` 章节选择策略 + 手动来源落库：Task 9.5
 - 文档同步：Task 10
 
 无 spec 章节遗漏。

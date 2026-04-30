@@ -13,6 +13,7 @@ use crate::infra::path_utils::resolve_project_relative_path;
 use crate::infra::time::now_iso;
 use crate::services::import_service::{extract_asset_candidates, AssetExtractionCandidate};
 use crate::services::project_service::{get_project_id, WritingStyle};
+use crate::services::story_state_service::StoryStateService;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -157,6 +158,15 @@ pub struct EditorChapterContext {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct StoryStateSummary {
+    pub subject_type: String,
+    pub subject_id: String,
+    pub state_kind: String,
+    pub payload: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct EditorContextPanel {
     pub chapter: EditorChapterContext,
     pub characters: Vec<CharacterSummary>,
@@ -169,6 +179,7 @@ pub struct EditorContextPanel {
     pub involvement_drafts: Vec<InvolvementDraft>,
     pub scene_drafts: Vec<SceneDraft>,
     pub previous_chapter_summary: Option<String>,
+    pub state_summary: Vec<StoryStateSummary>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -358,6 +369,16 @@ impl ContextService {
         )?;
         let (relationship_drafts, involvement_drafts, scene_drafts) =
             self.load_structured_draft_pool(&conn, &project_id, chapter_id)?;
+        let state_summary = StoryStateService::default()
+            .list_chapter_states(project_root, chapter_id)?
+            .into_iter()
+            .map(|row| StoryStateSummary {
+                subject_type: row.subject_type,
+                subject_id: row.subject_id,
+                state_kind: row.state_kind,
+                payload: row.payload_json,
+            })
+            .collect();
 
         Ok(EditorContextPanel {
             chapter: EditorChapterContext {
@@ -378,6 +399,7 @@ impl ContextService {
             involvement_drafts,
             scene_drafts,
             previous_chapter_summary: related.previous_chapter_summary,
+            state_summary,
         })
     }
 
@@ -2653,8 +2675,71 @@ mod tests {
             .find(|item| item.id == applied.target_id)
             .expect("character in panel");
         assert_eq!(character_after.source_kind, "manual_promotion");
-        assert_eq!(character_after.source_ref.as_deref(), Some("blueprint-step-04"));
+        assert_eq!(
+            character_after.source_ref.as_deref(),
+            Some("blueprint-step-04")
+        );
         assert_eq!(character_after.source_request_id.as_deref(), Some("req-1"));
+
+        remove_temp_workspace(&workspace);
+    }
+
+    #[test]
+    fn editor_context_includes_state_summary() {
+        let workspace = create_temp_workspace();
+        let project_service = ProjectService;
+        let chapter_service = ChapterService;
+        let context_service = ContextService;
+
+        let project = project_service
+            .create_project(CreateProjectInput {
+                name: "状态摘要测试".to_string(),
+                author: None,
+                genre: "测试".to_string(),
+                target_words: None,
+                save_directory: workspace.to_string_lossy().to_string(),
+            })
+            .expect("project created");
+        let chapter = chapter_service
+            .create_chapter(
+                &project.project_root,
+                ChapterInput {
+                    title: "第一章".to_string(),
+                    summary: None,
+                    target_words: None,
+                    status: None,
+                },
+            )
+            .expect("chapter created");
+        chapter_service
+            .save_chapter_content(&project.project_root, &chapter.id, "夜潮降临，风声渐急。")
+            .expect("save content");
+
+        let panel = context_service
+            .collect_editor_context(&project.project_root, &chapter.id)
+            .expect("collect context");
+        assert!(!panel.state_summary.is_empty());
+        let window_state = panel
+            .state_summary
+            .iter()
+            .find(|item| item.subject_type == "window" && item.state_kind == "progress")
+            .expect("window progress state");
+        assert_eq!(window_state.subject_id, "current_window");
+        assert_eq!(
+            window_state
+                .payload
+                .get("chapterId")
+                .and_then(|value| value.as_str()),
+            Some(chapter.id.as_str())
+        );
+        assert!(
+            window_state
+                .payload
+                .get("wordCount")
+                .and_then(|value| value.as_i64())
+                .unwrap_or_default()
+                > 0
+        );
 
         remove_temp_workspace(&workspace);
     }

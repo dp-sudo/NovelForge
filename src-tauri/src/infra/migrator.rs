@@ -52,6 +52,10 @@ fn project_migrations() -> Vec<Migration> {
             version: "0005_entity_provenance",
             sql: include_str!("../../migrations/project/0005_entity_provenance.sql"),
         },
+        Migration {
+            version: "0006_story_state",
+            sql: include_str!("../../migrations/project/0006_story_state.sql"),
+        },
     ]
 }
 
@@ -448,6 +452,7 @@ mod tests {
         assert!(has_table(&conn, "ai_pipeline_runs"));
         assert!(has_table(&conn, "structured_draft_batches"));
         assert!(has_table(&conn, "structured_draft_items"));
+        assert!(has_table(&conn, "story_state"));
         assert!(has_index(
             &conn,
             "structured_draft_items",
@@ -463,6 +468,7 @@ mod tests {
             "structured_draft_items",
             "ux_sdi_project_kind_key_pending"
         ));
+        assert!(has_index(&conn, "story_state", "idx_story_state_lookup"));
 
         conn.execute(
             "INSERT INTO ai_pipeline_runs(

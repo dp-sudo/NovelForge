@@ -170,12 +170,14 @@ export function EditorPage() {
     setVolumes(volumeRows);
   }, [projectRoot]);
 
-  const refreshChapterContext = useCallback(async (root: string, cid: string) => {
+  const refreshChapterContext = useCallback(async (root: string, cid: string): Promise<ChapterContext | null> => {
     try {
       const ctx = await getChapterContext(root, cid);
       setContext(ctx);
+      return ctx;
     } catch {
       setContext(null);
+      return null;
     }
   }, []);
 
@@ -370,13 +372,20 @@ export function EditorPage() {
   async function handleSave() {
     if (!chapterId || !projectRoot) return;
     store.setSaveStatus("saving");
+    const previousStateSignature = JSON.stringify(context?.stateSummary ?? []);
     try {
       const result = await saveChapterContent(chapterId, content, projectRoot);
       store.setSaveStatus("saved");
       store.setLastSavedAt(result.updatedAt);
       store.setIsDirty(false);
       await load();
-      await refreshChapterContext(projectRoot, chapterId);
+      const nextContext = await refreshChapterContext(projectRoot, chapterId);
+      if (nextContext) {
+        const nextStateSignature = JSON.stringify(nextContext.stateSummary);
+        if (nextStateSignature !== previousStateSignature) {
+          setEditorNotice(`状态账本已更新：${nextContext.stateSummary.length} 条摘要`);
+        }
+      }
       setCandidateStatus({});
       setStructuredDraftStatus({});
     } catch {
@@ -1282,10 +1291,21 @@ export function EditorPage() {
                   <div>目标字数: {context.chapter.targetWords.toLocaleString()}</div>
                   <div>当前字数: {context.chapter.currentWords.toLocaleString()}</div>
                   <div>状态: {context.chapter.status}</div>
+                  <div>状态账本摘要: {context.stateSummary.length}</div>
                   {context.previousChapterSummary && (
                     <div className="mt-2">
                       <div className="text-surface-500 mb-1">前章摘要:</div>
                       <div className="text-surface-400">{context.previousChapterSummary.slice(0, 100)}</div>
+                    </div>
+                  )}
+                  {context.stateSummary.length > 0 && (
+                    <div className="mt-2">
+                      <div className="text-surface-500 mb-1">最新状态:</div>
+                      {context.stateSummary.slice(0, 3).map((item, index) => (
+                        <div key={`${item.subjectType}:${item.subjectId}:${item.stateKind}:${index}`} className="text-surface-400">
+                          {item.subjectType}/{item.subjectId} · {item.stateKind}
+                        </div>
+                      ))}
                     </div>
                   )}
                 </div>

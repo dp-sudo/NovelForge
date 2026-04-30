@@ -92,6 +92,12 @@ export interface ChapterContext {
     evidence: string;
   }>;
   previousChapterSummary: string | null;
+  stateSummary: Array<{
+    subjectType: string;
+    subjectId: string;
+    stateKind: string;
+    payload: Record<string, unknown>;
+  }>;
 }
 
 export async function getChapterContext(projectRoot: string, chapterId: string): Promise<ChapterContext> {
