@@ -52,7 +52,7 @@ fn resolve_builtin_skills_dir(app: &tauri::App) -> PathBuf {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .setup(|app| {
             // ── Logging: stdout with Debug level ──
             // File logging is handled by infra::logger::log_to_file() for key events
@@ -109,7 +109,16 @@ pub fn run() {
             // ══ 2. Deferred provider preload (state is now safe to access) ══
             let ai_service = app.state::<AppState>().ai_service.clone();
             std::thread::spawn(move || {
-                let rt = tokio::runtime::Runtime::new().unwrap();
+                let rt = match tokio::runtime::Runtime::new() {
+                    Ok(rt) => rt,
+                    Err(err) => {
+                        log::error!(
+                            "[PRELOAD] Failed to create tokio runtime for deferred preload: {}",
+                            err
+                        );
+                        return;
+                    }
+                };
                 rt.block_on(async move {
                     tokio::time::sleep(std::time::Duration::from_secs(3)).await;
                     match crate::infra::app_database::open_or_create() {
@@ -191,6 +200,7 @@ pub fn run() {
             commands::settings_commands::activate_license,
             commands::settings_commands::check_app_update,
             commands::settings_commands::install_app_update,
+            commands::settings_commands::get_deprecated_command_usage_report,
             commands::settings_commands::save_provider,
             commands::settings_commands::load_provider,
             commands::settings_commands::delete_provider,
@@ -250,7 +260,9 @@ pub fn run() {
             commands::import_commands::create_backup,
             commands::import_commands::list_backups,
             commands::import_commands::restore_backup,
-        ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        ]);
+
+    if let Err(err) = app.run(tauri::generate_context!()) {
+        eprintln!("failed to run tauri application: {}", err);
+    }
 }

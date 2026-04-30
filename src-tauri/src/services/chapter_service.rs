@@ -906,7 +906,7 @@ fn load_chapter_links_for_frontmatter(
     let mut stmt = conn
         .prepare("SELECT target_type, target_id FROM chapter_links WHERE chapter_id = ?1")
         .map_err(|e| {
-            AppErrorDto::new("DB_READ_FAILED", "Cannot read chapter links", true)
+            AppErrorDto::new("DB_READ_FAILED", "无法读取章节关联", true)
                 .with_detail(e.to_string())
         })?;
 
@@ -915,7 +915,7 @@ fn load_chapter_links_for_frontmatter(
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         })
         .map_err(|e| {
-            AppErrorDto::new("DB_READ_FAILED", "Cannot read chapter links", true)
+            AppErrorDto::new("DB_READ_FAILED", "无法读取章节关联", true)
                 .with_detail(e.to_string())
         })?;
 
@@ -925,7 +925,7 @@ fn load_chapter_links_for_frontmatter(
 
     for row in rows {
         let (ty, id) = row.map_err(|e| {
-            AppErrorDto::new("DB_READ_FAILED", "Cannot read chapter link row", true)
+            AppErrorDto::new("DB_READ_FAILED", "无法读取章节关联记录", true)
                 .with_detail(e.to_string())
         })?;
         match ty.as_str() {
@@ -1573,3 +1573,4 @@ mod tests {
         remove_temp_workspace(&workspace);
     }
 }
+

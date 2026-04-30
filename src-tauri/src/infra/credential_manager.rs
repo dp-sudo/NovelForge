@@ -77,7 +77,7 @@ fn delete_from_keyring(provider_id: &str) -> Result<(), AppErrorDto> {
     let entry = keyring::Entry::new(KEYRING_SERVICE, provider_id).map_err(|e| {
         AppErrorDto::new(
             "SECRET_SERVICE_ERROR",
-            "Cannot access credential store",
+            "无法访问凭据存储",
             true,
         )
         .with_detail(e.to_string())
@@ -85,7 +85,7 @@ fn delete_from_keyring(provider_id: &str) -> Result<(), AppErrorDto> {
     match entry.delete_credential() {
         Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
         Err(e) => Err(
-            AppErrorDto::new("SECRET_DELETE_FAILED", "Cannot delete API key", true)
+            AppErrorDto::new("SECRET_DELETE_FAILED", "无法删除 API 密钥", true)
                 .with_detail(e.to_string()),
         ),
     }
@@ -98,14 +98,14 @@ fn save_fallback_secret(provider_id: &str, api_key: &str) -> Result<(), AppError
         fs::create_dir_all(parent).map_err(|err| {
             AppErrorDto::new(
                 "SECRET_SAVE_FAILED",
-                "Cannot create local secret directory",
+                "无法创建本地密钥目录",
                 true,
             )
             .with_detail(err.to_string())
         })?;
     }
     crate::infra::fs_utils::write_file_atomic(&target, &encrypted).map_err(|err| {
-        AppErrorDto::new("SECRET_SAVE_FAILED", "Cannot save API key", true)
+        AppErrorDto::new("SECRET_SAVE_FAILED", "无法保存 API 密钥", true)
             .with_detail(err.to_string())
     })
 }
@@ -116,11 +116,11 @@ fn load_fallback_secret(provider_id: &str) -> Result<Option<String>, AppErrorDto
         return Ok(None);
     }
     let payload = fs::read_to_string(&path).map_err(|err| {
-        AppErrorDto::new("SECRET_LOAD_FAILED", "Cannot load API key", true)
+        AppErrorDto::new("SECRET_LOAD_FAILED", "无法读取 API 密钥", true)
             .with_detail(err.to_string())
     })?;
     crypto::decrypt(payload.trim()).map(Some).map_err(|err| {
-        AppErrorDto::new("SECRET_LOAD_FAILED", "Cannot load API key", true).with_detail(err.message)
+        AppErrorDto::new("SECRET_LOAD_FAILED", "无法读取 API 密钥", true).with_detail(err.message)
     })
 }
 
@@ -130,7 +130,7 @@ fn delete_fallback_secret(provider_id: &str) -> Result<(), AppErrorDto> {
         return Ok(());
     }
     fs::remove_file(path).map_err(|err| {
-        AppErrorDto::new("SECRET_DELETE_FAILED", "Cannot delete API key", true)
+        AppErrorDto::new("SECRET_DELETE_FAILED", "无法删除 API 密钥", true)
             .with_detail(err.to_string())
     })
 }
@@ -140,7 +140,7 @@ fn fallback_secret_file_path(provider_id: &str) -> Result<PathBuf, AppErrorDto> 
     if provider_component.is_empty() {
         return Err(AppErrorDto::new(
             "SECRET_PROVIDER_INVALID",
-            "Provider id cannot be empty",
+            "供应商ID不能为空",
             true,
         ));
     }
@@ -202,3 +202,4 @@ mod tests {
         assert!(path.ends_with(Path::new(".._provider.secret")));
     }
 }
+

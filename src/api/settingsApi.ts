@@ -60,6 +60,12 @@ export interface AppUpdateInfo {
   date?: string;
 }
 
+export interface DeprecatedCommandUsageEntry {
+  command: string;
+  source: string;
+  count: number;
+}
+
 // ── Provider config ──
 
 export async function listProviders(): Promise<LlmProviderConfig[]> {
@@ -212,4 +218,8 @@ export async function checkAppUpdate(): Promise<AppUpdateInfo> {
 
 export async function installAppUpdate(): Promise<AppUpdateInfo> {
   return invokeCommand<AppUpdateInfo>("install_app_update");
+}
+
+export async function getDeprecatedCommandUsageReport(): Promise<DeprecatedCommandUsageEntry[]> {
+  return invokeCommand<DeprecatedCommandUsageEntry[]>("get_deprecated_command_usage_report");
 }

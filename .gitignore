@@ -140,6 +140,7 @@ database/*.sqlite-wal
 
 # OMC state files
 .omc/**
+.omx
 !.omc/.gitkeep
 
 # Session logs

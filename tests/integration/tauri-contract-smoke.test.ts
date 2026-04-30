@@ -105,6 +105,7 @@ test("问题6契约验证：compatibility-only 命令从强制注册约束解绑
   const libRs = await readRepoFile("src-tauri/src/lib.rs");
   const settingsCommands = await readRepoFile("src-tauri/src/commands/settings_commands.rs");
   const aiCommands = await readRepoFile("src-tauri/src/commands/ai_commands.rs");
+  const loggerInfra = await readRepoFile("src-tauri/src/infra/logger.rs");
   const apiDoc = await readRepoFile("docs/api/api-integration-spec.md");
 
   const deprecatedCommands = [
@@ -128,6 +129,13 @@ test("问题6契约验证：compatibility-only 命令从强制注册约束解绑
   assert.match(settingsCommands, /\[DEPRECATED_COMMAND\] save_provider_config is compatibility-only/);
   assert.match(aiCommands, /\[DEPRECATED_COMMAND\] register_ai_provider is compatibility-only/);
   assert.match(aiCommands, /\[DEPRECATED_COMMAND\] test_ai_connection is compatibility-only/);
+  assert.match(loggerInfra, /\[DEPRECATED_COMMAND_USAGE\] command=\{\} source=\{\} count=\{\}/);
+  assert.match(settingsCommands, /record_deprecated_command_usage\(command,\s*src\)/);
+  assert.match(settingsCommands, /log_deprecated_command\(DEPRECATED_LOAD_PROVIDER_LOG,\s*"load_provider"/);
+  assert.match(settingsCommands, /DEPRECATED_LOAD_PROVIDER_CONFIG_LOG,\s*"load_provider_config"/);
+  assert.match(settingsCommands, /DEPRECATED_SAVE_PROVIDER_CONFIG_LOG,\s*"save_provider_config"/);
+  assert.match(aiCommands, /record_deprecated_command_usage\("register_ai_provider",/);
+  assert.match(aiCommands, /record_deprecated_command_usage\("test_ai_connection",/);
 });
 
 test("问题3文档同步：AI 主链路统一为 pipeline + 事件流", async () => {

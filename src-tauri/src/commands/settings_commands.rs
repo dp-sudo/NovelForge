@@ -107,8 +107,10 @@ fn deprecated_source(source: Option<&str>) -> &str {
     source.unwrap_or("unknown")
 }
 
-fn log_deprecated_command(message: &str, source: Option<&str>) {
-    log::warn!("{} source={}", message, deprecated_source(source));
+fn log_deprecated_command(message: &str, command: &str, source: Option<&str>) {
+    let src = deprecated_source(source);
+    log::warn!("{} source={}", message, src);
+    crate::infra::logger::record_deprecated_command_usage(command, src);
 }
 
 fn updater_init_error(err: impl ToString) -> AppErrorDto {
@@ -204,6 +206,12 @@ pub async fn install_app_update(
 }
 
 #[tauri::command]
+pub async fn get_deprecated_command_usage_report(
+) -> Result<Vec<crate::infra::logger::DeprecatedCommandUsageEntry>, AppErrorDto> {
+    Ok(crate::infra::logger::read_deprecated_command_usage())
+}
+
+#[tauri::command]
 pub async fn list_providers(
     state: State<'_, AppState>,
 ) -> Result<Vec<ProviderConfig>, AppErrorDto> {
@@ -232,7 +240,7 @@ pub async fn load_provider(
     state: State<'_, AppState>,
 ) -> Result<ProviderConfig, AppErrorDto> {
     // 问题4修复(Deprecated 命令面): 兼容入口保留，但官方调用面改为 settingsApi.list_providers/save_provider。
-    log_deprecated_command(DEPRECATED_LOAD_PROVIDER_LOG, source.as_deref());
+    log_deprecated_command(DEPRECATED_LOAD_PROVIDER_LOG, "load_provider", source.as_deref());
     state.settings_service.load_provider(&provider_id)
 }
 
@@ -444,7 +452,11 @@ pub async fn load_provider_config(
     state: State<'_, AppState>,
 ) -> Result<serde_json::Value, AppErrorDto> {
     // 问题4修复(Deprecated 命令面): 兼容旧协议，后续由 list_providers 收敛替代。
-    log_deprecated_command(DEPRECATED_LOAD_PROVIDER_CONFIG_LOG, source.as_deref());
+    log_deprecated_command(
+        DEPRECATED_LOAD_PROVIDER_CONFIG_LOG,
+        "load_provider_config",
+        source.as_deref(),
+    );
     let providers = state.settings_service.list_providers()?;
     serde_json::to_value(providers).map_err(|e| {
         AppErrorDto::new(
@@ -464,7 +476,11 @@ pub async fn save_provider_config(
     state: State<'_, AppState>,
 ) -> Result<(), AppErrorDto> {
     // 问题4修复(Deprecated 命令面): 兼容旧协议，后续由 save_provider 收敛替代。
-    log_deprecated_command(DEPRECATED_SAVE_PROVIDER_CONFIG_LOG, source.as_deref());
+    log_deprecated_command(
+        DEPRECATED_SAVE_PROVIDER_CONFIG_LOG,
+        "save_provider_config",
+        source.as_deref(),
+    );
     let mut config: ProviderConfig = serde_json::from_value(input).map_err(|e| {
         AppErrorDto::new("INVALID_INPUT", "供应商配置格式无效", true)
             .with_detail(e.to_string())

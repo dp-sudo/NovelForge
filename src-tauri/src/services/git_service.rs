@@ -48,7 +48,7 @@ impl GitService {
         if !root.exists() {
             return Err(AppErrorDto::new(
                 "PROJECT_PATH_NOT_FOUND",
-                "Project path does not exist",
+                "项目路径不存在",
                 true,
             )
             .with_detail(project_root.to_string()));
@@ -155,7 +155,7 @@ impl GitService {
             .lines()
             .find_map(|line| parse_log_line(line.trim()))
             .ok_or_else(|| {
-                AppErrorDto::new("GIT_LOG_PARSE_FAILED", "Cannot parse git commit log", true)
+                AppErrorDto::new("GIT_LOG_PARSE_FAILED", "无法解析 Git 提交记录", true)
             })
     }
 
@@ -192,7 +192,7 @@ impl GitService {
         }
         if changed {
             fs::write(&path, existing).map_err(|err| {
-                AppErrorDto::new("GIT_INIT_FAILED", "Cannot update .gitignore", true)
+                AppErrorDto::new("GIT_INIT_FAILED", "无法更新 .gitignore", true)
                     .with_detail(err.to_string())
             })?;
         }
@@ -209,12 +209,12 @@ fn run_git(project_root: &str, args: &[&str]) -> Result<String, AppErrorDto> {
             if err.kind() == std::io::ErrorKind::NotFound {
                 AppErrorDto::new(
                     "GIT_NOT_INSTALLED",
-                    "Git executable is not available on this machine",
+                    "当前系统未安装 Git 可执行程序",
                     true,
                 )
                 .with_detail(err.to_string())
             } else {
-                AppErrorDto::new("GIT_COMMAND_FAILED", "Failed to execute git command", true)
+                AppErrorDto::new("GIT_COMMAND_FAILED", "执行 Git 命令失败", true)
                     .with_detail(err.to_string())
             }
         })?;
@@ -231,7 +231,7 @@ fn run_git(project_root: &str, args: &[&str]) -> Result<String, AppErrorDto> {
     };
     Err(AppErrorDto::new(
         "GIT_COMMAND_FAILED",
-        "Git command returned non-zero exit status",
+        "Git 命令返回非零退出状态",
         true,
     )
     .with_detail(format!("git {}: {}", args.join(" "), detail)))
@@ -316,3 +316,4 @@ mod tests {
         let _ = fs::remove_dir_all(workspace);
     }
 }
+

@@ -34,7 +34,7 @@ pub fn app_dir() -> Result<PathBuf, AppErrorDto> {
 pub fn open_or_create() -> Result<Connection, AppErrorDto> {
     let db_path = app_database_path()?;
     let conn = Connection::open(&db_path).map_err(|e| {
-        AppErrorDto::new("APP_DB_OPEN_FAILED", "Cannot open app database", true)
+        AppErrorDto::new("APP_DB_OPEN_FAILED", "无法打开应用数据库", true)
             .with_detail(e.to_string())
     })?;
     // Run migrations (will create tables and track versions if not already done)
@@ -169,7 +169,7 @@ pub fn load_provider(
          FROM llm_providers WHERE id = ?1",
         )
         .map_err(|e| {
-            AppErrorDto::new("DB_READ_FAILED", "Cannot read provider", true)
+            AppErrorDto::new("DB_READ_FAILED", "无法读取供应商配置", true)
                 .with_detail(e.to_string())
         })?;
 
@@ -203,7 +203,7 @@ pub fn load_provider(
         Ok(config) => Ok(Some(config)),
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
         Err(e) => Err(
-            AppErrorDto::new("DB_READ_FAILED", "Cannot read provider", true)
+            AppErrorDto::new("DB_READ_FAILED", "无法读取供应商配置", true)
                 .with_detail(e.to_string()),
         ),
     }
@@ -221,7 +221,7 @@ pub fn load_all_providers(conn: &Connection) -> Result<Vec<ProviderConfig>, AppE
          FROM llm_providers ORDER BY display_name",
         )
         .map_err(|e| {
-            AppErrorDto::new("DB_READ_FAILED", "Cannot list providers", true)
+            AppErrorDto::new("DB_READ_FAILED", "无法列出供应商配置", true)
                 .with_detail(e.to_string())
         })?;
 
@@ -252,12 +252,12 @@ pub fn load_all_providers(conn: &Connection) -> Result<Vec<ProviderConfig>, AppE
             })
         })
         .map_err(|e| {
-            AppErrorDto::new("DB_READ_FAILED", "Cannot list providers", true)
+            AppErrorDto::new("DB_READ_FAILED", "无法列出供应商配置", true)
                 .with_detail(e.to_string())
         })?;
 
     providers.collect::<Result<Vec<_>, _>>().map_err(|e| {
-        AppErrorDto::new("DB_READ_FAILED", "Error reading providers", true)
+        AppErrorDto::new("DB_READ_FAILED", "读取供应商配置失败", true)
             .with_detail(e.to_string())
     })
 }
@@ -325,7 +325,7 @@ pub fn upsert_provider(
         ],
     )
     .map_err(|e| {
-        AppErrorDto::new("DB_WRITE_FAILED", "Cannot save provider", true).with_detail(e.to_string())
+        AppErrorDto::new("DB_WRITE_FAILED", "无法保存供应商配置", true).with_detail(e.to_string())
     })?;
 
     Ok(())
@@ -338,7 +338,7 @@ pub fn delete_provider(conn: &Connection, provider_id: &str) -> Result<(), AppEr
         params![provider_id],
     )
     .map_err(|e| {
-        AppErrorDto::new("DB_DELETE_FAILED", "Cannot delete provider", true)
+        AppErrorDto::new("DB_DELETE_FAILED", "无法删除供应商配置", true)
             .with_detail(e.to_string())
     })?;
     Ok(())
@@ -354,7 +354,7 @@ pub fn load_models(conn: &Connection, provider_id: &str) -> Result<Vec<ModelReco
                 supports_thinking, supports_reasoning_effort, supports_prompt_cache,
                 status, source, user_overridden, last_seen_at, registry_version, created_at, updated_at
          FROM llm_models WHERE provider_id = ?1 ORDER BY model_name"
-    ).map_err(|e| AppErrorDto::new("DB_READ_FAILED", "Cannot load models", true).with_detail(e.to_string()))?;
+    ).map_err(|e| AppErrorDto::new("DB_READ_FAILED", "无法加载模型列表", true).with_detail(e.to_string()))?;
 
     let rows = stmt
         .query_map(params![provider_id], |row| {
@@ -382,12 +382,12 @@ pub fn load_models(conn: &Connection, provider_id: &str) -> Result<Vec<ModelReco
             })
         })
         .map_err(|e| {
-            AppErrorDto::new("DB_READ_FAILED", "Cannot load models", true)
+            AppErrorDto::new("DB_READ_FAILED", "无法加载模型列表", true)
                 .with_detail(e.to_string())
         })?;
 
     rows.collect::<Result<Vec<_>, _>>().map_err(|e| {
-        AppErrorDto::new("DB_READ_FAILED", "Error reading models", true).with_detail(e.to_string())
+        AppErrorDto::new("DB_READ_FAILED", "读取模型列表失败", true).with_detail(e.to_string())
     })
 }
 
@@ -431,7 +431,7 @@ pub fn upsert_model(conn: &Connection, model: &ModelRecord) -> Result<bool, AppE
             ],
         )
         .map_err(|e| {
-            AppErrorDto::new("DB_WRITE_FAILED", "Cannot update model", true)
+            AppErrorDto::new("DB_WRITE_FAILED", "无法更新模型信息", true)
                 .with_detail(e.to_string())
         })?;
         Ok(false)
@@ -453,7 +453,7 @@ pub fn upsert_model(conn: &Connection, model: &ModelRecord) -> Result<bool, AppE
                 model.user_overridden as i32, model.last_seen_at, model.registry_version,
                 model.created_at, model.updated_at
             ],
-        ).map_err(|e| AppErrorDto::new("DB_WRITE_FAILED", "Cannot insert model", true).with_detail(e.to_string()))?;
+        ).map_err(|e| AppErrorDto::new("DB_WRITE_FAILED", "无法写入模型信息", true).with_detail(e.to_string()))?;
         Ok(true)
     }
 }
@@ -480,7 +480,7 @@ pub fn insert_refresh_log(
         ],
     )
     .map_err(|e| {
-        AppErrorDto::new("DB_WRITE_FAILED", "Cannot insert refresh log", true)
+        AppErrorDto::new("DB_WRITE_FAILED", "无法写入刷新日志", true)
             .with_detail(e.to_string())
     })?;
     Ok(())
@@ -497,7 +497,7 @@ pub fn load_task_routes(conn: &Connection) -> Result<Vec<TaskRoute>, AppErrorDto
          FROM llm_task_routes ORDER BY task_type",
         )
         .map_err(|e| {
-            AppErrorDto::new("DB_READ_FAILED", "Cannot load task routes", true)
+            AppErrorDto::new("DB_READ_FAILED", "无法加载任务路由", true)
                 .with_detail(e.to_string())
         })?;
 
@@ -516,12 +516,12 @@ pub fn load_task_routes(conn: &Connection) -> Result<Vec<TaskRoute>, AppErrorDto
             })
         })
         .map_err(|e| {
-            AppErrorDto::new("DB_READ_FAILED", "Cannot load task routes", true)
+            AppErrorDto::new("DB_READ_FAILED", "无法加载任务路由", true)
                 .with_detail(e.to_string())
         })?;
 
     rows.collect::<Result<Vec<_>, _>>().map_err(|e| {
-        AppErrorDto::new("DB_READ_FAILED", "Error reading task routes", true)
+        AppErrorDto::new("DB_READ_FAILED", "读取任务路由失败", true)
             .with_detail(e.to_string())
     })
 }
@@ -554,7 +554,7 @@ pub fn upsert_task_route(
         ],
     )
     .map_err(|e| {
-        AppErrorDto::new("DB_WRITE_FAILED", "Cannot save task route", true)
+        AppErrorDto::new("DB_WRITE_FAILED", "无法保存任务路由", true)
             .with_detail(e.to_string())
     })?;
     Ok(())
@@ -567,7 +567,7 @@ pub fn delete_task_route(conn: &Connection, route_id: &str) -> Result<(), AppErr
         params![route_id],
     )
     .map_err(|e| {
-        AppErrorDto::new("DB_DELETE_FAILED", "Cannot delete task route", true)
+        AppErrorDto::new("DB_DELETE_FAILED", "无法删除任务路由", true)
             .with_detail(e.to_string())
     })?;
     Ok(())
@@ -580,7 +580,7 @@ pub fn load_app_setting(conn: &Connection, key: &str) -> Result<Option<String>, 
     let mut stmt = conn
         .prepare("SELECT value FROM app_settings WHERE key = ?1")
         .map_err(|e| {
-            AppErrorDto::new("DB_READ_FAILED", "Cannot read app setting", true)
+            AppErrorDto::new("DB_READ_FAILED", "无法读取应用设置", true)
                 .with_detail(e.to_string())
         })?;
 
@@ -590,7 +590,7 @@ pub fn load_app_setting(conn: &Connection, key: &str) -> Result<Option<String>, 
         Ok(value) => Ok(Some(value)),
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
         Err(e) => Err(
-            AppErrorDto::new("DB_READ_FAILED", "Cannot read app setting", true)
+            AppErrorDto::new("DB_READ_FAILED", "无法读取应用设置", true)
                 .with_detail(e.to_string()),
         ),
     }
@@ -609,7 +609,7 @@ pub fn save_app_setting(
         params![key, value, now],
     )
     .map_err(|e| {
-        AppErrorDto::new("DB_WRITE_FAILED", "Cannot save app setting", true)
+        AppErrorDto::new("DB_WRITE_FAILED", "无法保存应用设置", true)
             .with_detail(e.to_string())
     })?;
     Ok(())
@@ -630,7 +630,7 @@ pub fn load_refresh_logs(
          ORDER BY created_at DESC LIMIT ?2",
         )
         .map_err(|e| {
-            AppErrorDto::new("DB_READ_FAILED", "Cannot load refresh logs", true)
+            AppErrorDto::new("DB_READ_FAILED", "无法加载刷新日志", true)
                 .with_detail(e.to_string())
         })?;
 
@@ -649,12 +649,12 @@ pub fn load_refresh_logs(
             })
         })
         .map_err(|e| {
-            AppErrorDto::new("DB_READ_FAILED", "Cannot load refresh logs", true)
+            AppErrorDto::new("DB_READ_FAILED", "无法加载刷新日志", true)
                 .with_detail(e.to_string())
         })?;
 
     rows.collect::<Result<Vec<_>, _>>().map_err(|e| {
-        AppErrorDto::new("DB_READ_FAILED", "Error reading refresh logs", true)
+        AppErrorDto::new("DB_READ_FAILED", "读取刷新日志失败", true)
             .with_detail(e.to_string())
     })
 }
@@ -694,7 +694,7 @@ fn ensure_column(
     let mut stmt = conn.prepare(&pragma).map_err(|e| {
         AppErrorDto::new(
             "APP_DB_SCHEMA_READ_FAILED",
-            "Cannot read app database schema",
+            "无法读取应用数据库结构",
             false,
         )
         .with_detail(e.to_string())
@@ -705,7 +705,7 @@ fn ensure_column(
         .map_err(|e| {
             AppErrorDto::new(
                 "APP_DB_SCHEMA_READ_FAILED",
-                "Cannot read app database schema",
+                "无法读取应用数据库结构",
                 false,
             )
             .with_detail(e.to_string())
@@ -715,7 +715,7 @@ fn ensure_column(
         if name.map_err(|e| {
             AppErrorDto::new(
                 "APP_DB_SCHEMA_READ_FAILED",
-                "Cannot read app database schema",
+                "无法读取应用数据库结构",
                 false,
             )
             .with_detail(e.to_string())
@@ -729,7 +729,7 @@ fn ensure_column(
     conn.execute(&alter, []).map_err(|e| {
         AppErrorDto::new(
             "APP_DB_MIGRATION_FAILED",
-            "Cannot migrate app database schema",
+            "无法迁移应用数据库结构",
             false,
         )
         .with_detail(e.to_string())
@@ -754,7 +754,7 @@ fn migrate_legacy_database_if_needed(target_db_path: &Path) -> Result<(), AppErr
         fs::create_dir_all(parent).map_err(|err| {
             AppErrorDto::new(
                 "APP_DB_MIGRATION_FAILED",
-                "Cannot create app data directory for database migration",
+                "无法为数据库迁移创建应用数据目录",
                 false,
             )
             .with_detail(err.to_string())
@@ -764,7 +764,7 @@ fn migrate_legacy_database_if_needed(target_db_path: &Path) -> Result<(), AppErr
     fs::copy(&legacy_db_path, target_db_path).map_err(|err| {
         AppErrorDto::new(
             "APP_DB_MIGRATION_FAILED",
-            "Cannot migrate legacy app database",
+            "无法迁移旧版应用数据库",
             false,
         )
         .with_detail(err.to_string())
@@ -864,3 +864,4 @@ mod tests {
         }
     }
 }
+
