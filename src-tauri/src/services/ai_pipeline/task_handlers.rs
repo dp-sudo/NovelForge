@@ -42,7 +42,7 @@ impl TaskHandlers {
                     normalized_output,
                     input.user_instruction.as_str(),
                 )?;
-                let id = CharacterService::default().create(project_root, create_input)?;
+                let id = CharacterService.create(project_root, create_input)?;
                 records.push(PersistedRecord {
                     entity_type: "character".to_string(),
                     entity_id: id,
@@ -54,7 +54,7 @@ impl TaskHandlers {
                     normalized_output,
                     input.user_instruction.as_str(),
                 )?;
-                let id = WorldService::default().create(project_root, create_input)?;
+                let id = WorldService.create(project_root, create_input)?;
                 records.push(PersistedRecord {
                     entity_type: "world_rule".to_string(),
                     entity_id: id,
@@ -67,7 +67,7 @@ impl TaskHandlers {
                     normalized_output,
                     input.user_instruction.as_str(),
                 )?;
-                let id = PlotService::default().create(project_root, create_input)?;
+                let id = PlotService.create(project_root, create_input)?;
                 records.push(PersistedRecord {
                     entity_type: "plot_node".to_string(),
                     entity_id: id,
@@ -87,7 +87,7 @@ impl TaskHandlers {
                             true,
                         )
                     })?;
-                let saved = BlueprintService::default().save_step(
+                let saved = BlueprintService.save_step(
                     project_root,
                     SaveBlueprintStepInput {
                         step_key: step_key.to_string(),
@@ -133,7 +133,7 @@ impl TaskHandlers {
                     normalized_output,
                     input.user_instruction.as_str(),
                 )?;
-                let id = GlossaryService::default().create(project_root, create_input)?;
+                let id = GlossaryService.create(project_root, create_input)?;
                 records.push(PersistedRecord {
                     entity_type: "glossary_term".to_string(),
                     entity_id: id,
@@ -145,7 +145,7 @@ impl TaskHandlers {
                     normalized_output,
                     input.user_instruction.as_str(),
                 )?;
-                let id = NarrativeService::default().create(project_root, create_input)?;
+                let id = NarrativeService.create(project_root, create_input)?;
                 records.push(PersistedRecord {
                     entity_type: "narrative_obligation".to_string(),
                     entity_id: id,
@@ -1051,7 +1051,7 @@ impl TaskHandlers {
             return Ok(0);
         }
 
-        let characters = CharacterService::default().list(project_root)?;
+        let characters = CharacterService.list(project_root)?;
         let mut name_index = HashMap::<String, String>::new();
         for item in &characters {
             let key = Self::normalize_lookup_label(&item.name);
@@ -1068,7 +1068,7 @@ impl TaskHandlers {
             }
         }
 
-        let existing_links = RelationshipService::default().list(project_root, None)?;
+        let existing_links = RelationshipService.list(project_root, None)?;
         let mut dedupe = HashSet::<String>::new();
         for item in existing_links {
             let key = format!(
@@ -1157,7 +1157,7 @@ impl TaskHandlers {
                     "latest_trigger_event",
                 ],
             );
-            RelationshipService::default().create(
+            RelationshipService.create(
                 project_root,
                 CreateRelationshipInput {
                     source_character_id: source_id.clone(),
@@ -1347,8 +1347,7 @@ impl TaskHandlers {
         let mut in_string = false;
         let mut escaped = false;
 
-        for idx in start..bytes.len() {
-            let byte = bytes[idx];
+        for (idx, byte) in bytes.iter().copied().enumerate().skip(start) {
             if in_string {
                 if escaped {
                     escaped = false;
@@ -2361,7 +2360,7 @@ mod tests {
         }
         "#;
 
-        let records = TaskHandlers::default()
+        let records = TaskHandlers
             .persist_task_output(
                 "chapter.plan",
                 &project.project_root,
@@ -2428,7 +2427,7 @@ mod tests {
         }
         "#;
 
-        let records = TaskHandlers::default()
+        let records = TaskHandlers
             .persist_task_output(
                 "timeline.review",
                 &project.project_root,
@@ -2477,7 +2476,7 @@ mod tests {
         }
         "#;
 
-        let records = TaskHandlers::default()
+        let records = TaskHandlers
             .persist_task_output(
                 "character.create",
                 &project.project_root,
@@ -2587,7 +2586,7 @@ mod tests {
         }
         "#;
 
-        let records = TaskHandlers::default()
+        let records = TaskHandlers
             .persist_task_output(
                 "relationship.review",
                 &project.project_root,
@@ -2600,7 +2599,7 @@ mod tests {
         assert_eq!(records[0].entity_type, "character_relationship_batch");
         assert_eq!(records[0].action, "inserted:1");
 
-        let relations = crate::services::character_service::RelationshipService::default()
+        let relations = crate::services::character_service::RelationshipService
             .list(&project.project_root, None)
             .expect("list relationships should succeed");
         assert_eq!(relations.len(), 1);

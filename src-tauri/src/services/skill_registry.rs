@@ -124,7 +124,6 @@ pub struct SkillFile {
 }
 
 /// ── SkillRegistry (filesystem-backed) ──
-
 pub struct SkillRegistry {
     skills_dir: PathBuf,
     builtin_dir: PathBuf,

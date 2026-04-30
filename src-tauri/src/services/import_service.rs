@@ -59,7 +59,7 @@ fn infer_title(file_name: &str) -> String {
         Some(pos) => &file_name[..pos],
         None => file_name,
     };
-    stem.replace('_', " ").replace('-', " ").trim().to_string()
+    stem.replace(['_', '-'], " ").trim().to_string()
 }
 
 fn is_supported_file(file_name: &str) -> bool {
@@ -96,7 +96,7 @@ fn is_stopword(token: &str) -> bool {
 fn push_candidate_token(raw: &str, target: &mut Vec<String>) {
     let token = raw.trim_matches(|ch: char| ch == '-' || ch == '_' || ch == '·');
     let len = token.chars().count();
-    if len < 2 || len > 12 {
+    if !(2..=12).contains(&len) {
         return;
     }
     if token.chars().all(|ch| ch.is_ascii_digit()) {

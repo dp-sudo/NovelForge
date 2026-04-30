@@ -43,9 +43,7 @@ impl SearchService {
             .join(" OR ");
 
         let mut stmt = conn
-            .prepare(&format!(
-                "SELECT entity_type, entity_id, title, snippet(search_index, 1, '…', '…', 32, 16) as body_snippet, rank FROM search_index WHERE search_index MATCH ?1 ORDER BY rank LIMIT ?2"
-            ))
+            .prepare("SELECT entity_type, entity_id, title, snippet(search_index, 1, '…', '…', 32, 16) as body_snippet, rank FROM search_index WHERE search_index MATCH ?1 ORDER BY rank LIMIT ?2")
             .map_err(|e| {
                 AppErrorDto::new("SEARCH_QUERY_FAILED", "搜索查询失败", true)
                     .with_detail(e.to_string())

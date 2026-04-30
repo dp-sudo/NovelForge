@@ -690,9 +690,37 @@ fn resolve_registry_public_key(registry: &RegistryDocument, host: Option<&str>) 
 }
 
 fn is_loopback_host(host: Option<&str>) -> bool {
-    match host.unwrap_or("").to_ascii_lowercase().as_str() {
-        "localhost" | "127.0.0.1" | "::1" => true,
-        _ => false,
+    matches!(
+        host.unwrap_or("").to_ascii_lowercase().as_str(),
+        "localhost" | "127.0.0.1" | "::1"
+    )
+}
+
+fn build_adapter(
+    config: &ProviderConfig,
+) -> Result<Box<dyn crate::adapters::LlmService>, AppErrorDto> {
+    let is_anthropic_protocol = matches!(
+        config.protocol.as_str(),
+        "anthropic_messages" | "custom_anthropic_compatible"
+    );
+    let is_gemini_protocol = matches!(config.protocol.as_str(), "gemini_generate_content");
+
+    match config.vendor.as_str() {
+        "anthropic" | "minimax" => Ok(Box::new(crate::adapters::anthropic::AnthropicAdapter::new(
+            config.clone(),
+        ))),
+        "gemini" => Ok(Box::new(crate::adapters::gemini::GeminiAdapter::new(
+            config.clone(),
+        ))),
+        _ if is_anthropic_protocol => Ok(Box::new(
+            crate::adapters::anthropic::AnthropicAdapter::new(config.clone()),
+        )),
+        _ if is_gemini_protocol => Ok(Box::new(crate::adapters::gemini::GeminiAdapter::new(
+            config.clone(),
+        ))),
+        _ => Ok(Box::new(
+            crate::adapters::openai_compatible::OpenAiCompatibleAdapter::new(config.clone()),
+        )),
     }
 }
 
@@ -794,33 +822,5 @@ mod tests {
             verify_registry_signature(&registry, &registry_json, Some("updates.novelforge.app"))
                 .expect_err("public host should require trusted env key");
         assert_eq!(err.code, "REGISTRY_SIGNATURE_INVALID");
-    }
-}
-
-fn build_adapter(
-    config: &ProviderConfig,
-) -> Result<Box<dyn crate::adapters::LlmService>, AppErrorDto> {
-    let is_anthropic_protocol = matches!(
-        config.protocol.as_str(),
-        "anthropic_messages" | "custom_anthropic_compatible"
-    );
-    let is_gemini_protocol = matches!(config.protocol.as_str(), "gemini_generate_content");
-
-    match config.vendor.as_str() {
-        "anthropic" | "minimax" => Ok(Box::new(crate::adapters::anthropic::AnthropicAdapter::new(
-            config.clone(),
-        ))),
-        "gemini" => Ok(Box::new(crate::adapters::gemini::GeminiAdapter::new(
-            config.clone(),
-        ))),
-        _ if is_anthropic_protocol => Ok(Box::new(
-            crate::adapters::anthropic::AnthropicAdapter::new(config.clone()),
-        )),
-        _ if is_gemini_protocol => Ok(Box::new(crate::adapters::gemini::GeminiAdapter::new(
-            config.clone(),
-        ))),
-        _ => Ok(Box::new(
-            crate::adapters::openai_compatible::OpenAiCompatibleAdapter::new(config.clone()),
-        )),
     }
 }

@@ -207,7 +207,7 @@ impl<'a> PipelineOrchestrator<'a> {
             })?;
 
         let continuity_depth = self.resolve_continuity_pack_depth();
-        let continuity_pack = ContinuityPackCompiler::default().compile(
+        let continuity_pack = ContinuityPackCompiler.compile(
             &self.input.project_root,
             self.canonical_task,
             &continuity_depth,
@@ -467,15 +467,14 @@ impl<'a> PipelineOrchestrator<'a> {
         let user_instruction = input.user_instruction.trim();
 
         match canonical_task {
-            "chapter.draft" | "chapter.continue" => {
-                if chapter_id.is_empty() {
+            "chapter.draft" | "chapter.continue"
+                if chapter_id.is_empty() => {
                     return Err(AppErrorDto::new(
                         "PIPELINE_CHAPTER_ID_REQUIRED",
                         "该任务需要 chapterId",
                         true,
                     ));
                 }
-            }
             "chapter.plan" => {}
             "chapter.rewrite" | "prose.naturalize" => {
                 if chapter_id.is_empty() {
@@ -497,15 +496,14 @@ impl<'a> PipelineOrchestrator<'a> {
             | "world.create_rule"
             | "plot.create_node"
             | "glossary.create_term"
-            | "narrative.create_obligation" => {
-                if user_instruction.is_empty() {
+            | "narrative.create_obligation"
+                if user_instruction.is_empty() => {
                     return Err(AppErrorDto::new(
                         "PIPELINE_USER_INSTRUCTION_REQUIRED",
                         "该任务需要 userInstruction",
                         true,
                     ));
                 }
-            }
             "consistency.scan" => {
                 if chapter_id.is_empty() {
                     return Err(AppErrorDto::new(

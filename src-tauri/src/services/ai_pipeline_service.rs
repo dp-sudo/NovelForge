@@ -7,7 +7,7 @@ use serde_json::json;
 use tauri::Emitter;
 
 use crate::errors::AppErrorDto;
-use crate::services::ai_pipeline::audit_store::PipelineAuditStore;
+use crate::services::ai_pipeline::audit_store::{PipelineAuditStore, PipelineRunUpdate};
 use crate::services::ai_pipeline::orchestrator::{
     PipelineOrchestrator, PHASE_DONE, PHASE_VALIDATE,
 };
@@ -135,11 +135,13 @@ impl AiPipelineService {
                 self.audit_store.update_pipeline_run(
                     &input.project_root,
                     &request_id,
-                    "succeeded",
-                    PHASE_DONE,
-                    None,
-                    None,
-                    started_at.elapsed().as_millis() as i64,
+                    PipelineRunUpdate {
+                        status: "succeeded",
+                        phase: PHASE_DONE,
+                        error_code: None,
+                        error_message: None,
+                        duration_ms: started_at.elapsed().as_millis() as i64,
+                    },
                 );
                 self.emit_event(
                     app_handle,
@@ -173,15 +175,17 @@ impl AiPipelineService {
                 self.audit_store.update_pipeline_run(
                     &input.project_root,
                     &request_id,
-                    if stage_error.error.code == "PIPELINE_CANCELLED" {
-                        "cancelled"
-                    } else {
-                        "failed"
+                    PipelineRunUpdate {
+                        status: if stage_error.error.code == "PIPELINE_CANCELLED" {
+                            "cancelled"
+                        } else {
+                            "failed"
+                        },
+                        phase: stage_error.phase,
+                        error_code: Some(stage_error.error.code.as_str()),
+                        error_message: Some(stage_error.error.message.as_str()),
+                        duration_ms: started_at.elapsed().as_millis() as i64,
                     },
-                    stage_error.phase,
-                    Some(stage_error.error.code.as_str()),
-                    Some(stage_error.error.message.as_str()),
-                    started_at.elapsed().as_millis() as i64,
                 );
                 self.emit_event(
                     app_handle,

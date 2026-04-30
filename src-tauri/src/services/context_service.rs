@@ -290,6 +290,18 @@ struct ExtractedSceneDraft {
     evidence: String,
 }
 
+struct StructuredDraftSlices<'a> {
+    relationship: &'a [ExtractedRelationshipDraft],
+    involvement: &'a [ExtractedInvolvementDraft],
+    scene: &'a [ExtractedSceneDraft],
+}
+
+type StructuredDraftPool = (
+    Vec<RelationshipDraft>,
+    Vec<InvolvementDraft>,
+    Vec<SceneDraft>,
+);
+
 #[derive(Default)]
 pub struct ContextService;
 
@@ -364,13 +376,15 @@ impl ContextService {
             chapter_id,
             "editor.context.extract",
             &chapter_content,
-            &relationship_drafts,
-            &involvement_drafts,
-            &scene_drafts,
+            StructuredDraftSlices {
+                relationship: &relationship_drafts,
+                involvement: &involvement_drafts,
+                scene: &scene_drafts,
+            },
         )?;
         let (relationship_drafts, involvement_drafts, scene_drafts) =
             self.load_structured_draft_pool(&conn, &project_id, chapter_id)?;
-        let state_summary = StoryStateService::default()
+        let state_summary = StoryStateService
             .list_chapter_states(project_root, chapter_id)?
             .into_iter()
             .map(|row| StoryStateSummary {
@@ -580,7 +594,7 @@ impl ContextService {
         &self,
         project_root: &str,
     ) -> Result<Vec<StoryStateSummary>, AppErrorDto> {
-        StoryStateService::default()
+        StoryStateService
             .list_latest_states(project_root, None, None)
             .map(|rows| {
                 rows.into_iter()
@@ -1043,7 +1057,7 @@ impl ContextService {
                 evidence = item.3.unwrap_or_default().trim().to_string();
             }
             let payload: serde_json::Value =
-                serde_json::from_str(&item.4).unwrap_or_else(|_| serde_json::Value::Null);
+                serde_json::from_str(&item.4).unwrap_or(serde_json::Value::Null);
             if relationship_type.is_none() {
                 relationship_type =
                     payload_lookup_string(&payload, &["relationshipType", "relationship_type"]);
@@ -1319,9 +1333,7 @@ impl ContextService {
         chapter_id: &str,
         source_task_type: &str,
         chapter_content: &str,
-        relationship_drafts: &[ExtractedRelationshipDraft],
-        involvement_drafts: &[ExtractedInvolvementDraft],
-        scene_drafts: &[ExtractedSceneDraft],
+        drafts: StructuredDraftSlices<'_>,
     ) -> Result<(), AppErrorDto> {
         #[derive(Debug)]
         struct DraftRow {
@@ -1336,7 +1348,7 @@ impl ContextService {
         }
 
         let mut rows: Vec<DraftRow> = Vec::new();
-        for draft in relationship_drafts {
+        for draft in drafts.relationship {
             rows.push(DraftRow {
                 draft_kind: "relationship",
                 source_label: draft.source_label.clone(),
@@ -1355,7 +1367,7 @@ impl ContextService {
                 .to_string(),
             });
         }
-        for draft in involvement_drafts {
+        for draft in drafts.involvement {
             rows.push(DraftRow {
                 draft_kind: "involvement",
                 source_label: draft.character_label.clone(),
@@ -1374,7 +1386,7 @@ impl ContextService {
                 .to_string(),
             });
         }
-        for draft in scene_drafts {
+        for draft in drafts.scene {
             rows.push(DraftRow {
                 draft_kind: "scene",
                 source_label: draft.scene_label.clone(),
@@ -1579,14 +1591,7 @@ impl ContextService {
         conn: &rusqlite::Connection,
         project_id: &str,
         chapter_id: &str,
-    ) -> Result<
-        (
-            Vec<RelationshipDraft>,
-            Vec<InvolvementDraft>,
-            Vec<SceneDraft>,
-        ),
-        AppErrorDto,
-    > {
+    ) -> Result<StructuredDraftPool, AppErrorDto> {
         let mut relationship_drafts: Vec<RelationshipDraft> = Vec::new();
         let mut involvement_drafts: Vec<InvolvementDraft> = Vec::new();
         let mut scene_drafts: Vec<SceneDraft> = Vec::new();
@@ -1639,7 +1644,7 @@ impl ContextService {
                     .with_detail(err.to_string())
             })?;
             let payload: serde_json::Value =
-                serde_json::from_str(&payload_json).unwrap_or_else(|_| serde_json::Value::Null);
+                serde_json::from_str(&payload_json).unwrap_or(serde_json::Value::Null);
             let confidence = confidence.unwrap_or(0.0) as f32;
             let evidence = evidence_text.unwrap_or_default();
 
@@ -2534,7 +2539,7 @@ fn extract_relationship_drafts(
         .map(|name| name.trim().to_string())
         .filter(|name| {
             let len = name.chars().count();
-            !name.is_empty() && len >= 2 && len <= 12
+            !name.is_empty() && (2..=12).contains(&len)
         })
         .collect::<Vec<_>>();
     dedupe_labels(&mut names);
@@ -2558,7 +2563,7 @@ fn extract_relationship_drafts(
             for j in (i + 1)..present.len() {
                 let a = &present[i];
                 let b = &present[j];
-                let mut pair = vec![normalize_label_key(a), normalize_label_key(b)];
+                let mut pair = [normalize_label_key(a), normalize_label_key(b)];
                 pair.sort();
                 let key = format!("{}|{}|{}", pair[0], pair[1], relationship_type);
                 if seen.contains(&key) {
@@ -2594,7 +2599,7 @@ fn extract_involvement_drafts(
         .map(|name| name.trim().to_string())
         .filter(|name| {
             let len = name.chars().count();
-            !name.is_empty() && len >= 2 && len <= 12
+            !name.is_empty() && (2..=12).contains(&len)
         })
         .collect::<Vec<_>>();
     dedupe_labels(&mut names);
@@ -2620,7 +2625,7 @@ fn extract_involvement_drafts(
             evidence: extract_sentence_evidence(content, &name),
         });
     }
-    drafts.sort_by(|a, b| b.occurrences.cmp(&a.occurrences));
+    drafts.sort_by_key(|draft| std::cmp::Reverse(draft.occurrences));
     drafts.into_iter().take(limit).collect()
 }
 

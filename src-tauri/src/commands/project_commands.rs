@@ -105,7 +105,7 @@ pub async fn open_project(
     let _ = std::thread::Builder::new()
         .name("novelforge-auto-backup".to_string())
         .spawn(move || {
-            crate::services::backup_service::BackupService::default().try_auto_backup(&backup_root);
+            crate::services::backup_service::BackupService.try_auto_backup(&backup_root);
         });
     Ok(result)
 }

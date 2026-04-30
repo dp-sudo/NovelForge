@@ -567,7 +567,7 @@ impl ChapterService {
         let draft_path = draft_path_from_content(project_root_path, &chapter_row.content_path)?;
         let _ = fs::remove_file(draft_path);
 
-        StoryStateService::default().record_window_progress(
+        StoryStateService.record_window_progress(
             project_root,
             chapter_id,
             chapter_row.chapter_index,
@@ -897,10 +897,12 @@ fn fmt_yaml_list(items: &[String]) -> String {
     }
 }
 
+type ChapterLinkTargets = (Vec<String>, Vec<String>, Vec<String>);
+
 fn load_chapter_links_for_frontmatter(
     conn: &rusqlite::Connection,
     chapter_id: &str,
-) -> Result<(Vec<String>, Vec<String>, Vec<String>), AppErrorDto> {
+) -> Result<ChapterLinkTargets, AppErrorDto> {
     let mut stmt = conn
         .prepare("SELECT target_type, target_id FROM chapter_links WHERE chapter_id = ?1")
         .map_err(|e| {

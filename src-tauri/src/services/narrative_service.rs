@@ -190,7 +190,7 @@ impl NarrativeService {
 #[cfg(test)]
 mod tests {
     use std::fs;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use uuid::Uuid;
 
     use super::{CreateObligationInput, NarrativeService};
@@ -206,7 +206,7 @@ mod tests {
         let _ = fs::remove_dir_all(path);
     }
 
-    fn create_test_project(ws: &PathBuf) -> String {
+    fn create_test_project(ws: &Path) -> String {
         let ps = ProjectService;
         let project = ps
             .create_project(CreateProjectInput {

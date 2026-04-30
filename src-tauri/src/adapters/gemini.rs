@@ -97,7 +97,7 @@ impl GeminiAdapter {
             .map(|arr| {
                 arr.iter()
                     .enumerate()
-                    .filter_map(|(i, c)| {
+                    .map(|(i, c)| {
                         let text = c
                             .get("content")
                             .and_then(|ct| ct.get("parts"))
@@ -107,7 +107,7 @@ impl GeminiAdapter {
                             .and_then(|v| v.as_str())
                             .unwrap_or("");
                         let finish = c.get("finishReason").and_then(|v| v.as_str());
-                        Some(Choice {
+                        Choice {
                             index: i as u32,
                             message: Message {
                                 role: "assistant".to_string(),
@@ -117,7 +117,7 @@ impl GeminiAdapter {
                                 }],
                             },
                             finish_reason: finish.map(|s| s.to_string()),
-                        })
+                        }
                     })
                     .collect()
             })

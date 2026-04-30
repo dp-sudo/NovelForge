@@ -10,6 +10,14 @@ use crate::services::project_service::get_project_id;
 #[derive(Clone, Default)]
 pub struct PipelineAuditStore;
 
+pub struct PipelineRunUpdate<'a> {
+    pub status: &'a str,
+    pub phase: &'a str,
+    pub error_code: Option<&'a str>,
+    pub error_message: Option<&'a str>,
+    pub duration_ms: i64,
+}
+
 impl PipelineAuditStore {
     pub fn insert_pipeline_run(
         &self,
@@ -51,11 +59,7 @@ impl PipelineAuditStore {
         &self,
         project_root: &str,
         request_id: &str,
-        status: &str,
-        phase: &str,
-        error_code: Option<&str>,
-        error_message: Option<&str>,
-        duration_ms: i64,
+        update: PipelineRunUpdate<'_>,
     ) {
         let conn = match open_database(Path::new(project_root)) {
             Ok(conn) => conn,
@@ -71,11 +75,11 @@ impl PipelineAuditStore {
                  completed_at = ?6
              WHERE id = ?7",
             params![
-                status,
-                phase,
-                error_code,
-                error_message,
-                duration_ms,
+                update.status,
+                update.phase,
+                update.error_code,
+                update.error_message,
+                update.duration_ms,
                 now_iso(),
                 request_id
             ],
