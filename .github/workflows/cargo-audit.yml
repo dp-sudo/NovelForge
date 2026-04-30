@@ -1,0 +1,61 @@
+name: cargo-audit
+
+on:
+  pull_request:
+  schedule:
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+
+jobs:
+  rustsec-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+      uses: actions/checkout@v4
+
+      - name: Setup Rust
+      uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-audit
+      run: cargo install cargo-audit --locked
+
+      - name: Run cargo-audit
+        working-directory: src-tauri
+        run: |
+          set +e
+          cargo audit --json > cargo-audit.json
+          exit 0
+
+      - name: Upload audit report
+        uses: actions/upload-artifact@v4
+        with:
+          name: cargo-audit-report
+          path: src-tauri/cargo-audit.json
+
+      - name: Enforce High/Critical Vulnerabilities Only
+        working-directory: src-tauri
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path("cargo-audit.json").read_text(encoding="utf-8"))
+          vulns = report.get("vulnerabilities", {}).get("list", [])
+          high_or_critical = []
+          for item in vulns:
+            advisory = item.get("advisory", {})
+            cvss = advisory.get("cvss")
+            if isinstance(cvss, dict):
+              score = cvss.get("score")
+              if isinstance(score, (int, float)) and score >= 7.0:
+                high_or_critical.append({
+                  "id": advisory.get("id", "unknown"),
+                  "package": item.get("package", {}).get("name", "unknown"),
+                  "score": score,
+                })
+          if high_or_critical:
+            print("High/Critical Rust advisories detected:")
+            for vuln in high_or_critical:
+              print(f"- {vuln['id']} package={vuln['package']} cvss={vuln['score']}")
+            raise SystemExit(1)
+          print("No high/critical Rust advisories detected.")
+          PY

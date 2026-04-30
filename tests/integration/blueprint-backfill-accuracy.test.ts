@@ -181,7 +181,7 @@ test("问题5回填准确率：蓝图 8 步字段可 100% 映射到表单", () =
     const parsed = parseBlueprintContent(step.stepKey, JSON.stringify(step.payload));
     assert.deepEqual(parsed, step.expected, `step ${step.stepKey} mapped value mismatch`);
 
-    const defaults = BLUEPRINT_DEFAULTS[step.stepKey] as Record<string, string>;
+    const defaults = BLUEPRINT_DEFAULTS[step.stepKey as keyof typeof BLUEPRINT_DEFAULTS];
     const total = Object.keys(defaults).length;
     const filled = Object.values(parsed).filter((value) => value.trim().length > 0).length;
     assert.equal(filled, total, `step ${step.stepKey} should fill all ${total} fields`);

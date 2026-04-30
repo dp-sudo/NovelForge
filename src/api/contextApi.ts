@@ -185,6 +185,19 @@ function collectDriftWarnings(chapters: ChapterRecord[], plannedChapterCount: nu
   return warnings;
 }
 
+function selectSummaryChapter(chapters: ChapterRecord[]): ChapterRecord | null {
+  if (chapters.length === 0) {
+    return null;
+  }
+  const sorted = [...chapters].sort((a, b) => b.chapterIndex - a.chapterIndex);
+  const active = sorted.find((chapter) => chapter.status === "drafting" || chapter.status === "revising");
+  if (active) {
+    return active;
+  }
+  const latestNonArchived = sorted.find((chapter) => chapter.status !== "archived");
+  return latestNonArchived ?? sorted[0] ?? null;
+}
+
 export async function getSummaryFeedback(
   projectRoot: string,
   plannedChapterCount = 0,
@@ -199,8 +212,8 @@ export async function getSummaryFeedback(
     };
   }
 
-  const firstChapter = [...chapters].sort((a, b) => a.chapterIndex - b.chapterIndex)[0];
-  if (!firstChapter) {
+  const summaryChapter = selectSummaryChapter(chapters);
+  if (!summaryChapter) {
     return {
       keyVariableDelta: [],
       driftWarnings: [],
@@ -210,7 +223,7 @@ export async function getSummaryFeedback(
   }
 
   try {
-    const context = await getChapterContext(projectRoot, firstChapter.id);
+    const context = await getChapterContext(projectRoot, summaryChapter.id);
     const assetPromotionCount =
       [...context.characters, ...context.worldRules, ...context.plotNodes, ...context.glossary]
         .filter((entity) => entity.sourceKind !== "user_input")

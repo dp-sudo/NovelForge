@@ -15,7 +15,13 @@ import {
   type WindowPlanningData,
 } from "../../api/blueprintApi.js";
 import { listChapters, type ChapterRecord } from "../../api/chapterApi.js";
-import { buildPromotionStages, streamBookGenerationPipeline } from "../../api/bookPipelineApi.js";
+import {
+  buildPromotionStages,
+  resolveChapterPlanChapterSelection,
+  selectPromotionStage,
+  streamBookGenerationPipeline,
+  type ChapterPlanSelectionStrategy,
+} from "../../api/bookPipelineApi.js";
 import { runModuleAiTask } from "../../api/moduleAiApi.js";
 import { getSummaryFeedback, type SummaryFeedbackData } from "../../api/contextApi.js";
 import { useProjectStore } from "../../stores/projectStore.js";
@@ -343,6 +349,7 @@ export function BlueprintPage() {
   const [promotionRunning, setPromotionRunning] = useState(false);
   const [promotionChapters, setPromotionChapters] = useState<ChapterRecord[]>([]);
   const [selectedPromotionChapterId, setSelectedPromotionChapterId] = useState("");
+  const [selectedPromotionTargetStageKey, setSelectedPromotionTargetStageKey] = useState("");
   const [windowPlanningData, setWindowPlanningData] = useState<WindowPlanningData | null>(null);
   const [summaryFeedback, setSummaryFeedback] = useState<SummaryFeedbackData | null>(null);
   const [loopLoading, setLoopLoading] = useState(false);
@@ -425,24 +432,45 @@ export function BlueprintPage() {
     return PROMOTION_TARGETS_BY_STEP[cur.key] ?? [];
   }
 
+  function resolvePromotionTargetStageKey(targets: Array<{ stageKey: string }>): string | null {
+    const explicit = selectedPromotionTargetStageKey.trim();
+    if (explicit && targets.some((target) => target.stageKey === explicit)) {
+      return explicit;
+    }
+    return targets[0]?.stageKey ?? null;
+  }
+
   function isChapterPlanPromotionStep(): boolean {
     return getPromotionTargets().some((target) => target.stageKey === "chapter-plan");
   }
 
-  function resolvePromotionChapterId(chapters: ChapterRecord[]): string | null {
-    const explicit = selectedPromotionChapterId.trim();
-    if (explicit) {
-      return explicit;
-    }
-
-    const active = activeEditorChapterId?.trim();
-    if (active && chapters.some((chapter) => chapter.id === active)) {
-      return active;
-    }
-
-    const firstPlannable = chapters.find((chapter) => chapter.status !== "completed") ?? chapters[0];
-    return firstPlannable?.id ?? null;
+  function resolvePromotionChapterSelection(chapters: ChapterRecord[]): {
+    chapterId: string | null;
+    strategy: ChapterPlanSelectionStrategy;
+  } {
+    return resolveChapterPlanChapterSelection({
+      chapters: chapters.map((chapter) => ({
+        id: chapter.id,
+        chapterIndex: chapter.chapterIndex,
+        status: chapter.status,
+        targetWords: chapter.targetWords,
+        currentWords: chapter.currentWords,
+      })),
+      explicitChapterId: selectedPromotionChapterId,
+      activeChapterId: activeEditorChapterId ?? undefined,
+      windowPlanningHorizon: windowPlanningData?.windowPlanningHorizon,
+    });
   }
+
+  useEffect(() => {
+    const targets = PROMOTION_TARGETS_BY_STEP[cur.key] ?? [];
+    setSelectedPromotionTargetStageKey((prev) => {
+      if (prev && targets.some((target) => target.stageKey === prev)) {
+        return prev;
+      }
+      return targets[0]?.stageKey ?? "";
+    });
+  }, [cur.key]);
 
   async function handlePromoteCurrentStep() {
     if (!projectRoot || promotionRunning) return;
@@ -458,18 +486,21 @@ export function BlueprintPage() {
     }
     const isChapterPlanStep = isChapterPlanPromotionStep();
     let chapterId: string | undefined;
+    let chapterStrategy: ChapterPlanSelectionStrategy | null = null;
     if (isChapterPlanStep) {
       const chapters = promotionChapters.length > 0 ? promotionChapters : await loadPromotionChapters();
-      const resolved = resolvePromotionChapterId(chapters);
-      if (!resolved) {
+      const resolved = resolvePromotionChapterSelection(chapters);
+      if (!resolved.chapterId) {
         setBookPipelineStatus("请选择章节以生成章节计划");
         return;
       }
-      chapterId = resolved;
+      chapterId = resolved.chapterId;
+      chapterStrategy = resolved.strategy;
     }
 
     const promotionStages = buildPromotionStages({ projectRoot, ideaPrompt, chapterId });
-    const stage = promotionStages.find((item) => item.key === targets[0]?.stageKey) ?? promotionStages[0];
+    const targetStageKey = resolvePromotionTargetStageKey(targets);
+    const stage = selectPromotionStage(promotionStages, targetStageKey ?? undefined);
     if (!stage) {
       setBookPipelineStatus("当前上下文暂无可执行晋升步骤");
       return;
@@ -477,7 +508,9 @@ export function BlueprintPage() {
 
     setPromotionRunning(true);
     setBookPipelineStatus(null);
-    setBookPipelineLogs((prev) => [...prev, `开始晋升：${stage.label}`]);
+    const strategySuffix =
+      stage.key === "chapter-plan" && chapterStrategy ? `（章节策略：${chapterStrategy}）` : "";
+    setBookPipelineLogs((prev) => [...prev, `开始晋升：${stage.label}${strategySuffix}`]);
     try {
       await runModuleAiTask({
         ...stage.request,
@@ -664,6 +697,19 @@ export function BlueprintPage() {
                 可晋升资产类型：{getPromotionTargets().map((item) => item.label).join(" / ")}
               </p>
             )}
+            {status === "completed" && getPromotionTargets().length > 1 && (
+              <div className="mb-3">
+                <Select
+                  label="当前晋升资产类型"
+                  value={selectedPromotionTargetStageKey}
+                  onChange={(event) => setSelectedPromotionTargetStageKey(event.target.value)}
+                  options={getPromotionTargets().map((target) => ({
+                    value: target.stageKey,
+                    label: target.label,
+                  }))}
+                />
+              </div>
+            )}
             {status === "completed" && isChapterPlanPromotionStep() && (
               <div className="mb-3 space-y-2">
                 <Select
@@ -674,7 +720,7 @@ export function BlueprintPage() {
                     value: chapter.id,
                     label: `第 ${chapter.chapterIndex} 章 · ${chapter.title}`,
                   }))}
-                  placeholder="自动选择（用户指定 > 当前活动章节 > 首个可规划章节）"
+                  placeholder="自动选择（user_specified > next_porous > arc_anchor > window_drift）"
                 />
                 <p className="text-xs text-surface-500">
                   如未选择，系统将按策略自动定位章节；无可用章节时会提示“请选择章节以生成章节计划”。

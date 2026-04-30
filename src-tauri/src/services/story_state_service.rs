@@ -196,7 +196,10 @@ impl StoryStateService {
         self.list_latest_states(project_root, None, None)
             .map(|rows| {
                 rows.into_iter()
-                    .filter(|row| row.source_chapter_id.as_deref() == Some(chapter_id))
+                    .filter(|row| {
+                        row.source_chapter_id.as_deref() == Some(chapter_id)
+                            || (row.subject_type == "window" && row.scope == "global")
+                    })
                     .collect()
             })
     }
