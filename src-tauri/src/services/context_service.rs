@@ -73,6 +73,9 @@ pub struct CharacterSummary {
     pub identity_text: Option<String>,
     pub appearance: Option<String>,
     pub locked_fields: Option<String>,
+    pub source_kind: String,
+    pub source_ref: Option<String>,
+    pub source_request_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -83,6 +86,9 @@ pub struct WorldRuleSummary {
     pub category: String,
     pub description: String,
     pub constraint_level: String,
+    pub source_kind: String,
+    pub source_ref: Option<String>,
+    pub source_request_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -94,6 +100,9 @@ pub struct PlotNodeSummary {
     pub goal: Option<String>,
     pub conflict: Option<String>,
     pub sort_order: i64,
+    pub source_kind: String,
+    pub source_ref: Option<String>,
+    pub source_request_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -118,10 +127,14 @@ pub struct CollectedContext {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GlossaryContextTerm {
+    pub id: String,
     pub term: String,
     pub term_type: String,
     pub locked: bool,
     pub banned: bool,
+    pub source_kind: String,
+    pub source_ref: Option<String>,
+    pub source_request_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1628,15 +1641,41 @@ impl ContextService {
         project_id: &str,
     ) -> Result<Vec<GlossaryContextTerm>, AppErrorDto> {
         conn.prepare(
-            "SELECT term, term_type, locked, banned FROM glossary_terms WHERE project_id = ?1 ORDER BY term",
+            r#"
+            SELECT g.id,
+                   g.term,
+                   g.term_type,
+                   g.locked,
+                   g.banned,
+                   COALESCE(ep.source_kind, 'user_input') AS source_kind,
+                   ep.source_ref,
+                   ep.request_id
+            FROM glossary_terms g
+            LEFT JOIN entity_provenance ep
+              ON ep.id = (
+                SELECT ep2.id
+                FROM entity_provenance ep2
+                WHERE ep2.project_id = g.project_id
+                  AND ep2.entity_type = 'glossary_term'
+                  AND ep2.entity_id = g.id
+                ORDER BY ep2.created_at DESC
+                LIMIT 1
+              )
+            WHERE g.project_id = ?1
+            ORDER BY g.term
+            "#,
         )
         .map_err(|_| AppErrorDto::new("DB_QUERY_FAILED", "查询名词库失败", true))?
         .query_map(params![project_id], |row| {
             Ok(GlossaryContextTerm {
-                term: row.get(0)?,
-                term_type: row.get(1)?,
-                locked: row.get::<_, i64>(2)? != 0,
-                banned: row.get::<_, i64>(3)? != 0,
+                id: row.get(0)?,
+                term: row.get(1)?,
+                term_type: row.get(2)?,
+                locked: row.get::<_, i64>(3)? != 0,
+                banned: row.get::<_, i64>(4)? != 0,
+                source_kind: row.get(5)?,
+                source_ref: row.get(6)?,
+                source_request_id: row.get(7)?,
             })
         })
         .map_err(|_| AppErrorDto::new("DB_QUERY_FAILED", "查询名词库失败", true))?
@@ -1699,12 +1738,25 @@ impl ContextService {
             .prepare(
                 r#"
                 SELECT c.id, c.name, c.role_type, c.aliases, c.motivation, c.desire,
-                       c.fear, c.flaw, c.arc_stage, c.identity_text, c.appearance, c.locked_fields
+                       c.fear, c.flaw, c.arc_stage, c.identity_text, c.appearance, c.locked_fields,
+                       COALESCE(ep.source_kind, 'user_input') AS source_kind,
+                       ep.source_ref,
+                       ep.request_id
                 FROM characters c
                 LEFT JOIN chapter_links cl
                   ON cl.target_id = c.id
                  AND cl.target_type = 'character'
                  AND cl.chapter_id = ?1
+                LEFT JOIN entity_provenance ep
+                  ON ep.id = (
+                    SELECT ep2.id
+                    FROM entity_provenance ep2
+                    WHERE ep2.project_id = c.project_id
+                      AND ep2.entity_type = 'character'
+                      AND ep2.entity_id = c.id
+                    ORDER BY ep2.created_at DESC
+                    LIMIT 1
+                  )
                 WHERE c.project_id = ?2 AND c.is_deleted = 0
                 ORDER BY
                   CASE WHEN cl.chapter_id IS NULL THEN 1 ELSE 0 END,
@@ -1728,6 +1780,9 @@ impl ContextService {
                     identity_text: row.get::<_, Option<String>>(9)?,
                     appearance: row.get::<_, Option<String>>(10)?,
                     locked_fields: row.get::<_, Option<String>>(11)?,
+                    source_kind: row.get(12)?,
+                    source_ref: row.get::<_, Option<String>>(13)?,
+                    source_request_id: row.get::<_, Option<String>>(14)?,
                 })
             })
             .map_err(|_| AppErrorDto::new("DB_QUERY_FAILED", "查询角色失败", true))?
@@ -1738,12 +1793,29 @@ impl ContextService {
         let world_rules: Vec<WorldRuleSummary> = conn
             .prepare(
                 r#"
-                SELECT w.id, w.title, w.category, w.description, w.constraint_level
+                SELECT w.id,
+                       w.title,
+                       w.category,
+                       w.description,
+                       w.constraint_level,
+                       COALESCE(ep.source_kind, 'user_input') AS source_kind,
+                       ep.source_ref,
+                       ep.request_id
                 FROM world_rules w
                 LEFT JOIN chapter_links cl
                   ON cl.target_id = w.id
                  AND cl.target_type = 'world_rule'
                  AND cl.chapter_id = ?1
+                LEFT JOIN entity_provenance ep
+                  ON ep.id = (
+                    SELECT ep2.id
+                    FROM entity_provenance ep2
+                    WHERE ep2.project_id = w.project_id
+                      AND ep2.entity_type = 'world_rule'
+                      AND ep2.entity_id = w.id
+                    ORDER BY ep2.created_at DESC
+                    LIMIT 1
+                  )
                 WHERE w.project_id = ?2 AND w.is_deleted = 0
                 ORDER BY
                   CASE WHEN cl.chapter_id IS NULL THEN 1 ELSE 0 END,
@@ -1760,6 +1832,9 @@ impl ContextService {
                     category: row.get(2)?,
                     description: row.get(3)?,
                     constraint_level: row.get(4)?,
+                    source_kind: row.get(5)?,
+                    source_ref: row.get::<_, Option<String>>(6)?,
+                    source_request_id: row.get::<_, Option<String>>(7)?,
                 })
             })
             .map_err(|_| AppErrorDto::new("DB_QUERY_FAILED", "查询世界规则失败", true))?
@@ -1770,12 +1845,30 @@ impl ContextService {
         let plot_nodes: Vec<PlotNodeSummary> = conn
             .prepare(
                 r#"
-                SELECT p.id, p.title, p.node_type, p.goal, p.conflict, p.sort_order
+                SELECT p.id,
+                       p.title,
+                       p.node_type,
+                       p.goal,
+                       p.conflict,
+                       p.sort_order,
+                       COALESCE(ep.source_kind, 'user_input') AS source_kind,
+                       ep.source_ref,
+                       ep.request_id
                 FROM plot_nodes p
                 LEFT JOIN chapter_links cl
                   ON cl.target_id = p.id
                  AND cl.target_type = 'plot_node'
                  AND cl.chapter_id = ?1
+                LEFT JOIN entity_provenance ep
+                  ON ep.id = (
+                    SELECT ep2.id
+                    FROM entity_provenance ep2
+                    WHERE ep2.project_id = p.project_id
+                      AND ep2.entity_type = 'plot_node'
+                      AND ep2.entity_id = p.id
+                    ORDER BY ep2.created_at DESC
+                    LIMIT 1
+                  )
                 WHERE p.project_id = ?2
                 ORDER BY
                   CASE WHEN cl.chapter_id IS NULL THEN 1 ELSE 0 END,
@@ -1793,6 +1886,9 @@ impl ContextService {
                     goal: row.get::<_, Option<String>>(3)?,
                     conflict: row.get::<_, Option<String>>(4)?,
                     sort_order: row.get(5)?,
+                    source_kind: row.get(6)?,
+                    source_ref: row.get::<_, Option<String>>(7)?,
+                    source_request_id: row.get::<_, Option<String>>(8)?,
                 })
             })
             .map_err(|_| AppErrorDto::new("DB_QUERY_FAILED", "查询主线节点失败", true))?
@@ -2478,6 +2574,87 @@ mod tests {
             .expect("query applied item");
         assert_eq!(status, "applied");
         assert!(target_id.is_some());
+
+        remove_temp_workspace(&workspace);
+    }
+
+    #[test]
+    fn collect_editor_context_exposes_provenance_and_defaults_to_user_input() {
+        let workspace = create_temp_workspace();
+        let project_service = ProjectService;
+        let chapter_service = ChapterService;
+        let context_service = ContextService;
+
+        let project = project_service
+            .create_project(CreateProjectInput {
+                name: "来源查询测试".to_string(),
+                author: None,
+                genre: "测试".to_string(),
+                target_words: None,
+                save_directory: workspace.to_string_lossy().to_string(),
+            })
+            .expect("project created");
+        let chapter = chapter_service
+            .create_chapter(
+                &project.project_root,
+                ChapterInput {
+                    title: "第一章".to_string(),
+                    summary: None,
+                    target_words: None,
+                    status: None,
+                },
+            )
+            .expect("chapter created");
+
+        let applied = context_service
+            .apply_asset_candidate(
+                &project.project_root,
+                &chapter.id,
+                ApplyAssetCandidateInput {
+                    label: "白砚".to_string(),
+                    asset_type: "character".to_string(),
+                    evidence: Some("白砚在本章首次亮相".to_string()),
+                    target_kind: Some("character".to_string()),
+                },
+            )
+            .expect("apply candidate");
+
+        let panel_before = context_service
+            .collect_editor_context(&project.project_root, &chapter.id)
+            .expect("collect context before provenance");
+        let character_before = panel_before
+            .characters
+            .iter()
+            .find(|item| item.id == applied.target_id)
+            .expect("character in panel");
+        assert_eq!(character_before.source_kind, "user_input");
+        assert!(character_before.source_ref.is_none());
+
+        let conn = open_database(std::path::Path::new(&project.project_root)).expect("open db");
+        conn.execute(
+            "INSERT INTO entity_provenance(id, project_id, entity_type, entity_id, source_kind, source_ref, request_id, created_at)
+             VALUES(?1, ?2, 'character', ?3, 'manual_promotion', 'blueprint-step-04', 'req-1', ?4)",
+            params![
+                Uuid::new_v4().to_string(),
+                &project.project.project_id,
+                &applied.target_id,
+                "2026-04-30T00:00:00Z"
+            ],
+        )
+        .expect("insert provenance");
+        drop(conn);
+
+        let panel_after = context_service
+            .collect_editor_context(&project.project_root, &chapter.id)
+            .expect("collect context after provenance");
+        let character_after = panel_after
+            .characters
+            .iter()
+            .find(|item| item.id == applied.target_id)
+            .expect("character in panel");
+        assert_eq!(character_after.source_kind, "manual_promotion");
+        assert_eq!(character_after.source_ref.as_deref(), Some("blueprint-step-04"));
+        assert_eq!(character_after.source_request_id.as_deref(), Some("req-1"));
 
         remove_temp_workspace(&workspace);
     }

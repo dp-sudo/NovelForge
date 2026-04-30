@@ -6,7 +6,8 @@ import { Input } from "../../components/forms/Input.js";
 import { Textarea } from "../../components/forms/Textarea.js";
 import { Select } from "../../components/forms/Select.js";
 import { listBlueprintSteps, saveBlueprintStep, markBlueprintCompleted, resetBlueprintStep, generateBlueprintSuggestion } from "../../api/blueprintApi.js";
-import { streamBookGenerationPipeline } from "../../api/bookPipelineApi.js";
+import { buildPromotionStages, streamBookGenerationPipeline } from "../../api/bookPipelineApi.js";
+import { runModuleAiTask } from "../../api/moduleAiApi.js";
 import { useProjectStore } from "../../stores/projectStore.js";
 import { parseBlueprintContent, serializeBlueprintContent } from "../../domain/types.js";
 import type { BlueprintStepKey } from "../../domain/constants.js";
@@ -301,6 +302,16 @@ const FIELD_LABELS: Record<string, Record<string, string>> = {
   "step-08-chapters": { volumeStructure: "卷结构", chapterList: "章节列表", chapterGoals: "章节目标", characters: "出场人物", plotNodes: "关联主线节点" },
 };
 
+const PROMOTION_TARGETS_BY_STEP: Partial<Record<BlueprintStepKey, Array<{ label: string; stageKey: string }>>> = {
+  "step-04-characters": [{ label: "角色", stageKey: "character-seed" }],
+  "step-05-world": [{ label: "世界规则", stageKey: "world-seed" }],
+  "step-06-glossary": [{ label: "核心术语", stageKey: "glossary-seed" }],
+  "step-07-plot": [
+    { label: "剧情节点", stageKey: "plot-seed" },
+    { label: "叙事义务", stageKey: "narrative-seed" },
+  ],
+};
+
 // ── Main component ──
 
 export function BlueprintPage() {
@@ -317,6 +328,7 @@ export function BlueprintPage() {
   const [bookPipelineLogs, setBookPipelineLogs] = useState<string[]>([]);
   const [bookPipelineStatus, setBookPipelineStatus] = useState<string | null>(null);
   const [bookPipelineAbort, setBookPipelineAbort] = useState<AbortController | null>(null);
+  const [promotionRunning, setPromotionRunning] = useState(false);
   const projectRoot = useProjectStore((s) => s.currentProjectPath);
 
   const cur = STEPS[activeIdx];
@@ -351,6 +363,49 @@ export function BlueprintPage() {
 
   function wordCount(): number {
     return Object.values(formData).reduce((sum, v) => sum + v.replace(/\s/g, "").length, 0);
+  }
+
+  function getPromotionTargets() {
+    return PROMOTION_TARGETS_BY_STEP[cur.key] ?? [];
+  }
+
+  async function handlePromoteCurrentStep() {
+    if (!projectRoot || promotionRunning) return;
+    const targets = getPromotionTargets();
+    if (targets.length === 0) {
+      setBookPipelineStatus("当前步骤暂无可晋升资产");
+      return;
+    }
+    const ideaPrompt = (bookIdeaPrompt.trim() || serializeBlueprintContent(formData)).trim();
+    if (!ideaPrompt) {
+      setBookPipelineStatus("请先提供创意提示词后再执行晋升");
+      return;
+    }
+    const promotionStages = buildPromotionStages({ projectRoot, ideaPrompt });
+    const stage = promotionStages.find((item) => item.key === targets[0]?.stageKey) ?? promotionStages[0];
+    if (!stage) {
+      setBookPipelineStatus("当前上下文暂无可执行晋升步骤");
+      return;
+    }
+
+    setPromotionRunning(true);
+    setBookPipelineStatus(null);
+    setBookPipelineLogs((prev) => [...prev, `开始晋升：${stage.label}`]);
+    try {
+      await runModuleAiTask({
+        ...stage.request,
+        uiAction: "book.pipeline.promote.manual",
+      });
+      setBookPipelineLogs((prev) => [...prev, `晋升完成：${stage.label}`]);
+      setBookPipelineStatus(`已完成晋升：${stage.label}`);
+      await load();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "晋升执行失败";
+      setBookPipelineLogs((prev) => [...prev, `晋升失败：${stage.label} - ${message}`]);
+      setBookPipelineStatus(message);
+    } finally {
+      setPromotionRunning(false);
+    }
   }
 
   async function handleSave() {
@@ -504,8 +559,24 @@ export function BlueprintPage() {
                 <Button variant="primary" size="sm" onClick={() => void handleComplete()}>
                   {status === "completed" ? "已完成 ✓" : "标记完成"}
                 </Button>
+                {status === "completed" && getPromotionTargets().length > 0 && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    loading={promotionRunning}
+                    onClick={() => void handlePromoteCurrentStep()}
+                  >
+                    确认并晋升
+                  </Button>
+                )}
               </div>
             </div>
+
+            {status === "completed" && getPromotionTargets().length > 0 && (
+              <p className="mb-3 text-xs text-surface-400">
+                可晋升资产类型：{getPromotionTargets().map((item) => item.label).join(" / ")}
+              </p>
+            )}
 
             <StepForm stepKey={cur.key} data={formData} onChange={handleFormChange} />
 

@@ -17,6 +17,9 @@ export interface ChapterContext {
     motivation: string | null;
     desire: string | null;
     flaw: string | null;
+    sourceKind: string;
+    sourceRef?: string | null;
+    sourceRequestId?: string | null;
   }>;
   worldRules: Array<{
     id: string;
@@ -24,6 +27,9 @@ export interface ChapterContext {
     category: string;
     description: string;
     constraintLevel: string;
+    sourceKind: string;
+    sourceRef?: string | null;
+    sourceRequestId?: string | null;
   }>;
   plotNodes: Array<{
     id: string;
@@ -31,12 +37,19 @@ export interface ChapterContext {
     nodeType: string;
     goal: string | null;
     sortOrder: number;
+    sourceKind: string;
+    sourceRef?: string | null;
+    sourceRequestId?: string | null;
   }>;
   glossary: Array<{
+    id: string;
     term: string;
     termType: string;
     locked: boolean;
     banned: boolean;
+    sourceKind: string;
+    sourceRef?: string | null;
+    sourceRequestId?: string | null;
   }>;
   blueprint: Array<{
     stepKey: string;

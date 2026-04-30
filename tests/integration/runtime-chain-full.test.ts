@@ -80,3 +80,20 @@ test("问题1回归：闭环关键 API 调用命令在 Tauri 侧已注册", asyn
   const missing = [...invoked].filter((command) => !libRs.includes(`::${command}`)).sort();
   assert.deepEqual(missing, [], `关键 API 存在未注册命令: ${missing.join(", ")}`);
 });
+
+test("问题5回归：晋升来源轨迹链路已接入迁移、持久化与上下文查询", async () => {
+  const migration = await readRepoFile("src-tauri/migrations/project/0005_entity_provenance.sql");
+  const migrator = await readRepoFile("src-tauri/src/infra/migrator.rs");
+  const handlers = await readRepoFile("src-tauri/src/services/ai_pipeline/task_handlers.rs");
+  const contextService = await readRepoFile("src-tauri/src/services/context_service.rs");
+
+  assert.match(migration, /CREATE TABLE IF NOT EXISTS entity_provenance/);
+  assert.match(migration, /source_kind TEXT NOT NULL/);
+  assert.match(migration, /source_ref TEXT/);
+  assert.match(migrator, /0005_entity_provenance/);
+  assert.match(handlers, /INSERT INTO entity_provenance/);
+  assert.match(handlers, /manual_promotion/);
+  assert.match(handlers, /auto_promotion/);
+  assert.match(contextService, /entity_provenance/);
+  assert.match(contextService, /source_kind/);
+});

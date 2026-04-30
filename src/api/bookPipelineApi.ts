@@ -259,7 +259,7 @@ function buildNarrativeSeedInstruction(baseIdea: string): string {
 
 export function buildBookStages(input: RunBookGenerationInput): BookStage[] {
   const base = input.ideaPrompt.trim();
-  const stages: BookStage[] = BLUEPRINT_STAGES.map((stage) => ({
+  return BLUEPRINT_STAGES.map((stage) => ({
     key: stage.key,
     label: stage.label,
     request: {
@@ -273,8 +273,11 @@ export function buildBookStages(input: RunBookGenerationInput): BookStage[] {
       automationTier: "supervised",
     },
   }));
+}
 
-  stages.push(
+export function buildPromotionStages(input: RunBookGenerationInput): BookStage[] {
+  const base = input.ideaPrompt.trim();
+  const stages: BookStage[] = [
     {
       key: "character-seed",
       label: "角色: 核心角色草案",
@@ -335,7 +338,8 @@ export function buildBookStages(input: RunBookGenerationInput): BookStage[] {
         automationTier: "confirm",
       },
     },
-  );
+  ];
+
   if (input.chapterId) {
     stages.push({
       key: "chapter-plan",
@@ -347,7 +351,7 @@ export function buildBookStages(input: RunBookGenerationInput): BookStage[] {
         userInstruction: base,
         autoPersist: true,
         persistMode: "formal",
-        automationTier: "auto",
+        automationTier: "confirm",
       },
     });
   }

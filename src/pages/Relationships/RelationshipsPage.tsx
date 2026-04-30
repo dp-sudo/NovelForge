@@ -114,6 +114,12 @@ export function RelationshipsPage() {
         </div>
       </div>
 
+      <div className="mb-4 rounded-lg border border-surface-700 bg-surface-800/70 px-3 py-2">
+        <p className="text-xs text-surface-400">
+          本页为派生审阅层，展示已晋升的正式数据与待审信息
+        </p>
+      </div>
+
       {loading ? (
         <Card padding="lg">
           <p className="text-sm text-surface-400">加载中...</p>

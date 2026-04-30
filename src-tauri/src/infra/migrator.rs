@@ -48,6 +48,10 @@ fn project_migrations() -> Vec<Migration> {
             version: "0004_ai_strategy_profile",
             sql: include_str!("../../migrations/project/0004_ai_strategy_profile.sql"),
         },
+        Migration {
+            version: "0005_entity_provenance",
+            sql: include_str!("../../migrations/project/0005_entity_provenance.sql"),
+        },
     ]
 }
 

@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
-use rusqlite::params;
+use rusqlite::{params, Connection};
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -181,7 +181,155 @@ impl TaskHandlers {
             }
             _ => {}
         }
+        self.record_entity_provenance_for_records(
+            canonical_task,
+            project_root,
+            input,
+            request_id,
+            &records,
+        )?;
         Ok(records)
+    }
+
+    fn record_entity_provenance_for_records(
+        &self,
+        canonical_task: &str,
+        project_root: &str,
+        input: &RunAiTaskPipelineInput,
+        request_id: &str,
+        records: &[PersistedRecord],
+    ) -> Result<(), AppErrorDto> {
+        if records.is_empty() {
+            return Ok(());
+        }
+        let source_kind = match Self::resolve_provenance_source_kind(canonical_task, input) {
+            Some(kind) => kind,
+            None => return Ok(()),
+        };
+        let source_ref = Self::resolve_provenance_source_ref(canonical_task, input);
+
+        let conn = open_database(Path::new(project_root)).map_err(|err| {
+            AppErrorDto::new("DB_OPEN_FAILED", "无法打开项目数据库", false)
+                .with_detail(err.to_string())
+        })?;
+        let project_id = get_project_id(&conn)?;
+        for record in records {
+            if !Self::should_record_provenance(canonical_task, record) {
+                continue;
+            }
+            Self::insert_entity_provenance(
+                &conn,
+                &project_id,
+                &record.entity_type,
+                &record.entity_id,
+                source_kind,
+                source_ref.as_deref(),
+                request_id,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn should_record_provenance(canonical_task: &str, record: &PersistedRecord) -> bool {
+        match canonical_task {
+            "blueprint.generate_step" => record.entity_type == "blueprint_step",
+            "character.create"
+            | "world.create_rule"
+            | "plot.create_node"
+            | "glossary.create_term"
+            | "narrative.create_obligation"
+            | "chapter.plan" => true,
+            _ => false,
+        }
+    }
+
+    fn resolve_provenance_source_kind(
+        canonical_task: &str,
+        input: &RunAiTaskPipelineInput,
+    ) -> Option<&'static str> {
+        match canonical_task {
+            "blueprint.generate_step" => Some("blueprint_draft"),
+            "character.create"
+            | "world.create_rule"
+            | "plot.create_node"
+            | "glossary.create_term"
+            | "narrative.create_obligation"
+            | "chapter.plan" => {
+                if Self::is_promotion_action(input.ui_action.as_deref()) {
+                    let tier = input
+                        .automation_tier
+                        .as_deref()
+                        .map(str::trim)
+                        .unwrap_or("");
+                    if tier.eq_ignore_ascii_case("auto") || tier.eq_ignore_ascii_case("supervised")
+                    {
+                        Some("auto_promotion")
+                    } else {
+                        Some("manual_promotion")
+                    }
+                } else {
+                    Some("ai_generation")
+                }
+            }
+            _ => None,
+        }
+    }
+
+    fn resolve_provenance_source_ref(
+        canonical_task: &str,
+        input: &RunAiTaskPipelineInput,
+    ) -> Option<String> {
+        if canonical_task == "blueprint.generate_step" {
+            return input
+                .blueprint_step_key
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string);
+        }
+        input
+            .ui_action
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    }
+
+    fn is_promotion_action(ui_action: Option<&str>) -> bool {
+        ui_action
+            .map(str::trim)
+            .map(|value| value.to_ascii_lowercase().contains("promote"))
+            .unwrap_or(false)
+    }
+
+    fn insert_entity_provenance(
+        conn: &Connection,
+        project_id: &str,
+        entity_type: &str,
+        entity_id: &str,
+        source_kind: &str,
+        source_ref: Option<&str>,
+        request_id: &str,
+    ) -> Result<(), AppErrorDto> {
+        conn.execute(
+            "INSERT INTO entity_provenance (id, project_id, entity_type, entity_id, source_kind, source_ref, request_id, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                Uuid::new_v4().to_string(),
+                project_id,
+                entity_type,
+                entity_id,
+                source_kind,
+                source_ref,
+                request_id,
+                now_iso(),
+            ],
+        )
+        .map_err(|err| {
+            AppErrorDto::new("PIPELINE_PROVENANCE_WRITE_FAILED", "写入来源轨迹失败", true)
+                .with_detail(err.to_string())
+        })?;
+        Ok(())
     }
 
     fn build_character_create_input(
@@ -1792,7 +1940,10 @@ mod tests {
     use std::fs;
     use std::path::PathBuf;
 
+    use rusqlite::params;
+
     use super::TaskHandlers;
+    use crate::infra::database::open_database;
     use crate::services::ai_pipeline_service::RunAiTaskPipelineInput;
     use crate::services::chapter_service::{ChapterInput, ChapterService};
     use crate::services::character_service::CharacterService;
@@ -2297,6 +2448,67 @@ mod tests {
         assert_eq!(chapters[0].summary, "主角在雪夜确认灭门线索。");
         assert_eq!(chapters[0].status, "planned");
         assert_eq!(chapters[0].target_words, 2800);
+
+        remove_temp_workspace(&workspace);
+    }
+
+    #[test]
+    fn persist_task_output_records_manual_promotion_provenance() {
+        let workspace = create_temp_workspace();
+        let project_service = ProjectService;
+        let project = project_service
+            .create_project(CreateProjectInput {
+                name: "来源轨迹记录测试".to_string(),
+                author: None,
+                genre: "玄幻".to_string(),
+                target_words: None,
+                save_directory: workspace.to_string_lossy().to_string(),
+            })
+            .expect("project should be created");
+
+        let mut input = build_pipeline_input(&project.project_root, "character.create", None);
+        input.ui_action = Some("book.pipeline.promote.manual".to_string());
+        input.automation_tier = Some("confirm".to_string());
+        let output = r#"
+        {
+          "name": "林夜",
+          "roleType": "主角",
+          "motivation": "守住故土"
+        }
+        "#;
+
+        let records = TaskHandlers::default()
+            .persist_task_output(
+                "character.create",
+                &project.project_root,
+                &input,
+                output,
+                "req-promo-manual",
+            )
+            .expect("character create persist should succeed");
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].entity_type, "character");
+
+        let conn = open_database(std::path::Path::new(&project.project_root)).expect("open db");
+        let (source_kind, source_ref, provenance_request_id): (
+            String,
+            Option<String>,
+            Option<String>,
+        ) = conn
+            .query_row(
+                "SELECT source_kind, source_ref, request_id
+                 FROM entity_provenance
+                 WHERE project_id = ?1 AND entity_type = 'character' AND entity_id = ?2
+                 ORDER BY created_at DESC
+                 LIMIT 1",
+                params![&project.project.project_id, &records[0].entity_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .expect("provenance row");
+
+        assert_eq!(source_kind, "manual_promotion");
+        assert_eq!(source_ref.as_deref(), Some("book.pipeline.promote.manual"));
+        assert_eq!(provenance_request_id.as_deref(), Some("req-promo-manual"));
 
         remove_temp_workspace(&workspace);
     }
