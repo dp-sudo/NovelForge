@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import path from "node:path";
 import test from "node:test";
 
 import { BLUEPRINT_DEFAULTS, parseBlueprintContent } from "../../src/domain/types.js";
@@ -184,5 +186,14 @@ test("问题5回填准确率：蓝图 8 步字段可 100% 映射到表单", () =
     const filled = Object.values(parsed).filter((value) => value.trim().length > 0).length;
     assert.equal(filled, total, `step ${step.stepKey} should fill all ${total} fields`);
   }
+});
+
+test("蓝图闭环契约：Blueprint 页面暴露窗口级规划与摘要回报区", async () => {
+  const page = await fs.readFile(
+    path.join(process.cwd(), "src/pages/Blueprint/BlueprintPage.tsx"),
+    "utf-8",
+  );
+  assert.match(page, /windowPlanningHorizon/);
+  assert.match(page, /摘要回报/);
 });
 

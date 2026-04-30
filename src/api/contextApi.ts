@@ -1,4 +1,5 @@
 import { invokeCommand } from "./tauriClient.js";
+import { listChapters, type ChapterRecord } from "./chapterApi.js";
 
 export interface ChapterContext {
   chapter: {
@@ -137,6 +138,98 @@ export interface ApplyStructuredDraftResult {
   draftItemStatus: string | null;
   primaryTargetId: string;
   secondaryTargetId: string | null;
+}
+
+export interface SummaryFeedbackData {
+  keyVariableDelta: string[];
+  driftWarnings: string[];
+  assetPromotionCount: number;
+  stateUpdateCount: number;
+}
+
+function summarizeStateDelta(context: ChapterContext): string[] {
+  return context.stateSummary
+    .slice(0, 6)
+    .map((item) => {
+      if (item.subjectType === "window" && item.stateKind === "progress") {
+        const chapterId = typeof item.payload.chapterId === "string" ? item.payload.chapterId : item.subjectId;
+        const wordCount = typeof item.payload.wordCount === "number" ? item.payload.wordCount : null;
+        if (wordCount !== null) {
+          return `窗口进度更新：${chapterId}（${wordCount} 字）`;
+        }
+        return `窗口进度更新：${chapterId}`;
+      }
+      return `${item.subjectType}:${item.subjectId} -> ${item.stateKind}`;
+    });
+}
+
+function collectDriftWarnings(chapters: ChapterRecord[], plannedChapterCount: number): string[] {
+  const warnings: string[] = [];
+
+  for (const chapter of chapters) {
+    if (chapter.targetWords <= 0 || chapter.currentWords <= 0) continue;
+    const delta = Math.abs(chapter.currentWords - chapter.targetWords) / chapter.targetWords;
+    if (delta >= 0.35) {
+      warnings.push(
+        `第 ${chapter.chapterIndex} 章字数偏差 ${Math.round(delta * 100)}%（目标 ${chapter.targetWords}，当前 ${chapter.currentWords}）`,
+      );
+    }
+  }
+
+  if (plannedChapterCount > 0 && chapters.length > plannedChapterCount) {
+    warnings.push(`实际章节数 ${chapters.length} 已超过蓝图计划 ${plannedChapterCount}`);
+  } else if (plannedChapterCount > 0 && plannedChapterCount - chapters.length >= 3) {
+    warnings.push(`当前章节数 ${chapters.length} 低于蓝图计划 ${plannedChapterCount}，窗口执行存在滞后`);
+  }
+
+  return warnings;
+}
+
+export async function getSummaryFeedback(
+  projectRoot: string,
+  plannedChapterCount = 0,
+): Promise<SummaryFeedbackData> {
+  const chapters = await listChapters(projectRoot);
+  if (chapters.length === 0) {
+    return {
+      keyVariableDelta: [],
+      driftWarnings: [],
+      assetPromotionCount: 0,
+      stateUpdateCount: 0,
+    };
+  }
+
+  const firstChapter = [...chapters].sort((a, b) => a.chapterIndex - b.chapterIndex)[0];
+  if (!firstChapter) {
+    return {
+      keyVariableDelta: [],
+      driftWarnings: [],
+      assetPromotionCount: 0,
+      stateUpdateCount: 0,
+    };
+  }
+
+  try {
+    const context = await getChapterContext(projectRoot, firstChapter.id);
+    const assetPromotionCount =
+      [...context.characters, ...context.worldRules, ...context.plotNodes, ...context.glossary]
+        .filter((entity) => entity.sourceKind !== "user_input")
+        .length;
+
+    return {
+      keyVariableDelta: summarizeStateDelta(context),
+      driftWarnings: collectDriftWarnings(chapters, plannedChapterCount),
+      assetPromotionCount,
+      stateUpdateCount: context.stateSummary.length,
+    };
+  } catch {
+    return {
+      keyVariableDelta: [],
+      driftWarnings: collectDriftWarnings(chapters, plannedChapterCount),
+      assetPromotionCount: 0,
+      stateUpdateCount: 0,
+    };
+  }
 }
 
 export async function applyAssetCandidate(

@@ -5,9 +5,18 @@ import { Button } from "../../components/ui/Button.js";
 import { Input } from "../../components/forms/Input.js";
 import { Textarea } from "../../components/forms/Textarea.js";
 import { Select } from "../../components/forms/Select.js";
-import { listBlueprintSteps, saveBlueprintStep, markBlueprintCompleted, resetBlueprintStep, generateBlueprintSuggestion } from "../../api/blueprintApi.js";
+import {
+  listBlueprintSteps,
+  saveBlueprintStep,
+  markBlueprintCompleted,
+  resetBlueprintStep,
+  generateBlueprintSuggestion,
+  getWindowPlanningData,
+  type WindowPlanningData,
+} from "../../api/blueprintApi.js";
 import { buildPromotionStages, streamBookGenerationPipeline } from "../../api/bookPipelineApi.js";
 import { runModuleAiTask } from "../../api/moduleAiApi.js";
+import { getSummaryFeedback, type SummaryFeedbackData } from "../../api/contextApi.js";
 import { useProjectStore } from "../../stores/projectStore.js";
 import { parseBlueprintContent, serializeBlueprintContent } from "../../domain/types.js";
 import type { BlueprintStepKey } from "../../domain/constants.js";
@@ -329,6 +338,10 @@ export function BlueprintPage() {
   const [bookPipelineStatus, setBookPipelineStatus] = useState<string | null>(null);
   const [bookPipelineAbort, setBookPipelineAbort] = useState<AbortController | null>(null);
   const [promotionRunning, setPromotionRunning] = useState(false);
+  const [windowPlanningData, setWindowPlanningData] = useState<WindowPlanningData | null>(null);
+  const [summaryFeedback, setSummaryFeedback] = useState<SummaryFeedbackData | null>(null);
+  const [loopLoading, setLoopLoading] = useState(false);
+  const [loopError, setLoopError] = useState<string | null>(null);
   const projectRoot = useProjectStore((s) => s.currentProjectPath);
 
   const cur = STEPS[activeIdx];
@@ -340,7 +353,32 @@ export function BlueprintPage() {
     setSteps(data);
   }, [projectRoot]);
 
+  const loadLoopData = useCallback(async () => {
+    if (!projectRoot) {
+      setWindowPlanningData(null);
+      setSummaryFeedback(null);
+      setLoopError(null);
+      return;
+    }
+
+    setLoopLoading(true);
+    setLoopError(null);
+    try {
+      const windowData = await getWindowPlanningData(projectRoot);
+      const feedback = await getSummaryFeedback(projectRoot, windowData.plannedChapterCount);
+      setWindowPlanningData(windowData);
+      setSummaryFeedback(feedback);
+    } catch (error) {
+      setLoopError(error instanceof Error ? error.message : "窗口蓝图回报加载失败");
+      setWindowPlanningData(null);
+      setSummaryFeedback(null);
+    } finally {
+      setLoopLoading(false);
+    }
+  }, [projectRoot]);
+
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => { void loadLoopData(); }, [loadLoopData]);
 
   // Populate formData when active step changes or steps load
   useEffect(() => {
@@ -398,7 +436,7 @@ export function BlueprintPage() {
       });
       setBookPipelineLogs((prev) => [...prev, `晋升完成：${stage.label}`]);
       setBookPipelineStatus(`已完成晋升：${stage.label}`);
-      await load();
+      await Promise.all([load(), loadLoopData()]);
     } catch (error) {
       const message = error instanceof Error ? error.message : "晋升执行失败";
       setBookPipelineLogs((prev) => [...prev, `晋升失败：${stage.label} - ${message}`]);
@@ -414,7 +452,7 @@ export function BlueprintPage() {
     try {
       const json = JSON.stringify(formData);
       await saveBlueprintStep(cur.key, json, false, projectRoot);
-      await load();
+      await Promise.all([load(), loadLoopData()]);
     } finally { setSaving(false); }
   }
 
@@ -425,7 +463,7 @@ export function BlueprintPage() {
       await saveBlueprintStep(cur.key, json, false, projectRoot);
     }
     await markBlueprintCompleted(cur.key, projectRoot);
-    await load();
+    await Promise.all([load(), loadLoopData()]);
   }
 
   async function handleReset() {
@@ -433,7 +471,7 @@ export function BlueprintPage() {
     await resetBlueprintStep(cur.key, projectRoot);
     setFormData(parseBlueprintContent(cur.key, ""));
     setAiResult(null);
-    await load();
+    await Promise.all([load(), loadLoopData()]);
   }
 
   async function handleAiSuggest() {
@@ -452,7 +490,7 @@ export function BlueprintPage() {
         userInstruction: textSummary || ""
       });
       setAiResult(suggestion.trim() ? suggestion : "AI 返回为空内容，请重试或切换模型后再试。");
-      await load();
+      await Promise.all([load(), loadLoopData()]);
     } catch {
       setAiResult("AI 建议生成失败。请检查 AI 供应商配置。");
     } finally { setAiLoading(false); }
@@ -498,7 +536,7 @@ export function BlueprintPage() {
         }
       }
       setBookPipelineStatus("全书生成编排执行完成");
-      await load();
+      await Promise.all([load(), loadLoopData()]);
     } catch (error) {
       setBookPipelineStatus(error instanceof Error ? error.message : "全书生成编排执行失败");
     } finally {
@@ -600,6 +638,78 @@ export function BlueprintPage() {
               </div>
             )}
           </Card>
+
+          <div className="mt-4 grid grid-cols-1 xl:grid-cols-2 gap-4">
+            <Card padding="md">
+              <h3 className="text-sm font-semibold text-surface-200 mb-2">窗口规划</h3>
+              {loopLoading ? (
+                <p className="text-xs text-surface-400">窗口蓝图加载中...</p>
+              ) : loopError ? (
+                <p className="text-xs text-error">{loopError}</p>
+              ) : !windowPlanningData ? (
+                <p className="text-xs text-surface-400">暂无窗口规划</p>
+              ) : (
+                <div className="space-y-2">
+                  <p className="text-xs text-surface-300">
+                    未来 {windowPlanningData.windowPlanningHorizon} 章（windowPlanningHorizon）
+                  </p>
+                  <p className="text-xs text-surface-400">
+                    卷结构：{windowPlanningData.volumeStructure || "暂无卷结构"}
+                  </p>
+                  <p className="text-xs text-surface-400">
+                    当前卷进度：{windowPlanningData.currentVolumeProgress}%
+                  </p>
+                  <p className="text-xs text-surface-400">
+                    计划章节数：{windowPlanningData.plannedChapterCount || 0}
+                  </p>
+                  {windowPlanningData.chapterGoals.length === 0 ? (
+                    <p className="text-xs text-surface-500">暂无章节目标</p>
+                  ) : (
+                    <ul className="space-y-1 text-xs text-surface-300">
+                      {windowPlanningData.chapterGoals.map((goal, index) => (
+                        <li key={`${goal}-${index}`}>- {goal}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+            </Card>
+
+            <Card padding="md">
+              <h3 className="text-sm font-semibold text-surface-200 mb-2">摘要回报</h3>
+              {loopLoading ? (
+                <p className="text-xs text-surface-400">摘要回报加载中...</p>
+              ) : !summaryFeedback ? (
+                <p className="text-xs text-surface-400">暂无摘要回报</p>
+              ) : (
+                <div className="space-y-2">
+                  <div className="flex gap-3 text-xs text-surface-300">
+                    <span>晋升资产：{summaryFeedback.assetPromotionCount}</span>
+                    <span>状态更新：{summaryFeedback.stateUpdateCount}</span>
+                  </div>
+                  {summaryFeedback.keyVariableDelta.length === 0 ? (
+                    <p className="text-xs text-surface-500">暂无关键变量变化</p>
+                  ) : (
+                    <ul className="space-y-1 text-xs text-surface-300">
+                      {summaryFeedback.keyVariableDelta.map((delta, index) => (
+                        <li key={`${delta}-${index}`}>- {delta}</li>
+                      ))}
+                    </ul>
+                  )}
+                  {summaryFeedback.driftWarnings.length > 0 && (
+                    <div className="rounded-lg border border-warning/40 bg-warning/10 px-2 py-2">
+                      <p className="text-xs text-warning mb-1">漂移警告</p>
+                      <ul className="space-y-1 text-xs text-warning">
+                        {summaryFeedback.driftWarnings.map((warning, index) => (
+                          <li key={`${warning}-${index}`}>- {warning}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              )}
+            </Card>
+          </div>
         </div>
 
         {/* ── AI sidebar ── */}
