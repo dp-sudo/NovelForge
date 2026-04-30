@@ -40,6 +40,11 @@ export interface RunBookGenerationInput {
   chapterId?: string;
 }
 
+function normalizeChapterId(chapterId?: string): string | undefined {
+  const trimmed = chapterId?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
 export type BookPipelineEvent =
   | {
     type: "stage-start";
@@ -277,6 +282,7 @@ export function buildBookStages(input: RunBookGenerationInput): BookStage[] {
 
 export function buildPromotionStages(input: RunBookGenerationInput): BookStage[] {
   const base = input.ideaPrompt.trim();
+  const chapterId = normalizeChapterId(input.chapterId);
   const stages: BookStage[] = [
     {
       key: "character-seed",
@@ -340,14 +346,14 @@ export function buildPromotionStages(input: RunBookGenerationInput): BookStage[]
     },
   ];
 
-  if (input.chapterId) {
+  if (chapterId) {
     stages.push({
       key: "chapter-plan",
       label: "章节: 章节计划",
       request: {
         projectRoot: input.projectRoot,
         taskType: "chapter.plan",
-        chapterId: input.chapterId,
+        chapterId,
         userInstruction: base,
         autoPersist: true,
         persistMode: "formal",

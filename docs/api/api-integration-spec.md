@@ -1,8 +1,8 @@
 # NovelForge API 集成文档（Frontend <-> Tauri <-> Rust）
 
 ## 1. 文档信息
-- 版本：v0.8
-- 状态：S18（AI Pipeline v1 + 结构化草案池闭环 + 项目级 AI 策略）
+- 版本：v0.9
+- 状态：S20（AI 生产系统闭环：策略权威源 + 持久化契约 + Continuity Pack + 技能运行期）
 - 最后更新：2026-04-30
 - 代码基线：`src/api/*`、`src-tauri/src/commands/*`
 
@@ -141,7 +141,8 @@
 - `get_skill(id) -> SkillManifest`
 - `get_skill_content(id) -> string`
 - `create_skill(input) -> SkillManifest`
-- `update_skill(id, body) -> SkillManifest`
+- `update_skill(input: { id, body?, manifest? }) -> SkillManifest`
+  - `manifest` 为可选 patch，支持更新 `skillClass/bundleIds/alwaysOn/triggerConditions/requiredContexts/stateWrites/automationTier/sceneTags/affectsLayers` 等元数据
 - `delete_skill(id) -> void`
 - `import_skill_file(filePath) -> SkillManifest`
 - `reset_builtin_skill(id) -> SkillManifest`
@@ -160,6 +161,9 @@
   - 兼容规则：
     - 当 `persistMode` 存在时，以 `persistMode` 语义为准（覆盖 `autoPersist`）。
     - 当仅有 `autoPersist: true` 时，前端按任务类型推断 `persistMode`，默认 `automationTier = "supervised"`。
+  - 运行时行为：
+    - `prompt` 前会编译 `ContinuityPack`，并注入技能选择结果。
+    - 若技能命中 `route_override`，仅覆盖本次请求的 provider/model，不修改项目配置。
 - AI 功能任务（前端薄封装，统一走 pipeline）：
   - `generateBlueprintSuggestion` -> `runModuleAiTask(taskType="blueprint.generate_step")`
   - `aiGenerateCharacter` -> `runModuleAiTask(taskType="character.create")`
@@ -211,6 +215,7 @@ interface AppErrorDto {
 3. `get_chapter_context` 返回 `assetCandidates` 与三类 `*Drafts`。
 4. `apply_asset_candidate` 与 `apply_structured_draft` 可成功入库。
 5. 任务路由页面保存后，`list_task_routes` 回显 canonical 结果。
+6. `save_ai_strategy_profile/get_ai_strategy_profile` 可在 `project.sqlite.projects.ai_strategy_profile` 往返读写。
 
 ## 9. 文档维护规则
 以下变化必须同步更新本文档：

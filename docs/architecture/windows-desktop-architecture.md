@@ -1,8 +1,8 @@
 # NovelForge Windows 桌面端技术架构文档
 
 ## 1. 文档信息
-- 版本：v0.7
-- 状态：S18（AI Pipeline v1 + 结构化草案池 + 写作风格/项目级 AI 策略 + 技能管理）
+- 版本：v0.8
+- 状态：S20（AI 生产系统闭环：策略权威源 + State Ledger + Continuity Pack + 技能运行期 + 滚动蓝图）
 - 最后更新：2026-04-30
 - 代码基线：`src/` + `src-tauri/src/`
 
@@ -11,6 +11,14 @@
 - 主闭环优先：项目 -> 蓝图/资产 -> 章节写作 -> AI 任务 -> 人工确认 -> 检查 -> 导出。
 - 安全基线：API Key 不写入项目目录与日志明文（存于 Windows Credential Manager）。
 - 主链路收口：前端业务能力默认通过 Tauri command 调用，不走并行 Node 业务运行时。
+- 五层对象落地：`Story Constitution` / `Canon Registry` / `State Ledger` / `Execution Workspace` / `Review Trail`。
+
+### 2.1 AI 生产系统对象（运行期）
+- `Story Constitution`：`blueprint_steps` + `projects.ai_strategy_profile`（目标、约束、默认策略）。
+- `Canon Registry`：正式资产表（`characters/world_rules/plot_nodes/glossary_terms/narrative_obligations/chapters`）。
+- `State Ledger`：`story_state`（章节写后状态增量，如窗口进度）。
+- `Execution Workspace`：`ai_pipeline_runs`、`structured_draft_*`、`ai_requests` 与编辑器执行态。
+- `Review Trail`：`entity_provenance` + 派生审阅结果（timeline/relationships review）。
 
 ## 3. 技术栈
 - 桌面框架：Tauri 2.x
@@ -52,6 +60,7 @@
   - `WorldService`, `GlossaryService`, `PlotService`, `NarrativeService`
   - `ContextService`, `ConsistencyService`, `DashboardService`, `IntegrityService`
   - `SearchService`, `VectorService`
+  - `StoryStateService`
   - `SettingsService`, `ModelRegistryService`, `GitService`, `LicenseService`
   - `SkillRegistry`
 
@@ -79,16 +88,20 @@
 - 核心表：
   - `projects`, `chapters`, `blueprint_steps`, `characters`, `world_rules`, `glossary_terms`, `plot_nodes`, `chapter_links`
   - `character_relationships`, `consistency_issues`, `narrative_obligations`, `snapshots`, `volumes`
-- AI/运行审计表：
+- AI/运行审计与闭环表：
   - `ai_requests`
   - `ai_pipeline_runs`
   - `structured_draft_batches`
   - `structured_draft_items`
+  - `entity_provenance`
+  - `story_state`
 - 迁移现状：
   - `project/0001_init.sql`
   - `project/0002_task_route_unique.sql`（任务类型 canonical + 去重 + 唯一索引）
   - `project/0003_pipeline_draft_pool.sql`（Pipeline run 审计 + 草案池）
   - `project/0004_ai_strategy_profile.sql`（项目级 AI 策略配置列）
+  - `project/0005_entity_provenance.sql`（正式资产来源轨迹）
+  - `project/0006_story_state.sql`（状态账本）
 - 兼容补列：
   - `database.rs::ensure_compatible_schema()` 在打开/初始化时补齐 `projects.writing_style`、`projects.ai_strategy_profile` 等历史缺列。
 
@@ -99,6 +112,7 @@
   - `app/0002_skill_index.sql`
   - `app/0003_task_route_unique.sql`（canonical + 去重 + `task_type` 唯一索引）
 - 编辑器设置通过 `app_settings` 的 `editor_settings` 键持久化。
+- 应用级 Provider/模型/路由运行期真相源在 `novelforge.db`；项目级 AI 策略真相源在 `project.sqlite`。
 
 ### 5.4 应用级本地文件
 - `%LOCALAPPDATA%\\NovelForge\\license.json`：授权离线缓存。
@@ -122,9 +136,20 @@
 ### 6.3 Prompt 解析策略
 - 优先读取技能 Markdown 模板（`SkillRegistry`）。
 - 未命中模板时回退 `PromptBuilder`。
-- `projects.writing_style` 会注入到 PromptBuilder 输出（适用章节/改写/检查等任务）。
+- 章节任务在 `prompt` 前会先编译 `ContinuityPack`（Constitution/Canon/Lexicon Policy/State/Promise/Window/Recent）。
+- `projects.writing_style` 与已选技能栈（workflow/capability/policy/review）会共同注入提示词。
 
-### 6.4 编辑器结构化抽取闭环
+### 6.4 运行期技能消费与路由覆盖
+- `orchestrator` 在 `route` 阶段执行 `select_skills_for_task`。
+- `ai_service.stream_generate_for_pipeline` 消费 `route_override`，仅覆盖本次请求 provider/model，不改项目配置。
+- `ai:pipeline:event.meta` 回传所选技能数量与 route override 元信息，便于审计。
+
+### 6.5 写后回写与来源轨迹
+- `save_chapter_content` 写正文后调用 `StoryStateService.record_window_progress` 回写窗口状态。
+- `task_handlers.persist_task_output` 在正式资产写入后统一记录 `entity_provenance`。
+- 手动 CRUD（character/world/plot/glossary/narrative）创建时写入 `source_kind = "user_input"`。
+
+### 6.6 编辑器结构化抽取闭环
 - `ContextService.collect_editor_context()` 从章节内容抽取：
   - 资产候选：`assetCandidates`
   - 结构化草案：`relationshipDrafts`, `involvementDrafts`, `sceneDrafts`
@@ -132,7 +157,6 @@
 - 用户在 UI 手动确认后调用 `apply_structured_draft` 落库并回写状态。
 
 ## 7. 命令面（按域摘要）
-- Project：项目创建/打开/最近项目 + 写作风格保存读取 + Git 仓库与快照。
 - Project：项目创建/打开/最近项目 + 写作风格/项目级 AI 策略保存读取 + Git 仓库与快照。
 - Chapter：章节 CRUD、重排、自动保存/恢复、快照、卷管理。
 - AI：pipeline run/cancel，模块化 AI 任务通过前端 API 薄封装统一转发到 pipeline（legacy stream 命令已移除）。

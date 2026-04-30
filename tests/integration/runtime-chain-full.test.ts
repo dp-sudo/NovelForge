@@ -117,3 +117,19 @@ test("问题9契约：审阅层页面明确标注非一级事实源", async () =
   assert.match(timeline, /不是一级事实源/);
   assert.match(relationships, /不是一级事实源/);
 });
+
+test("问题9.5契约：手动 CRUD 服务写入 user_input 来源轨迹", async () => {
+  const files = [
+    "src-tauri/src/services/character_service.rs",
+    "src-tauri/src/services/world_service.rs",
+    "src-tauri/src/services/plot_service.rs",
+    "src-tauri/src/services/glossary_service.rs",
+    "src-tauri/src/services/narrative_service.rs",
+  ];
+
+  for (const file of files) {
+    const raw = await readRepoFile(file);
+    assert.match(raw, /entity_provenance/, `${file} 未写入来源轨迹表`);
+    assert.match(raw, /user_input/, `${file} 未写入 user_input 来源类型`);
+  }
+});

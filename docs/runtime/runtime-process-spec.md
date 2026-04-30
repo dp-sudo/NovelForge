@@ -1,8 +1,8 @@
 # NovelForge 运行流程文档（Main / Renderer / API / Service）
 
 ## 1. 文档信息
-- 版本：v0.8
-- 状态：S18（AI Pipeline v1 + 项目级 AI 策略权威源）
+- 版本：v0.9
+- 状态：S20（AI 生产系统闭环：策略权威源 + State Ledger + Continuity Pack + 技能运行期）
 - 最后更新：2026-04-30
 
 ## 2. 运行时角色
@@ -51,7 +51,7 @@
 ### 4.3 编辑器 AI（Pipeline 主链路）
 1. 点击 9 个固定按钮之一或输入自定义指令。
 2. `EditorPage` 先做前置校验（章节/选区/指令/正文要求）。
-3. 调用 `run_ai_task_pipeline` 得到 `requestId`。
+3. 调用 `run_ai_task_pipeline` 得到 `requestId`（输入支持 `autoPersist` + `persistMode` + `automationTier`）。
 4. 通过 `streamTaskPipeline` 监听 `ai:pipeline:event`。
 5. 事件按阶段推进：
    - `validate`
@@ -64,6 +64,12 @@
    - `done`
 6. 若报错，前端按 `errorCode + phase` 映射建议动作并展示。
 7. 用户可触发 `cancel_ai_task_pipeline` 取消进行中的任务。
+
+#### 4.3.1 章节链路（Task 10 对齐）
+1. 编译 `Continuity Pack`（Constitution/Canon/Lexicon Policy/State/Promise/Window/Recent）。
+2. 装配技能栈（workflow/capability/policy/review）并解析可选 `route override`。
+3. 生成章节计划/草稿/改写等任务输出。
+4. 写后回写 `Canon + State`：正式资产入库并写 `entity_provenance`，章节保存后回写 `story_state`。
 
 ### 4.4 编辑器 9 按钮任务映射（canonical）
 - `chapter.continue`（续写章节）
@@ -105,6 +111,15 @@
 - Git 快照：`init_project_repository/get_project_repository_status/commit_project_snapshot/list_project_history`。
 - 授权与更新：`get_license_status/activate_license/check_app_update/install_app_update`。
 
+### 4.8 蓝图与晋升边界
+- 蓝图页“一键全书生成”默认只执行 8 步 `blueprint.generate_step`（蓝图阶段）。
+- 资产晋升通过“确认并晋升”独立触发（角色/世界/剧情/术语/叙事/章节计划）。
+- `chapter-plan` 章节选择策略（仅晋升入口）：
+  1. 用户显式选择章节；
+  2. 当前编辑器活动章节；
+  3. 章节列表中首个可规划章节（优先未完成）；
+  4. 若仍为空则提示“请选择章节以生成章节计划”，并跳过该晋升步骤。
+
 ## 5. 失败处理策略
 - 统一错误结构：`AppErrorDto`。
 - 前端统一错误入口：`invokeCommand` 抛出的错误对象。
@@ -118,6 +133,7 @@
 - 问题3修复：编辑器 AI 主链路为 `run_ai_task_pipeline + ai:pipeline:event`；旧流式命令不再是可用接口。
 - 结构化抽取采用规则启发式，仍需人工确认，不自动直接写核心资产表。
 - 项目级 AI 策略运行期真相源为项目库，不在 `project.json` 日常保存路径双写。
+- 手动创建资产（character/world/plot/glossary/narrative）会落 `entity_provenance(source_kind=user_input)`，用于来源追溯。
 
 ## 7. 文档维护规则
 以下变化必须同步更新本文档：

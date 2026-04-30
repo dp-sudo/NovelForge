@@ -1,4 +1,4 @@
-use rusqlite::params;
+use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -40,6 +40,30 @@ pub struct CreatePlotNodeInput {
 
 #[derive(Default)]
 pub struct PlotService;
+
+fn insert_manual_provenance(
+    conn: &Connection,
+    project_id: &str,
+    entity_type: &str,
+    entity_id: &str,
+) -> Result<(), AppErrorDto> {
+    conn.execute(
+        "INSERT INTO entity_provenance(id, project_id, entity_type, entity_id, source_kind, source_ref, request_id, created_at)
+         VALUES (?1, ?2, ?3, ?4, 'user_input', ?5, NULL, ?6)",
+        params![
+            Uuid::new_v4().to_string(),
+            project_id,
+            entity_type,
+            entity_id,
+            format!("manual_crud:{entity_type}:create"),
+            now_iso(),
+        ],
+    )
+    .map_err(|e| {
+        AppErrorDto::new("INSERT_FAILED", "写入来源轨迹失败", true).with_detail(e.to_string())
+    })?;
+    Ok(())
+}
 
 impl PlotService {
     pub fn list(&self, project_root: &str) -> Result<Vec<PlotNodeRecord>, AppErrorDto> {
@@ -98,6 +122,7 @@ impl PlotService {
             params![id, project_id, input.title, input.node_type, input.sort_order, input.goal, input.conflict, input.emotional_curve, status, rc, now, now],
         )
         .map_err(|e| AppErrorDto::new("INSERT_FAILED", "创建剧情节点失败", true).with_detail(e.to_string()))?;
+        insert_manual_provenance(&conn, &project_id, "plot_node", &id)?;
         Ok(id)
     }
 

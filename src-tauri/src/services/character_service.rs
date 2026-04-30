@@ -1,4 +1,4 @@
-use rusqlite::params;
+use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -74,6 +74,30 @@ pub struct UpdateCharacterInput {
 #[derive(Default)]
 pub struct CharacterService;
 
+fn insert_manual_provenance(
+    conn: &Connection,
+    project_id: &str,
+    entity_type: &str,
+    entity_id: &str,
+) -> Result<(), AppErrorDto> {
+    conn.execute(
+        "INSERT INTO entity_provenance(id, project_id, entity_type, entity_id, source_kind, source_ref, request_id, created_at)
+         VALUES (?1, ?2, ?3, ?4, 'user_input', ?5, NULL, ?6)",
+        params![
+            Uuid::new_v4().to_string(),
+            project_id,
+            entity_type,
+            entity_id,
+            format!("manual_crud:{entity_type}:create"),
+            now_iso(),
+        ],
+    )
+    .map_err(|e| {
+        AppErrorDto::new("INSERT_FAILED", "写入来源轨迹失败", true).with_detail(e.to_string())
+    })?;
+    Ok(())
+}
+
 impl CharacterService {
     pub fn list(&self, project_root: &str) -> Result<Vec<CharacterRecord>, AppErrorDto> {
         let conn = open_database(Path::new(project_root)).map_err(|e| {
@@ -136,6 +160,7 @@ impl CharacterService {
             params![id, project_id, input.name, aliases, input.role_type, input.age, input.gender, input.identity_text, input.appearance, input.motivation, input.desire, input.fear, input.flaw, input.arc_stage, locked, input.notes, now, now],
         )
         .map_err(|e| AppErrorDto::new("INSERT_FAILED", "创建角色失败", true).with_detail(e.to_string()))?;
+        insert_manual_provenance(&conn, &project_id, "character", &id)?;
         Ok(id)
     }
 
@@ -303,8 +328,10 @@ impl CharacterService {
 mod tests {
     use std::fs;
     use std::path::PathBuf;
+    use rusqlite::params;
     use uuid::Uuid;
 
+    use crate::infra::database::open_database;
     use super::{CharacterService, CreateCharacterInput};
     use crate::services::project_service::{CreateProjectInput, ProjectService};
 
@@ -350,6 +377,17 @@ mod tests {
         let chars = cs.list(&project.project_root).expect("list characters");
         assert_eq!(chars.len(), 1);
         assert_eq!(chars[0].name, "沈烬");
+
+        let conn = open_database(std::path::Path::new(&project.project_root)).expect("open db");
+        let provenance_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM entity_provenance
+                 WHERE project_id = ?1 AND entity_type = 'character' AND entity_id = ?2 AND source_kind = 'user_input'",
+                params![&project.project.project_id, &id],
+                |row| row.get(0),
+            )
+            .expect("query provenance count");
+        assert_eq!(provenance_count, 1);
 
         remove_temp_workspace(&ws);
     }

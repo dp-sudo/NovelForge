@@ -1,4 +1,4 @@
-use rusqlite::params;
+use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -39,6 +39,30 @@ pub struct CreateWorldRuleInput {
 
 #[derive(Default)]
 pub struct WorldService;
+
+fn insert_manual_provenance(
+    conn: &Connection,
+    project_id: &str,
+    entity_type: &str,
+    entity_id: &str,
+) -> Result<(), AppErrorDto> {
+    conn.execute(
+        "INSERT INTO entity_provenance(id, project_id, entity_type, entity_id, source_kind, source_ref, request_id, created_at)
+         VALUES (?1, ?2, ?3, ?4, 'user_input', ?5, NULL, ?6)",
+        params![
+            Uuid::new_v4().to_string(),
+            project_id,
+            entity_type,
+            entity_id,
+            format!("manual_crud:{entity_type}:create"),
+            now_iso(),
+        ],
+    )
+    .map_err(|e| {
+        AppErrorDto::new("INSERT_FAILED", "写入来源轨迹失败", true).with_detail(e.to_string())
+    })?;
+    Ok(())
+}
 
 impl WorldService {
     pub fn list(&self, project_root: &str) -> Result<Vec<WorldRuleRecord>, AppErrorDto> {
@@ -96,6 +120,7 @@ impl WorldService {
             params![id, project_id, input.title, input.category, input.description, input.constraint_level, related, input.examples, input.contradiction_policy, now, now],
         )
         .map_err(|e| AppErrorDto::new("INSERT_FAILED", "创建世界规则失败", true).with_detail(e.to_string()))?;
+        insert_manual_provenance(&conn, &project_id, "world_rule", &id)?;
         Ok(id)
     }
 

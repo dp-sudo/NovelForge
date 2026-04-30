@@ -92,6 +92,15 @@ test("问题5编排回归：Blueprint 页面存在一键全书生成入口", asy
   assert.match(page, /确认并晋升/);
 });
 
+test("问题9.5契约：蓝图晋升入口具备 chapter-plan 章节选择策略", async () => {
+  const page = await fs.readFile(
+    path.join(process.cwd(), "src/pages/Blueprint/BlueprintPage.tsx"),
+    "utf-8",
+  );
+  assert.match(page, /resolvePromotionChapterId/);
+  assert.match(page, /请选择章节以生成章节计划/);
+});
+
 test("问题5编排回归：审阅层页面显示派生审阅提示", async () => {
   const timeline = await fs.readFile(
     path.join(process.cwd(), "src/pages/Timeline/TimelinePage.tsx"),

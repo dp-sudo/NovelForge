@@ -14,10 +14,12 @@ import {
   getWindowPlanningData,
   type WindowPlanningData,
 } from "../../api/blueprintApi.js";
+import { listChapters, type ChapterRecord } from "../../api/chapterApi.js";
 import { buildPromotionStages, streamBookGenerationPipeline } from "../../api/bookPipelineApi.js";
 import { runModuleAiTask } from "../../api/moduleAiApi.js";
 import { getSummaryFeedback, type SummaryFeedbackData } from "../../api/contextApi.js";
 import { useProjectStore } from "../../stores/projectStore.js";
+import { useEditorStore } from "../../stores/editorStore.js";
 import { parseBlueprintContent, serializeBlueprintContent } from "../../domain/types.js";
 import type { BlueprintStepKey } from "../../domain/constants.js";
 
@@ -319,6 +321,7 @@ const PROMOTION_TARGETS_BY_STEP: Partial<Record<BlueprintStepKey, Array<{ label:
     { label: "剧情节点", stageKey: "plot-seed" },
     { label: "叙事义务", stageKey: "narrative-seed" },
   ],
+  "step-08-chapters": [{ label: "章节计划", stageKey: "chapter-plan" }],
 };
 
 // ── Main component ──
@@ -338,11 +341,14 @@ export function BlueprintPage() {
   const [bookPipelineStatus, setBookPipelineStatus] = useState<string | null>(null);
   const [bookPipelineAbort, setBookPipelineAbort] = useState<AbortController | null>(null);
   const [promotionRunning, setPromotionRunning] = useState(false);
+  const [promotionChapters, setPromotionChapters] = useState<ChapterRecord[]>([]);
+  const [selectedPromotionChapterId, setSelectedPromotionChapterId] = useState("");
   const [windowPlanningData, setWindowPlanningData] = useState<WindowPlanningData | null>(null);
   const [summaryFeedback, setSummaryFeedback] = useState<SummaryFeedbackData | null>(null);
   const [loopLoading, setLoopLoading] = useState(false);
   const [loopError, setLoopError] = useState<string | null>(null);
   const projectRoot = useProjectStore((s) => s.currentProjectPath);
+  const activeEditorChapterId = useEditorStore((s) => s.activeChapterId);
 
   const cur = STEPS[activeIdx];
   const status: StepStatus = (steps[activeIdx]?.status as StepStatus) ?? "not_started";
@@ -351,6 +357,17 @@ export function BlueprintPage() {
     if (!projectRoot) { setSteps([]); return; }
     const data = await listBlueprintSteps(projectRoot);
     setSteps(data);
+  }, [projectRoot]);
+
+  const loadPromotionChapters = useCallback(async (): Promise<ChapterRecord[]> => {
+    if (!projectRoot) {
+      setPromotionChapters([]);
+      return [];
+    }
+    const rows = await listChapters(projectRoot);
+    const sorted = [...rows].sort((a, b) => a.chapterIndex - b.chapterIndex);
+    setPromotionChapters(sorted);
+    return sorted;
   }, [projectRoot]);
 
   const loadLoopData = useCallback(async () => {
@@ -378,6 +395,7 @@ export function BlueprintPage() {
   }, [projectRoot]);
 
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => { void loadPromotionChapters(); }, [loadPromotionChapters]);
   useEffect(() => { void loadLoopData(); }, [loadLoopData]);
 
   // Populate formData when active step changes or steps load
@@ -407,6 +425,25 @@ export function BlueprintPage() {
     return PROMOTION_TARGETS_BY_STEP[cur.key] ?? [];
   }
 
+  function isChapterPlanPromotionStep(): boolean {
+    return getPromotionTargets().some((target) => target.stageKey === "chapter-plan");
+  }
+
+  function resolvePromotionChapterId(chapters: ChapterRecord[]): string | null {
+    const explicit = selectedPromotionChapterId.trim();
+    if (explicit) {
+      return explicit;
+    }
+
+    const active = activeEditorChapterId?.trim();
+    if (active && chapters.some((chapter) => chapter.id === active)) {
+      return active;
+    }
+
+    const firstPlannable = chapters.find((chapter) => chapter.status !== "completed") ?? chapters[0];
+    return firstPlannable?.id ?? null;
+  }
+
   async function handlePromoteCurrentStep() {
     if (!projectRoot || promotionRunning) return;
     const targets = getPromotionTargets();
@@ -419,7 +456,19 @@ export function BlueprintPage() {
       setBookPipelineStatus("请先提供创意提示词后再执行晋升");
       return;
     }
-    const promotionStages = buildPromotionStages({ projectRoot, ideaPrompt });
+    const isChapterPlanStep = isChapterPlanPromotionStep();
+    let chapterId: string | undefined;
+    if (isChapterPlanStep) {
+      const chapters = promotionChapters.length > 0 ? promotionChapters : await loadPromotionChapters();
+      const resolved = resolvePromotionChapterId(chapters);
+      if (!resolved) {
+        setBookPipelineStatus("请选择章节以生成章节计划");
+        return;
+      }
+      chapterId = resolved;
+    }
+
+    const promotionStages = buildPromotionStages({ projectRoot, ideaPrompt, chapterId });
     const stage = promotionStages.find((item) => item.key === targets[0]?.stageKey) ?? promotionStages[0];
     if (!stage) {
       setBookPipelineStatus("当前上下文暂无可执行晋升步骤");
@@ -436,7 +485,7 @@ export function BlueprintPage() {
       });
       setBookPipelineLogs((prev) => [...prev, `晋升完成：${stage.label}`]);
       setBookPipelineStatus(`已完成晋升：${stage.label}`);
-      await Promise.all([load(), loadLoopData()]);
+      await Promise.all([load(), loadPromotionChapters(), loadLoopData()]);
     } catch (error) {
       const message = error instanceof Error ? error.message : "晋升执行失败";
       setBookPipelineLogs((prev) => [...prev, `晋升失败：${stage.label} - ${message}`]);
@@ -614,6 +663,23 @@ export function BlueprintPage() {
               <p className="mb-3 text-xs text-surface-400">
                 可晋升资产类型：{getPromotionTargets().map((item) => item.label).join(" / ")}
               </p>
+            )}
+            {status === "completed" && isChapterPlanPromotionStep() && (
+              <div className="mb-3 space-y-2">
+                <Select
+                  label="章节计划目标章节（可选）"
+                  value={selectedPromotionChapterId}
+                  onChange={(event) => setSelectedPromotionChapterId(event.target.value)}
+                  options={promotionChapters.map((chapter) => ({
+                    value: chapter.id,
+                    label: `第 ${chapter.chapterIndex} 章 · ${chapter.title}`,
+                  }))}
+                  placeholder="自动选择（用户指定 > 当前活动章节 > 首个可规划章节）"
+                />
+                <p className="text-xs text-surface-500">
+                  如未选择，系统将按策略自动定位章节；无可用章节时会提示“请选择章节以生成章节计划”。
+                </p>
+              </div>
             )}
 
             <StepForm stepKey={cur.key} data={formData} onChange={handleFormChange} />

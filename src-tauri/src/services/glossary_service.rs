@@ -1,4 +1,4 @@
-use rusqlite::params;
+use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -37,6 +37,30 @@ pub struct CreateGlossaryTermInput {
 
 #[derive(Default)]
 pub struct GlossaryService;
+
+fn insert_manual_provenance(
+    conn: &Connection,
+    project_id: &str,
+    entity_type: &str,
+    entity_id: &str,
+) -> Result<(), AppErrorDto> {
+    conn.execute(
+        "INSERT INTO entity_provenance(id, project_id, entity_type, entity_id, source_kind, source_ref, request_id, created_at)
+         VALUES (?1, ?2, ?3, ?4, 'user_input', ?5, NULL, ?6)",
+        params![
+            Uuid::new_v4().to_string(),
+            project_id,
+            entity_type,
+            entity_id,
+            format!("manual_crud:{entity_type}:create"),
+            now_iso(),
+        ],
+    )
+    .map_err(|e| {
+        AppErrorDto::new("INSERT_FAILED", "写入来源轨迹失败", true).with_detail(e.to_string())
+    })?;
+    Ok(())
+}
 
 impl GlossaryService {
     pub fn list(&self, project_root: &str) -> Result<Vec<GlossaryTermRecord>, AppErrorDto> {
@@ -92,6 +116,7 @@ impl GlossaryService {
             params![id, project_id, input.term, input.term_type, aliases, input.description, locked, banned, now, now],
         )
         .map_err(|e| AppErrorDto::new("INSERT_FAILED", "创建名词失败", true).with_detail(e.to_string()))?;
+        insert_manual_provenance(&conn, &project_id, "glossary_term", &id)?;
         Ok(id)
     }
 }
