@@ -3,7 +3,7 @@
 ## 1. 文档信息
 - 版本：v0.9
 - 状态：S20（AI 生产系统闭环：策略权威源 + 持久化契约 + Continuity Pack + 技能运行期）
-- 最后更新：2026-04-30
+- 最后更新：2026-05-01
 - 代码基线：`src/api/*`、`src-tauri/src/commands/*`
 
 ## 2. 集成原则（当前）
@@ -67,6 +67,8 @@
   - `save_blueprint_step(projectRoot, input) -> BlueprintStep`
   - `mark_blueprint_completed(projectRoot, stepKey) -> void`
   - `reset_blueprint_step(projectRoot, stepKey) -> void`
+  - `BlueprintStep` 新增 `certaintyZones?: { frozen: string[]; promised: string[]; exploratory: string[] }`（当前用于 `step-08-chapters`）。
+  - `save_blueprint_step.input` 新增可选 `certaintyZones`，作为确定性分区显式 DTO（优先于旧文本分区解析）。
 - Character + Relationship：
   - `list_characters`, `create_character`, `update_character`, `delete_character`
   - `list_character_relationships`, `create_character_relationship`, `delete_character_relationship`

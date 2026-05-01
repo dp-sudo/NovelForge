@@ -268,7 +268,10 @@ mod tests {
             .expect("check_project failed");
         assert_eq!(report.status, "healthy");
         assert!(report.issues.is_empty());
-        assert_eq!(report.summary.schema_version, "0006_story_state");
+        assert_eq!(
+            report.summary.schema_version,
+            "0007_blueprint_certainty_zones"
+        );
 
         remove_temp_workspace(&ws);
     }
