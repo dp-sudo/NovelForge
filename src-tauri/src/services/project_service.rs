@@ -571,6 +571,20 @@ fn normalize_project_root(project_root: &str) -> Result<&str, AppErrorDto> {
                 .with_suggested_action("请输入有效的项目目录路径"),
         );
     }
+    let root = Path::new(normalized_root);
+    if !root.is_absolute() {
+        return Err(
+            AppErrorDto::new("PROJECT_INVALID_PATH", "项目目录必须是绝对路径", true)
+                .with_suggested_action("请输入有效的 Windows 绝对路径"),
+        );
+    }
+    if !root.exists() || !root.is_dir() {
+        return Err(
+            AppErrorDto::new("PROJECT_INVALID_PATH", "项目目录不存在或不可用", true)
+                .with_detail(normalized_root.to_string())
+                .with_suggested_action("请检查目录路径并重试"),
+        );
+    }
     Ok(normalized_root)
 }
 
@@ -956,5 +970,22 @@ mod tests {
             .get_ai_strategy_profile("   ")
             .expect_err("blank root should be rejected");
         assert_eq!(err.code, "PROJECT_INVALID_PATH");
+    }
+
+    #[test]
+    fn writing_style_rejects_relative_existing_root_without_creating_db() {
+        let current_dir = std::env::current_dir().expect("current dir");
+        let relative_name = format!("novelforge-relative-style-{}", Uuid::new_v4());
+        let relative_root = current_dir.join(&relative_name);
+        fs::create_dir_all(&relative_root).expect("create relative root");
+
+        let service = ProjectService;
+        let err = service
+            .get_writing_style(&relative_name)
+            .expect_err("relative path should be rejected");
+        assert_eq!(err.code, "PROJECT_INVALID_PATH");
+        assert!(!relative_root.join("database").join("project.sqlite").exists());
+
+        let _ = fs::remove_dir_all(relative_root);
     }
 }

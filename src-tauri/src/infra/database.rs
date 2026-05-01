@@ -8,6 +8,22 @@ pub fn get_database_path(project_root: &Path) -> PathBuf {
     project_root.join("database").join("project.sqlite")
 }
 
+fn validate_project_root(project_root: &Path) -> SqlResult<()> {
+    if !project_root.is_absolute() {
+        return Err(rusqlite::Error::InvalidParameterName(format!(
+            "Project root must be an absolute path: {}",
+            project_root.to_string_lossy()
+        )));
+    }
+    if !project_root.exists() || !project_root.is_dir() {
+        return Err(rusqlite::Error::InvalidParameterName(format!(
+            "Project root must be an existing directory: {}",
+            project_root.to_string_lossy()
+        )));
+    }
+    Ok(())
+}
+
 pub fn initialize_database(project_root: &Path) -> SqlResult<()> {
     let db_path = get_database_path(project_root);
     if let Some(parent) = db_path.parent() {
@@ -30,6 +46,7 @@ pub fn initialize_database(project_root: &Path) -> SqlResult<()> {
 }
 
 pub fn open_database(project_root: &Path) -> SqlResult<Connection> {
+    validate_project_root(project_root)?;
     let conn = Connection::open(get_database_path(project_root))?;
     // Run pending migrations on open (idempotent)
     let result = crate::infra::migrator::run_project_pending(&conn).map_err(|e| {
@@ -182,5 +199,20 @@ mod tests {
         assert!(column_exists(&upgraded, "chapters", "volume_id"));
 
         remove_temp_workspace(&workspace);
+    }
+
+    #[test]
+    fn open_database_rejects_relative_existing_directory_without_creating_db() {
+        let current_dir = std::env::current_dir().expect("current dir");
+        let relative_name = format!("novelforge-relative-db-{}", Uuid::new_v4());
+        let relative_root = current_dir.join(&relative_name);
+        fs::create_dir_all(&relative_root).expect("create relative root");
+        fs::create_dir_all(relative_root.join("database")).expect("create nested db dir");
+
+        let result = open_database(std::path::Path::new(&relative_name));
+        assert!(result.is_err(), "relative project root should be rejected");
+        assert!(!get_database_path(&relative_root).exists());
+
+        let _ = fs::remove_dir_all(relative_root);
     }
 }

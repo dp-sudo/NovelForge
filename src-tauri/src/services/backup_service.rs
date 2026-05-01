@@ -1,5 +1,5 @@
 use std::fs;
-use std::io::{Read, Write};
+use std::io::Read;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -13,6 +13,7 @@ use crate::errors::AppErrorDto;
 use crate::infra::fs_utils::write_bytes_atomic;
 use crate::infra::path_utils::resolve_project_relative_path;
 use crate::infra::time::now_iso;
+use crate::services::project_service::ProjectJson;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -81,13 +82,6 @@ impl BackupService {
                         .with_suggested_action("请检查备份文件完整性")
                 })?;
             } else {
-                let mut content = Vec::new();
-                fs::File::open(path)
-                    .and_then(|mut f| f.read_to_end(&mut content))
-                    .map_err(|e| {
-                        AppErrorDto::new("BACKUP_FAILED", "读取文件失败", true)
-                            .with_detail(e.to_string())
-                    })?;
                 let options =
                     FileOptions::<()>::default().compression_method(CompressionMethod::Deflated);
                 zip.start_file(&name, options).map_err(|err| {
@@ -95,7 +89,11 @@ impl BackupService {
                         .with_detail(err.to_string())
                         .with_suggested_action("请检查备份文件完整性")
                 })?;
-                zip.write_all(&content).map_err(|err| {
+                let mut source = fs::File::open(path).map_err(|e| {
+                    AppErrorDto::new("BACKUP_FAILED", "读取文件失败", true)
+                        .with_detail(e.to_string())
+                })?;
+                std::io::copy(&mut source, &mut zip).map_err(|err| {
                     AppErrorDto::new("BACKUP_ZIP_WRITE_FAILED", "写入备份文件失败", true)
                         .with_detail(err.to_string())
                         .with_suggested_action("请检查备份文件写入权限")
@@ -195,6 +193,7 @@ impl BackupService {
         let normalized_root = normalize_project_root(project_root)?;
         let backup_file = normalize_backup_file_path(backup_path)?;
         let root = Path::new(&normalized_root);
+        let current_project = read_project_json(root)?;
 
         let file = fs::File::open(&backup_file).map_err(|e| {
             AppErrorDto::new("RESTORE_FAILED", "打开备份文件失败", true).with_detail(e.to_string())
@@ -203,21 +202,21 @@ impl BackupService {
             AppErrorDto::new("RESTORE_FAILED", "读取备份文件失败", true).with_detail(e.to_string())
         })?;
 
-        // Validate: check project.json exists in archive
-        let has_project_json = (0..archive.len()).any(|i| {
-            archive
-                .by_index(i)
-                .ok()
-                .map(|f| f.name().to_string())
-                .unwrap_or_default()
-                == "project.json"
-        });
-        if !has_project_json {
-            return Err(AppErrorDto::new(
-                "RESTORE_INVALID",
-                "备份文件不包含 project.json，不是有效的项目备份",
-                false,
-            ));
+        let archived_project = read_archived_project_json(&mut archive)?;
+        if archived_project.project_id != current_project.project_id
+            || archived_project.schema_version != current_project.schema_version
+        {
+            return Err(
+                AppErrorDto::new("RESTORE_PROJECT_MISMATCH", "备份文件与当前项目不匹配", false)
+                    .with_detail(format!(
+                        "archiveProjectId={}, currentProjectId={}, archiveSchemaVersion={}, currentSchemaVersion={}",
+                        archived_project.project_id,
+                        current_project.project_id,
+                        archived_project.schema_version,
+                        current_project.schema_version,
+                    ))
+                    .with_suggested_action("请选择当前项目生成的备份文件后重试"),
+            );
         }
 
         let mut restored = 0usize;
@@ -265,6 +264,39 @@ impl BackupService {
             files_restored: restored,
         })
     }
+}
+
+fn read_project_json(project_root: &Path) -> Result<ProjectJson, AppErrorDto> {
+    let path = project_root.join("project.json");
+    let payload = fs::read_to_string(&path).map_err(|err| {
+        AppErrorDto::new("RESTORE_INVALID", "无法读取当前项目元数据", false)
+            .with_detail(err.to_string())
+    })?;
+    serde_json::from_str::<ProjectJson>(&payload).map_err(|err| {
+        AppErrorDto::new("RESTORE_INVALID", "当前项目元数据损坏", false)
+            .with_detail(err.to_string())
+    })
+}
+
+fn read_archived_project_json<R: Read + std::io::Seek>(
+    archive: &mut ZipArchive<R>,
+) -> Result<ProjectJson, AppErrorDto> {
+    let mut project_json = archive.by_name("project.json").map_err(|_| {
+        AppErrorDto::new(
+            "RESTORE_INVALID",
+            "备份文件不包含 project.json，不是有效的项目备份",
+            false,
+        )
+    })?;
+    let mut payload = String::new();
+    project_json.read_to_string(&mut payload).map_err(|err| {
+        AppErrorDto::new("RESTORE_INVALID", "无法读取备份项目元数据", false)
+            .with_detail(err.to_string())
+    })?;
+    serde_json::from_str::<ProjectJson>(&payload).map_err(|err| {
+        AppErrorDto::new("RESTORE_INVALID", "备份项目元数据损坏", false)
+            .with_detail(err.to_string())
+    })
 }
 
 fn normalize_project_root(project_root: &str) -> Result<String, AppErrorDto> {
@@ -333,6 +365,7 @@ mod tests {
     use zip::ZipWriter;
 
     use super::BackupService;
+    use crate::services::project_service::{CreateProjectInput, ProjectService};
 
     fn create_temp_workspace() -> PathBuf {
         let workspace =
@@ -348,8 +381,19 @@ mod tests {
     #[test]
     fn restore_rejects_zip_slip_entries() {
         let workspace = create_temp_workspace();
-        let project_root = workspace.join("project");
-        fs::create_dir_all(&project_root).expect("create project root");
+        let project_service = ProjectService;
+        let project = project_service
+            .create_project(CreateProjectInput {
+                name: "恶意恢复".to_string(),
+                author: None,
+                genre: "测试".to_string(),
+                target_words: None,
+                save_directory: workspace.to_string_lossy().to_string(),
+            })
+            .expect("create project root");
+        let project_root = PathBuf::from(&project.project_root);
+        let project_json = fs::read_to_string(project_root.join("project.json"))
+            .expect("read project json");
 
         let backup_path = workspace.join("malicious.zip");
         let file = fs::File::create(&backup_path).expect("create backup file");
@@ -357,7 +401,7 @@ mod tests {
         let options = FileOptions::<()>::default().compression_method(CompressionMethod::Deflated);
         zip.start_file("project.json", options)
             .expect("start project.json");
-        zip.write_all(br#"{"schemaVersion":"1.0.0"}"#)
+        zip.write_all(project_json.as_bytes())
             .expect("write project json");
         zip.start_file("../outside.txt", options)
             .expect("start malicious entry");
@@ -369,7 +413,7 @@ mod tests {
         let service = BackupService;
         let err = service
             .restore_backup(
-                project_root.to_string_lossy().as_ref(),
+                project.project_root.as_str(),
                 backup_path.to_string_lossy().as_ref(),
             )
             .expect_err("zip slip should be rejected");
@@ -400,6 +444,43 @@ mod tests {
             .restore_backup(project_root.to_string_lossy().as_ref(), "   ")
             .expect_err("blank backup path should be rejected");
         assert_eq!(err.code, "RESTORE_INVALID");
+
+        remove_temp_workspace(&workspace);
+    }
+
+    #[test]
+    fn restore_rejects_backup_from_different_project() {
+        let workspace = create_temp_workspace();
+        let project_service = ProjectService;
+        let backup_service = BackupService;
+
+        let project_a = project_service
+            .create_project(CreateProjectInput {
+                name: "备份A".to_string(),
+                author: None,
+                genre: "测试".to_string(),
+                target_words: None,
+                save_directory: workspace.to_string_lossy().to_string(),
+            })
+            .expect("create project a");
+        let project_b = project_service
+            .create_project(CreateProjectInput {
+                name: "备份B".to_string(),
+                author: None,
+                genre: "测试".to_string(),
+                target_words: None,
+                save_directory: workspace.to_string_lossy().to_string(),
+            })
+            .expect("create project b");
+
+        let backup = backup_service
+            .create_backup(&project_a.project_root)
+            .expect("create backup");
+
+        let err = backup_service
+            .restore_backup(&project_b.project_root, &backup.file_path)
+            .expect_err("cross-project restore should be rejected");
+        assert_eq!(err.code, "RESTORE_PROJECT_MISMATCH");
 
         remove_temp_workspace(&workspace);
     }

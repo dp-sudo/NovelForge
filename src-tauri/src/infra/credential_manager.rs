@@ -151,17 +151,19 @@ fn fallback_secret_file_path(provider_id: &str) -> Result<PathBuf, AppErrorDto> 
 }
 
 fn sanitize_provider_id(value: &str) -> String {
-    value
-        .trim()
-        .chars()
-        .map(|ch| {
-            if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-') {
-                ch
-            } else {
-                '_'
-            }
-        })
-        .collect::<String>()
+    let mut sanitized = String::new();
+    for ch in value.trim().chars() {
+        if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-') {
+            sanitized.push(ch);
+            continue;
+        }
+        let mut buffer = [0_u8; 4];
+        for byte in ch.encode_utf8(&mut buffer).as_bytes() {
+            sanitized.push('_');
+            sanitized.push_str(&format!("{byte:02X}"));
+        }
+    }
+    sanitized
 }
 
 #[cfg(test)]
@@ -190,7 +192,7 @@ mod tests {
         assert_eq!(sanitize_provider_id(""), "");
         assert_eq!(
             sanitize_provider_id(" provider/with*chars "),
-            "provider_with_chars"
+            "provider_2Fwith_2Achars"
         );
     }
 
@@ -199,7 +201,18 @@ mod tests {
         let path = fallback_secret_file_path("../provider").expect("path");
         let parent = path.parent().expect("parent");
         assert!(parent.ends_with(Path::new("secrets")));
-        assert!(path.ends_with(Path::new(".._provider.secret")));
+        assert!(path.ends_with(Path::new(".._2Fprovider.secret")));
+    }
+
+    #[test]
+    fn fallback_paths_do_not_collide_for_alias_like_provider_ids() {
+        let slash_path = fallback_secret_file_path("foo/bar").expect("slash path");
+        let underscore_path = fallback_secret_file_path("foo_bar").expect("underscore path");
+        let spaced_path = fallback_secret_file_path("foo bar").expect("spaced path");
+
+        assert_ne!(slash_path, underscore_path);
+        assert_ne!(slash_path, spaced_path);
+        assert_ne!(underscore_path, spaced_path);
     }
 }
 
