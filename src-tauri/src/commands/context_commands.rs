@@ -19,6 +19,17 @@ pub async fn get_chapter_context(
 }
 
 #[tauri::command]
+pub async fn materialize_chapter_structured_drafts(
+    project_root: String,
+    chapter_id: String,
+    state: State<'_, AppState>,
+) -> Result<EditorContextPanel, AppErrorDto> {
+    state
+        .context_service
+        .collect_editor_context_with_persisted_drafts(&project_root, &chapter_id)
+}
+
+#[tauri::command]
 pub async fn apply_asset_candidate(
     project_root: String,
     chapter_id: String,

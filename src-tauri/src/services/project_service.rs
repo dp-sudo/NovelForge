@@ -99,8 +99,13 @@ impl Default for AiStrategyProfile {
             automation_default: "supervised".to_string(),
             review_strictness: 4,
             default_workflow_stack: vec!["chapter.plan".to_string(), "chapter.draft".to_string()],
-            always_on_policy_skills: vec![],
-            default_capability_bundles: vec![],
+            always_on_policy_skills: vec!["consistency.scan".to_string()],
+            default_capability_bundles: vec![
+                "bundle.character-expression".to_string(),
+                "bundle.emotion-progression".to_string(),
+                "bundle.scene-environment".to_string(),
+                "bundle.rule-fulfillment".to_string(),
+            ],
             state_write_policy: "chapter_confirmed".to_string(),
             continuity_pack_depth: "standard".to_string(),
             chapter_generation_mode: "plan_scene_draft".to_string(),
@@ -284,36 +289,35 @@ impl ProjectService {
                 .with_detail(err.to_string())
                 .with_suggested_action("请检查 database/project.sqlite 是否可读写")
         })?;
-        conn
-      .execute(
-        "
+        conn.execute(
+            "
         INSERT INTO projects(
           id, name, author, genre, narrative_pov, writing_style, ai_strategy_profile,
           target_words, current_words, project_path, schema_version, created_at, updated_at
         )
         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
         ",
-        params![
-          project_json.project_id,
-          project_json.name,
-          project_json.author,
-          project_json.genre,
-          project_json.settings.default_narrative_pov.clone(),
-          writing_style_json,
-          ai_strategy_profile_json,
-          project_json.target_words,
-          0_i64,
-          project_root_path.to_string_lossy().to_string(),
-          project_json.schema_version,
-          created_at,
-          project_json.updated_at
-        ],
-      )
-      .map_err(|err| {
-        AppErrorDto::new("PROJECT_CREATE_FAILED", "创建项目失败", true)
-          .with_detail(err.to_string())
-          .with_suggested_action("请检查项目数据库结构")
-      })?;
+            params![
+                project_json.project_id,
+                project_json.name,
+                project_json.author,
+                project_json.genre,
+                project_json.settings.default_narrative_pov.clone(),
+                writing_style_json,
+                ai_strategy_profile_json,
+                project_json.target_words,
+                0_i64,
+                project_root_path.to_string_lossy().to_string(),
+                project_json.schema_version,
+                created_at,
+                project_json.updated_at
+            ],
+        )
+        .map_err(|err| {
+            AppErrorDto::new("PROJECT_CREATE_FAILED", "创建项目失败", true)
+                .with_detail(err.to_string())
+                .with_suggested_action("请检查项目数据库结构")
+        })?;
 
         let project_root = project_root_path.to_string_lossy().to_string();
         let _ = mark_recent_project(&project_root);
@@ -984,7 +988,10 @@ mod tests {
             .get_writing_style(&relative_name)
             .expect_err("relative path should be rejected");
         assert_eq!(err.code, "PROJECT_INVALID_PATH");
-        assert!(!relative_root.join("database").join("project.sqlite").exists());
+        assert!(!relative_root
+            .join("database")
+            .join("project.sqlite")
+            .exists());
 
         let _ = fs::remove_dir_all(relative_root);
     }

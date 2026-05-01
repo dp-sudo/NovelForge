@@ -35,6 +35,15 @@ author: NovelForge
 icon: "📋"
 createdAt: 2026-04-28
 updatedAt: 2026-04-30
+skillClass: workflow
+bundleIds: [bundle.rule-fulfillment, bundle.scene-environment]
+alwaysOn: false
+triggerConditions: [chapter.plan]
+requiredContexts: [chapter, canon, state]
+stateWrites: [chapter.plan_status, window.progress]
+automationTier: supervised
+sceneTags: []
+affectsLayers: [constitution, canon, state, promise, window_plan, recent_continuity]
 ---
 
 # 生成章节计划

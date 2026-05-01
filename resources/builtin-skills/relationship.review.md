@@ -23,6 +23,15 @@ author: NovelForge
 icon: "🕸️"
 createdAt: 2026-04-29
 updatedAt: 2026-04-30
+skillClass: review
+bundleIds: [bundle.emotion-progression, bundle.character-expression]
+alwaysOn: false
+triggerConditions: [relationship.review]
+requiredContexts: [chapter, canon, state]
+stateWrites: [relationship.relationship]
+automationTier: confirm
+sceneTags: [dialogue, emotion]
+affectsLayers: [canon, state, promise, recent_continuity]
 ---
 
 # 关系审阅

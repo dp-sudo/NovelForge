@@ -22,6 +22,15 @@ author: NovelForge
 icon: "👤"
 createdAt: 2026-04-28
 updatedAt: 2026-04-30
+skillClass: workflow
+bundleIds: [bundle.character-expression]
+alwaysOn: false
+triggerConditions: [character.create]
+requiredContexts: [constitution, canon]
+stateWrites: [character.involvement]
+automationTier: supervised
+sceneTags: []
+affectsLayers: [constitution, canon, state, promise]
 ---
 
 # 创建角色卡

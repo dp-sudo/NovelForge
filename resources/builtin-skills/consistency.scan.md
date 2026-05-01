@@ -25,6 +25,15 @@ author: NovelForge
 icon: "🔍"
 createdAt: 2026-04-28
 updatedAt: 2026-04-29
+skillClass: review
+bundleIds: [bundle.rule-fulfillment]
+alwaysOn: false
+triggerConditions: [consistency.scan]
+requiredContexts: [chapter, canon, state]
+stateWrites: []
+automationTier: confirm
+sceneTags: []
+affectsLayers: [constitution, canon, state, promise, window_plan, recent_continuity]
 ---
 
 # 一致性扫描

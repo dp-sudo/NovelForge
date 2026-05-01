@@ -25,6 +25,15 @@ author: NovelForge
 icon: "📝"
 createdAt: 2026-04-28
 updatedAt: 2026-04-29
+skillClass: workflow
+bundleIds: [bundle.character-expression, bundle.emotion-progression, bundle.scene-environment]
+alwaysOn: false
+triggerConditions: [chapter.continue]
+requiredContexts: [chapter, canon, state]
+stateWrites: [chapter.progress]
+automationTier: supervised
+sceneTags: []
+affectsLayers: [canon, state, promise, window_plan, recent_continuity]
 ---
 
 # 续写章节

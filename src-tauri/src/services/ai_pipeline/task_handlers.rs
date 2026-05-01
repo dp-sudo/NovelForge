@@ -28,6 +28,7 @@ use crate::services::{
 pub struct RuntimeStateWriteOptions<'a> {
     pub state_writes: &'a [String],
     pub state_write_policy: &'a str,
+    pub persist_mode: &'a str,
     pub active_skill_ids: &'a [String],
     pub affects_layers: &'a [String],
 }
@@ -37,6 +38,7 @@ impl<'a> Default for RuntimeStateWriteOptions<'a> {
         Self {
             state_writes: &[],
             state_write_policy: "manual_only",
+            persist_mode: "none",
             active_skill_ids: &[],
             affects_layers: &[],
         }
@@ -62,7 +64,8 @@ fn project_db_open_error(err: impl ToString) -> AppErrorDto {
 }
 
 fn pipeline_db_open_error(err: impl ToString) -> AppErrorDto {
-    AppErrorDto::new("PIPELINE_DB_OPEN_FAILED", "数据库打开失败", false).with_detail(err.to_string())
+    AppErrorDto::new("PIPELINE_DB_OPEN_FAILED", "数据库打开失败", false)
+        .with_detail(err.to_string())
 }
 
 fn pipeline_persist_error(message: &str, err: impl ToString) -> AppErrorDto {
@@ -334,6 +337,7 @@ impl TaskHandlers {
             || !Self::should_persist_runtime_state_writes(
                 canonical_task,
                 input,
+                runtime_options.persist_mode,
                 runtime_options.state_write_policy,
             )
         {
@@ -351,6 +355,7 @@ impl TaskHandlers {
                 input,
                 normalized_output,
                 request_id,
+                runtime_options.persist_mode,
                 records,
                 state_write_key,
                 runtime_options.active_skill_ids,
@@ -368,8 +373,14 @@ impl TaskHandlers {
     fn should_persist_runtime_state_writes(
         canonical_task: &str,
         input: &RunAiTaskPipelineInput,
+        persist_mode: &str,
         state_write_policy: &str,
     ) -> bool {
+        match persist_mode.trim().to_ascii_lowercase().as_str() {
+            "none" => return false,
+            "derived_review" if !Self::is_review_task(canonical_task) => return false,
+            _ => {}
+        }
         match state_write_policy.trim().to_ascii_lowercase().as_str() {
             "manual_only" => {
                 Self::is_promotion_action(input.ui_action.as_deref())
@@ -392,11 +403,16 @@ impl TaskHandlers {
         }
     }
 
+    fn is_review_task(canonical_task: &str) -> bool {
+        canonical_task == "consistency.scan" || canonical_task.ends_with(".review")
+    }
+
     fn build_runtime_story_state_input(
         canonical_task: &str,
         input: &RunAiTaskPipelineInput,
         normalized_output: &str,
         request_id: &str,
+        persist_mode: &str,
         records: &[PersistedRecord],
         state_write_key: &str,
         active_skill_ids: &[String],
@@ -447,6 +463,7 @@ impl TaskHandlers {
                 "taskType": canonical_task,
                 "requestId": request_id,
                 "uiAction": input.ui_action.as_deref().map(str::trim).filter(|value| !value.is_empty()),
+                "persistMode": persist_mode.trim(),
                 "automationTier": input.automation_tier.as_deref().map(str::trim).filter(|value| !value.is_empty()),
                 "chapterId": input.chapter_id.as_deref().map(str::trim).filter(|value| !value.is_empty()),
                 "skillIds": active_skill_ids,
@@ -1172,9 +1189,7 @@ impl TaskHandlers {
                     project_id
                 ],
             )
-            .map_err(|err| {
-                pipeline_persist_error("写入章节规划失败", err)
-            })?;
+            .map_err(|err| pipeline_persist_error("写入章节规划失败", err))?;
 
         if changed == 0 {
             return Err(AppErrorDto::new(
@@ -1192,9 +1207,10 @@ impl TaskHandlers {
         normalized_output: &str,
     ) -> Result<usize, AppErrorDto> {
         let value = Self::extract_output_value(normalized_output)?;
-        let root = value.as_object().cloned().ok_or_else(|| {
-            pipeline_parse_error("时间线审阅结果不是 JSON 对象")
-        })?;
+        let root = value
+            .as_object()
+            .cloned()
+            .ok_or_else(|| pipeline_parse_error("时间线审阅结果不是 JSON 对象"))?;
 
         let entries = root
             .get("timelineEntries")
@@ -1293,9 +1309,10 @@ impl TaskHandlers {
         normalized_output: &str,
     ) -> Result<usize, AppErrorDto> {
         let value = Self::extract_output_value(normalized_output)?;
-        let root = value.as_object().cloned().ok_or_else(|| {
-            pipeline_parse_error("关系审阅结果不是 JSON 对象")
-        })?;
+        let root = value
+            .as_object()
+            .cloned()
+            .ok_or_else(|| pipeline_parse_error("关系审阅结果不是 JSON 对象"))?;
 
         let mut edges = root
             .get("edges")
@@ -2246,6 +2263,48 @@ mod tests {
     }
 
     #[test]
+    fn runtime_state_write_policy_respects_persist_mode_contract() {
+        let mut chapter_input = build_pipeline_input(
+            "C:\\tmp\\novelforge",
+            "chapter.plan",
+            Some("chapter-1".to_string()),
+        );
+        chapter_input.automation_tier = Some("confirm".to_string());
+        chapter_input.ui_action = Some("book.pipeline.promote.manual".to_string());
+
+        assert!(!TaskHandlers::should_persist_runtime_state_writes(
+            "chapter.plan",
+            &chapter_input,
+            "none",
+            "chapter_confirmed",
+        ));
+        assert!(!TaskHandlers::should_persist_runtime_state_writes(
+            "chapter.plan",
+            &chapter_input,
+            "derived_review",
+            "chapter_confirmed",
+        ));
+        assert!(TaskHandlers::should_persist_runtime_state_writes(
+            "chapter.plan",
+            &chapter_input,
+            "formal",
+            "chapter_confirmed",
+        ));
+
+        let review_input = build_pipeline_input(
+            "C:\\tmp\\novelforge",
+            "timeline.review",
+            Some("chapter-1".to_string()),
+        );
+        assert!(TaskHandlers::should_persist_runtime_state_writes(
+            "timeline.review",
+            &review_input,
+            "derived_review",
+            "chapter_confirmed",
+        ));
+    }
+
+    #[test]
     fn build_character_create_input_maps_nested_character_json() {
         let normalized_output = r#"
         {
@@ -2926,6 +2985,7 @@ mod tests {
                         "scene.environment".to_string(),
                     ],
                     state_write_policy: "chapter_confirmed",
+                    persist_mode: "formal",
                     active_skill_ids: &["capability.scene-environment".to_string()],
                     affects_layers: &["state".to_string(), "window_plan".to_string()],
                 },

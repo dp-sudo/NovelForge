@@ -21,6 +21,15 @@ author: NovelForge
 icon: "📥"
 createdAt: 2026-04-28
 updatedAt: 2026-04-29
+skillClass: extractor
+bundleIds: [bundle.scene-environment]
+alwaysOn: false
+triggerConditions: [import.extract_assets]
+requiredContexts: [chapter, canon]
+stateWrites: [character.involvement, scene.environment]
+automationTier: auto
+sceneTags: [environment]
+affectsLayers: [canon, state]
 ---
 
 # 导入资产抽取

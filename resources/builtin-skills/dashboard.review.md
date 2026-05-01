@@ -21,6 +21,15 @@ author: NovelForge
 icon: "📊"
 createdAt: 2026-04-29
 updatedAt: 2026-04-29
+skillClass: review
+bundleIds: [bundle.rule-fulfillment]
+alwaysOn: false
+triggerConditions: [dashboard.review]
+requiredContexts: [canon, state, window_plan]
+stateWrites: []
+automationTier: supervised
+sceneTags: []
+affectsLayers: [canon, state, window_plan, recent_continuity]
 ---
 
 # 仪表盘诊断

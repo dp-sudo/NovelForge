@@ -21,6 +21,15 @@ author: NovelForge
 icon: "📤"
 createdAt: 2026-04-29
 updatedAt: 2026-04-29
+skillClass: review
+bundleIds: [bundle.rule-fulfillment]
+alwaysOn: false
+triggerConditions: [export.review]
+requiredContexts: [canon, state]
+stateWrites: []
+automationTier: supervised
+sceneTags: []
+affectsLayers: [canon, state, recent_continuity]
 ---
 
 # 导出前审阅

@@ -23,6 +23,15 @@ author: NovelForge
 icon: "🔄"
 createdAt: 2026-04-28
 updatedAt: 2026-04-29
+skillClass: workflow
+bundleIds: [bundle.character-expression, bundle.emotion-progression]
+alwaysOn: false
+triggerConditions: [chapter.rewrite]
+requiredContexts: [chapter, canon, state]
+stateWrites: [chapter.revision]
+automationTier: supervised
+sceneTags: [dialogue, emotion]
+affectsLayers: [canon, state, recent_continuity]
 ---
 
 # 改写选区

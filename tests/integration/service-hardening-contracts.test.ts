@@ -26,3 +26,13 @@ test("备份写入应使用流式复制而不是整文件 read_to_end", async ()
   assert.match(createBackupSection, /std::io::copy/);
   assert.doesNotMatch(createBackupSection, /read_to_end\(&mut content\)/);
 });
+
+test("上下文链路契约：读取与结构化草案持久化必须分离", async () => {
+  const contextService = await readRepoFile("src-tauri/src/services/context_service.rs");
+  const contextCommands = await readRepoFile("src-tauri/src/commands/context_commands.rs");
+
+  assert.match(contextService, /collect_editor_context_internal\(project_root, chapter_id, false\)/);
+  assert.match(contextService, /extract_and_persist_structured_drafts/);
+  assert.match(contextService, /collect_editor_context_with_persisted_drafts/);
+  assert.match(contextCommands, /materialize_chapter_structured_drafts/);
+});

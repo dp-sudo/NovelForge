@@ -46,8 +46,15 @@ test("持久化策略契约：pipeline 输入类型声明显式策略并保留 a
 
 test("持久化策略契约：后端 run_ai_task_pipeline 入参接受新字段", async () => {
   const service = await readRepoFile("src-tauri/src/services/ai_pipeline_service.rs");
+  const orchestrator = await readRepoFile("src-tauri/src/services/ai_pipeline/orchestrator.rs");
+  const handlers = await readRepoFile("src-tauri/src/services/ai_pipeline/task_handlers.rs");
 
   assert.match(service, /pub auto_persist: bool,/);
   assert.match(service, /pub persist_mode: Option<String>,/);
   assert.match(service, /pub automation_tier: Option<String>,/);
+  assert.match(orchestrator, /resolve_persist_mode\(/);
+  assert.match(orchestrator, /should_persist_task_output\(/);
+  assert.match(orchestrator, /persistMode/);
+  assert.match(handlers, /persist_mode:/);
+  assert.match(handlers, /should_persist_runtime_state_writes/);
 });

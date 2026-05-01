@@ -21,6 +21,15 @@ author: NovelForge
 icon: "📚"
 createdAt: 2026-04-28
 updatedAt: 2026-04-29
+skillClass: extractor
+bundleIds: [bundle.scene-environment, bundle.character-expression]
+alwaysOn: false
+triggerConditions: [context.collect]
+requiredContexts: [chapter, canon]
+stateWrites: [relationship.relationship, character.involvement, scene.environment]
+automationTier: auto
+sceneTags: [dialogue, emotion, environment]
+affectsLayers: [canon, state, recent_continuity]
 ---
 
 # 收集上下文

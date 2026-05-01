@@ -22,6 +22,15 @@ author: NovelForge
 icon: "✨"
 createdAt: 2026-04-28
 updatedAt: 2026-04-29
+skillClass: capability
+bundleIds: [bundle.character-expression, bundle.emotion-progression]
+alwaysOn: false
+triggerConditions: [prose.naturalize]
+requiredContexts: [chapter, canon]
+stateWrites: []
+automationTier: supervised
+sceneTags: [dialogue, emotion]
+affectsLayers: [canon, state, recent_continuity]
 ---
 
 # 去 AI 味

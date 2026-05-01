@@ -182,6 +182,13 @@ export function EditorPage() {
   }, []);
 
   const getCandidateKey = useCallback((assetType: string, label: string) => `${assetType}:${label}`, []);
+  const normalizeDraftItemId = useCallback((rawId: string): string | undefined => {
+    const normalized = rawId.trim();
+    if (!normalized || normalized.startsWith("ephemeral:")) {
+      return undefined;
+    }
+    return normalized;
+  }, []);
   const getStructuredDraftDisplayStatus = useCallback(
     (draftId: string, persistedStatus: string): "pending" | "applying" | "applied" | "rejected" | "error" => {
       const transient = structuredDraftStatus[draftId];
@@ -710,7 +717,7 @@ export function EditorPage() {
     setStructuredDraftStatus((prev) => ({ ...prev, [draft.id]: "applying" }));
     try {
       const result = await applyStructuredDraft(projectRoot, chapterId, {
-        draftItemId: draft.id,
+        draftItemId: normalizeDraftItemId(draft.id),
         draftKind: "relationship",
         sourceLabel: draft.sourceLabel,
         targetLabel: draft.targetLabel,
@@ -745,7 +752,7 @@ export function EditorPage() {
     setStructuredDraftStatus((prev) => ({ ...prev, [draft.id]: "applying" }));
     try {
       const result = await applyStructuredDraft(projectRoot, chapterId, {
-        draftItemId: draft.id,
+        draftItemId: normalizeDraftItemId(draft.id),
         draftKind: "involvement",
         sourceLabel: draft.characterLabel,
         involvementType: draft.involvementType,
@@ -779,7 +786,7 @@ export function EditorPage() {
     setStructuredDraftStatus((prev) => ({ ...prev, [draft.id]: "applying" }));
     try {
       const result = await applyStructuredDraft(projectRoot, chapterId, {
-        draftItemId: draft.id,
+        draftItemId: normalizeDraftItemId(draft.id),
         draftKind: "scene",
         sourceLabel: draft.sceneLabel,
         sceneType: draft.sceneType,

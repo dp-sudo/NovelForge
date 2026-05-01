@@ -78,3 +78,15 @@ test("技能运行期契约：PromptResolver 注入 capability\\/policy\\/review
   assert.match(resolver, /Review Skill Context/);
   assert.match(resolver, /collect_runtime_skill_context/);
 });
+
+test("技能素材契约：内置技能 frontmatter 补齐编排元数据字段", async () => {
+  const skillDir = path.join(REPO_ROOT, "resources/builtin-skills");
+  const files = await fs.readdir(skillDir);
+  for (const file of files.filter((name) => name.endsWith(".md"))) {
+    const raw = await fs.readFile(path.join(skillDir, file), "utf-8");
+    assert.match(raw, /skillClass:/, `${file} 缺少 skillClass`);
+    assert.match(raw, /triggerConditions:/, `${file} 缺少 triggerConditions`);
+    assert.match(raw, /requiredContexts:/, `${file} 缺少 requiredContexts`);
+    assert.match(raw, /affectsLayers:/, `${file} 缺少 affectsLayers`);
+  }
+});

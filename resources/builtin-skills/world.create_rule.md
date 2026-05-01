@@ -22,6 +22,15 @@ author: NovelForge
 icon: "🌍"
 createdAt: 2026-04-28
 updatedAt: 2026-04-30
+skillClass: workflow
+bundleIds: [bundle.rule-fulfillment]
+alwaysOn: false
+triggerConditions: [world.create_rule]
+requiredContexts: [constitution, canon]
+stateWrites: []
+automationTier: supervised
+sceneTags: [environment]
+affectsLayers: [constitution, canon, promise]
 ---
 
 # 创建世界规则

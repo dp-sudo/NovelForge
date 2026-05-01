@@ -22,6 +22,15 @@ author: NovelForge
 icon: "🧵"
 createdAt: 2026-04-29
 updatedAt: 2026-04-30
+skillClass: workflow
+bundleIds: [bundle.rule-fulfillment]
+alwaysOn: false
+triggerConditions: [narrative.create_obligation]
+requiredContexts: [constitution, canon, promise]
+stateWrites: []
+automationTier: supervised
+sceneTags: []
+affectsLayers: [constitution, canon, promise, window_plan]
 ---
 
 # 创建叙事义务

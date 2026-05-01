@@ -131,7 +131,7 @@ test("问题6契约验证：compatibility-only 命令从强制注册约束解绑
   assert.match(aiCommands, /\[DEPRECATED_COMMAND\] test_ai_connection is compatibility-only/);
   assert.match(loggerInfra, /\[DEPRECATED_COMMAND_USAGE\] command=\{\} source=\{\} count=\{\}/);
   assert.match(settingsCommands, /record_deprecated_command_usage\(command,\s*src\)/);
-  assert.match(settingsCommands, /log_deprecated_command\(DEPRECATED_LOAD_PROVIDER_LOG,\s*"load_provider"/);
+  assert.match(settingsCommands, /log_deprecated_command\(\s*DEPRECATED_LOAD_PROVIDER_LOG,\s*"load_provider"/);
   assert.match(settingsCommands, /DEPRECATED_LOAD_PROVIDER_CONFIG_LOG,\s*"load_provider_config"/);
   assert.match(settingsCommands, /DEPRECATED_SAVE_PROVIDER_CONFIG_LOG,\s*"save_provider_config"/);
   assert.match(aiCommands, /record_deprecated_command_usage\(command,\s*src\)/);

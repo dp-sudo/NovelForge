@@ -22,6 +22,15 @@ author: NovelForge
 icon: "📘"
 createdAt: 2026-04-29
 updatedAt: 2026-04-30
+skillClass: workflow
+bundleIds: [bundle.rule-fulfillment]
+alwaysOn: false
+triggerConditions: [glossary.create_term]
+requiredContexts: [constitution, canon]
+stateWrites: []
+automationTier: supervised
+sceneTags: []
+affectsLayers: [constitution, canon, lexicon_policy]
 ---
 
 # 创建术语条目

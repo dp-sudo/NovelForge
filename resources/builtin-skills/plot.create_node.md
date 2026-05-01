@@ -22,6 +22,15 @@ author: NovelForge
 icon: "🔗"
 createdAt: 2026-04-28
 updatedAt: 2026-04-30
+skillClass: workflow
+bundleIds: [bundle.rule-fulfillment]
+alwaysOn: false
+triggerConditions: [plot.create_node]
+requiredContexts: [canon, state, window_plan]
+stateWrites: [window.progress]
+automationTier: supervised
+sceneTags: []
+affectsLayers: [canon, state, promise, window_plan]
 ---
 
 # 创建剧情节点

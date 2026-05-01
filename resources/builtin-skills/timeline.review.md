@@ -25,6 +25,15 @@ author: NovelForge
 icon: "⏱️"
 createdAt: 2026-04-29
 updatedAt: 2026-04-30
+skillClass: review
+bundleIds: [bundle.rule-fulfillment]
+alwaysOn: false
+triggerConditions: [timeline.review]
+requiredContexts: [chapter, canon, state, window_plan]
+stateWrites: [window.progress]
+automationTier: confirm
+sceneTags: []
+affectsLayers: [canon, state, window_plan, recent_continuity]
 ---
 
 # 时间线审阅

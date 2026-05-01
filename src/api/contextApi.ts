@@ -105,6 +105,16 @@ export async function getChapterContext(projectRoot: string, chapterId: string):
   return invokeCommand<ChapterContext>("get_chapter_context", { projectRoot, chapterId });
 }
 
+export async function materializeChapterStructuredDrafts(
+  projectRoot: string,
+  chapterId: string,
+): Promise<ChapterContext> {
+  return invokeCommand<ChapterContext>("materialize_chapter_structured_drafts", {
+    projectRoot,
+    chapterId,
+  });
+}
+
 export interface ApplyAssetCandidateInput {
   label: string;
   assetType: string;

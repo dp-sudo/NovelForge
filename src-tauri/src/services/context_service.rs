@@ -302,6 +302,88 @@ type StructuredDraftPool = (
     Vec<SceneDraft>,
 );
 
+fn stable_ephemeral_id(kind: &str, tokens: &[&str]) -> String {
+    let mut hasher = DefaultHasher::new();
+    kind.hash(&mut hasher);
+    for token in tokens {
+        token.trim().hash(&mut hasher);
+    }
+    format!("ephemeral:{}:{:x}", kind, hasher.finish())
+}
+
+fn map_ephemeral_relationship_drafts(
+    extracted: &[ExtractedRelationshipDraft],
+) -> Vec<RelationshipDraft> {
+    extracted
+        .iter()
+        .map(|draft| RelationshipDraft {
+            id: stable_ephemeral_id(
+                "relationship",
+                &[
+                    draft.source_label.as_str(),
+                    draft.target_label.as_str(),
+                    draft.relationship_type.as_str(),
+                    draft.evidence.as_str(),
+                ],
+            ),
+            batch_id: "ephemeral".to_string(),
+            status: "pending".to_string(),
+            source_label: draft.source_label.clone(),
+            target_label: draft.target_label.clone(),
+            relationship_type: draft.relationship_type.clone(),
+            confidence: draft.confidence,
+            evidence: draft.evidence.clone(),
+        })
+        .collect()
+}
+
+fn map_ephemeral_involvement_drafts(
+    extracted: &[ExtractedInvolvementDraft],
+) -> Vec<InvolvementDraft> {
+    extracted
+        .iter()
+        .map(|draft| InvolvementDraft {
+            id: stable_ephemeral_id(
+                "involvement",
+                &[
+                    draft.character_label.as_str(),
+                    draft.involvement_type.as_str(),
+                    draft.evidence.as_str(),
+                ],
+            ),
+            batch_id: "ephemeral".to_string(),
+            status: "pending".to_string(),
+            character_label: draft.character_label.clone(),
+            involvement_type: draft.involvement_type.clone(),
+            occurrences: draft.occurrences,
+            confidence: draft.confidence,
+            evidence: draft.evidence.clone(),
+        })
+        .collect()
+}
+
+fn map_ephemeral_scene_drafts(extracted: &[ExtractedSceneDraft]) -> Vec<SceneDraft> {
+    extracted
+        .iter()
+        .map(|draft| SceneDraft {
+            id: stable_ephemeral_id(
+                "scene",
+                &[
+                    draft.scene_label.as_str(),
+                    draft.scene_type.as_str(),
+                    draft.evidence.as_str(),
+                ],
+            ),
+            batch_id: "ephemeral".to_string(),
+            status: "pending".to_string(),
+            scene_label: draft.scene_label.clone(),
+            scene_type: draft.scene_type.clone(),
+            confidence: draft.confidence,
+            evidence: draft.evidence.clone(),
+        })
+        .collect()
+}
+
 #[derive(Default)]
 pub struct ContextService;
 
@@ -444,6 +526,60 @@ impl ContextService {
         project_root: &str,
         chapter_id: &str,
     ) -> Result<EditorContextPanel, AppErrorDto> {
+        self.collect_editor_context_internal(project_root, chapter_id, false)
+    }
+
+    /// Compatibility wrapper: preserves legacy behavior by materializing
+    /// structured draft pool before returning context.
+    pub fn collect_editor_context_with_persisted_drafts(
+        &self,
+        project_root: &str,
+        chapter_id: &str,
+    ) -> Result<EditorContextPanel, AppErrorDto> {
+        log::info!(
+            "[CONTEXT_COMPAT] collect_editor_context_with_persisted_drafts project_root={} chapter_id={}",
+            project_root,
+            chapter_id
+        );
+        self.extract_and_persist_structured_drafts(project_root, chapter_id)?;
+        self.collect_editor_context_internal(project_root, chapter_id, false)
+    }
+
+    pub fn extract_and_persist_structured_drafts(
+        &self,
+        project_root: &str,
+        chapter_id: &str,
+    ) -> Result<(), AppErrorDto> {
+        let normalized_root = normalize_project_root(project_root)?;
+        let project_root_path = Path::new(normalized_root);
+        let mut conn = open_project_database(normalized_root)?;
+        let project_id = get_project_id(&conn)?;
+        let related = self.collect_related_context(&conn, &project_id, chapter_id)?;
+        let glossary = self.collect_glossary_context(&conn, &project_id)?;
+        let chapter_content = self.load_chapter_content(&conn, project_root_path, chapter_id)?;
+        let (relationship_drafts, involvement_drafts, scene_drafts, _) = self
+            .extract_structured_drafts(&conn, &project_id, &related, &glossary, &chapter_content)?;
+        self.persist_structured_draft_pool(
+            &mut conn,
+            &project_id,
+            chapter_id,
+            "editor.context.extract.explicit",
+            &chapter_content,
+            StructuredDraftSlices {
+                relationship: &relationship_drafts,
+                involvement: &involvement_drafts,
+                scene: &scene_drafts,
+            },
+        )?;
+        Ok(())
+    }
+
+    fn collect_editor_context_internal(
+        &self,
+        project_root: &str,
+        chapter_id: &str,
+        materialize_structured_drafts: bool,
+    ) -> Result<EditorContextPanel, AppErrorDto> {
         let normalized_root = normalize_project_root(project_root)?;
         let project_root_path = Path::new(normalized_root);
         let mut conn = open_project_database(normalized_root)?;
@@ -455,57 +591,46 @@ impl ContextService {
             .ok_or_else(chapter_not_found_error)?;
         let glossary = self.collect_glossary_context(&conn, &project_id)?;
         let blueprint = self.collect_blueprint_context(&conn, &project_id)?;
-        let chapter_content = match conn
-            .query_row(
-                "SELECT content_path FROM chapters WHERE id = ?1 AND is_deleted = 0",
-                params![chapter_id],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()
-            .map_err(|err| context_collect_error("无法读取章节路径", err.to_string()))? {
-            Some(content_path) => {
-                let chapter_file = resolve_project_relative_path(project_root_path, &content_path)
-                    .map_err(|detail| context_collect_error("章节路径无效", detail))?;
-                let content = fs::read_to_string(&chapter_file)
-                    .map_err(|err| context_collect_error("无法读取章节正文", err.to_string()))?;
-                strip_frontmatter(&content)
-            }
-            None => String::new(),
-        };
-        let mut existing_labels: Vec<String> = Vec::new();
-        existing_labels.extend(related.characters.iter().map(|item| item.name.clone()));
-        existing_labels.extend(related.world_rules.iter().map(|item| item.title.clone()));
-        existing_labels.extend(related.plot_nodes.iter().map(|item| item.title.clone()));
-        existing_labels.extend(glossary.iter().map(|item| item.term.clone()));
-        let asset_candidates = extract_asset_candidates(&chapter_content, &existing_labels, 12);
-        let mut character_labels = self.collect_project_character_names(&conn, &project_id)?;
-        character_labels.extend(
-            asset_candidates
-                .iter()
-                .filter(|item| item.asset_type == "character")
-                .map(|item| item.label.clone()),
-        );
-        dedupe_labels(&mut character_labels);
-        let world_titles = self.collect_project_world_rule_titles(&conn, &project_id)?;
-        let relationship_drafts =
-            extract_relationship_drafts(&chapter_content, &character_labels, 10);
-        let involvement_drafts =
-            extract_involvement_drafts(&chapter_content, &character_labels, 10);
-        let scene_drafts = extract_scene_drafts(&asset_candidates, &world_titles, 10);
-        self.persist_structured_draft_pool(
-            &mut conn,
+        let chapter_content = self.load_chapter_content(&conn, project_root_path, chapter_id)?;
+        let (
+            extracted_relationship_drafts,
+            extracted_involvement_drafts,
+            extracted_scene_drafts,
+            asset_candidates,
+        ) = self.extract_structured_drafts(
+            &conn,
             &project_id,
-            chapter_id,
-            "editor.context.extract",
+            &related,
+            &glossary,
             &chapter_content,
-            StructuredDraftSlices {
-                relationship: &relationship_drafts,
-                involvement: &involvement_drafts,
-                scene: &scene_drafts,
-            },
         )?;
         let (relationship_drafts, involvement_drafts, scene_drafts) =
-            self.load_structured_draft_pool(&conn, &project_id, chapter_id)?;
+            if materialize_structured_drafts {
+                self.persist_structured_draft_pool(
+                    &mut conn,
+                    &project_id,
+                    chapter_id,
+                    "editor.context.extract",
+                    &chapter_content,
+                    StructuredDraftSlices {
+                        relationship: &extracted_relationship_drafts,
+                        involvement: &extracted_involvement_drafts,
+                        scene: &extracted_scene_drafts,
+                    },
+                )?;
+                self.load_structured_draft_pool(&conn, &project_id, chapter_id)?
+            } else {
+                let loaded = self.load_structured_draft_pool(&conn, &project_id, chapter_id)?;
+                if !loaded.0.is_empty() || !loaded.1.is_empty() || !loaded.2.is_empty() {
+                    loaded
+                } else {
+                    (
+                        map_ephemeral_relationship_drafts(&extracted_relationship_drafts),
+                        map_ephemeral_involvement_drafts(&extracted_involvement_drafts),
+                        map_ephemeral_scene_drafts(&extracted_scene_drafts),
+                    )
+                }
+            };
         let state_summary = StoryStateService
             .list_chapter_states(normalized_root, chapter_id)?
             .into_iter()
@@ -538,6 +663,76 @@ impl ContextService {
             previous_chapter_summary: related.previous_chapter_summary,
             state_summary,
         })
+    }
+
+    fn load_chapter_content(
+        &self,
+        conn: &Connection,
+        project_root_path: &Path,
+        chapter_id: &str,
+    ) -> Result<String, AppErrorDto> {
+        match conn
+            .query_row(
+                "SELECT content_path FROM chapters WHERE id = ?1 AND is_deleted = 0",
+                params![chapter_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|err| context_collect_error("无法读取章节路径", err.to_string()))?
+        {
+            Some(content_path) => {
+                let chapter_file = resolve_project_relative_path(project_root_path, &content_path)
+                    .map_err(|detail| context_collect_error("章节路径无效", detail))?;
+                let content = fs::read_to_string(&chapter_file)
+                    .map_err(|err| context_collect_error("无法读取章节正文", err.to_string()))?;
+                Ok(strip_frontmatter(&content))
+            }
+            None => Ok(String::new()),
+        }
+    }
+
+    fn extract_structured_drafts(
+        &self,
+        conn: &Connection,
+        project_id: &str,
+        related: &RelatedContext,
+        glossary: &[GlossaryContextTerm],
+        chapter_content: &str,
+    ) -> Result<
+        (
+            Vec<ExtractedRelationshipDraft>,
+            Vec<ExtractedInvolvementDraft>,
+            Vec<ExtractedSceneDraft>,
+            Vec<AssetExtractionCandidate>,
+        ),
+        AppErrorDto,
+    > {
+        let mut existing_labels: Vec<String> = Vec::new();
+        existing_labels.extend(related.characters.iter().map(|item| item.name.clone()));
+        existing_labels.extend(related.world_rules.iter().map(|item| item.title.clone()));
+        existing_labels.extend(related.plot_nodes.iter().map(|item| item.title.clone()));
+        existing_labels.extend(glossary.iter().map(|item| item.term.clone()));
+        let asset_candidates = extract_asset_candidates(chapter_content, &existing_labels, 12);
+
+        let mut character_labels = self.collect_project_character_names(conn, project_id)?;
+        character_labels.extend(
+            asset_candidates
+                .iter()
+                .filter(|item| item.asset_type == "character")
+                .map(|item| item.label.clone()),
+        );
+        dedupe_labels(&mut character_labels);
+        let world_titles = self.collect_project_world_rule_titles(conn, project_id)?;
+        let relationship_drafts =
+            extract_relationship_drafts(chapter_content, &character_labels, 10);
+        let involvement_drafts = extract_involvement_drafts(chapter_content, &character_labels, 10);
+        let scene_drafts = extract_scene_drafts(&asset_candidates, &world_titles, 10);
+        Ok((
+            relationship_drafts,
+            involvement_drafts,
+            scene_drafts,
+            asset_candidates,
+        ))
     }
 
     /// Collect only global context without requiring a chapter_id.
@@ -756,8 +951,8 @@ impl ContextService {
 
         let mut lines = Vec::new();
         for row in rows {
-            let (obligation_type, description, expected_payoff_chapter_id, payoff_status) = row
-                .map_err(promise_context_query_error)?;
+            let (obligation_type, description, expected_payoff_chapter_id, payoff_status) =
+                row.map_err(promise_context_query_error)?;
             let mut line = format!(
                 "叙事义务[{}]: {}",
                 obligation_type.trim(),
@@ -819,7 +1014,10 @@ impl ContextService {
         let snapshot = ChapterService
             .get_window_plan_snapshot(project_root, chapter_id)
             .map_err(|err| {
-                context_collect_error("查询章节窗口计划失败", format!("{}: {}", err.code, err.message))
+                context_collect_error(
+                    "查询章节窗口计划失败",
+                    format!("{}: {}", err.code, err.message),
+                )
             })?;
 
         let mut lines = vec![format!(
@@ -977,9 +1175,7 @@ impl ContextService {
                 &input.asset_type,
                 &evidence,
             )?,
-            _ => {
-                return Err(candidate_target_invalid_error("不支持的候选目标类型"))
-            }
+            _ => return Err(candidate_target_invalid_error("不支持的候选目标类型")),
         };
 
         let link_created =
@@ -2691,9 +2887,7 @@ fn resolve_candidate_target_type(
             "world" | "world_rule" => "world_rule",
             "plot" | "plot_node" => "plot_node",
             "glossary" | "glossary_term" | "term" => "glossary_term",
-            _ => {
-                return Err(candidate_target_invalid_error("目标类型不支持"))
-            }
+            _ => return Err(candidate_target_invalid_error("目标类型不支持")),
         };
         return Ok(value.to_string());
     }
@@ -2926,7 +3120,7 @@ mod tests {
     }
 
     #[test]
-    fn collect_context_persists_structured_draft_pool_and_apply_updates_item_status() {
+    fn collect_context_is_read_only_and_explicit_materialize_persists_draft_pool() {
         let workspace = create_temp_workspace();
         let project_service = ProjectService;
         let chapter_service = ChapterService;
@@ -2970,15 +3164,36 @@ mod tests {
         )
         .expect("write chapter content");
 
-        let panel = context_service
+        let panel_read_only = context_service
             .collect_editor_context(&project.project_root, &chapter.id)
-            .expect("collect context");
-        assert!(!panel.relationship_drafts.is_empty());
-        let relationship = panel
+            .expect("collect context (read-only)");
+        assert!(!panel_read_only.relationship_drafts.is_empty());
+        assert!(panel_read_only
             .relationship_drafts
             .iter()
-            .find(|item| item.status == "pending")
-            .expect("pending relationship draft")
+            .all(|item| item.batch_id == "ephemeral"));
+
+        let conn = open_database(std::path::Path::new(&project.project_root)).expect("open db");
+        let draft_item_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM structured_draft_items", [], |row| {
+                row.get(0)
+            })
+            .expect("query draft item count");
+        assert_eq!(draft_item_count, 0);
+        drop(conn);
+
+        context_service
+            .extract_and_persist_structured_drafts(&project.project_root, &chapter.id)
+            .expect("explicit materialize should persist structured drafts");
+
+        let panel_materialized = context_service
+            .collect_editor_context(&project.project_root, &chapter.id)
+            .expect("collect context after materialize");
+        let relationship = panel_materialized
+            .relationship_drafts
+            .iter()
+            .find(|item| item.status == "pending" && item.batch_id != "ephemeral")
+            .expect("materialized relationship draft")
             .clone();
 
         let applied = context_service
