@@ -51,7 +51,7 @@
 ### 4.3 编辑器 AI（Pipeline 主链路）
 1. 点击 9 个固定按钮之一或输入自定义指令。
 2. `EditorPage` 先做前置校验（章节/选区/指令/正文要求）。
-3. 调用 `run_ai_task_pipeline` 得到 `requestId`（输入支持 `autoPersist` + `persistMode` + `automationTier`）。
+3. 调用 `run_ai_task_pipeline` 得到 `requestId`（输入支持 `autoPersist` + `persistMode` + `automationTier` + 可选 `skillSelection` 请求级覆盖）。
 4. 通过 `streamTaskPipeline` 监听 `ai:pipeline:event`。
 5. 事件按阶段推进：
    - `validate`
@@ -70,10 +70,11 @@
 2. 装配技能栈（workflow/capability/extractor/policy/review），运行时会同时应用：
    - 项目级 `alwaysOnPolicySkills`
    - 项目级 `defaultCapabilityBundles`
+   - 请求级 `skillSelection`（显式 skill/bundle/scene/context + 可关闭推断场景标签）
    - 技能元数据 `sceneTags/requiredContexts/automationTier`
    - 可选 `route override`
 3. 生成章节计划/草稿/改写等任务输出。
-4. 写后回写 `Canon + State`：正式资产入库并写 `entity_provenance`，章节保存后回写 `story_state`；若激活技能声明了 `stateWrites`，会按项目级 `stateWritePolicy` 追加运行时状态写入。
+4. 写后回写 `Canon + State`：正式资产入库并写 `entity_provenance`，章节保存后回写 `story_state`；若激活技能声明了 `stateWrites`，会按项目级 `stateWritePolicy` 追加运行时状态写入，并附带 `skillIds/affectsLayers` 元数据。
 
 ### 4.4 编辑器 9 按钮任务映射（canonical）
 - `chapter.continue`（续写章节）

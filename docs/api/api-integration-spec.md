@@ -158,14 +158,16 @@
     - `autoPersist?: boolean`（兼容桥，保留）
     - `persistMode?: "none" | "formal" | "derived_review"`（显式持久化语义）
     - `automationTier?: "auto" | "supervised" | "confirm"`（显式自动化档位）
+    - `skillSelection?: { explicitSkillIds, activeBundleIds, sceneTags, availableContexts, disableInferredSceneTags }`（请求级技能编排覆盖）
   - 兼容规则：
     - 当 `persistMode` 存在时，以 `persistMode` 语义为准（覆盖 `autoPersist`）。
     - 当仅有 `autoPersist: true` 时，前端按任务类型推断 `persistMode`，默认 `automationTier = "supervised"`。
   - 运行时行为：
     - `prompt` 前会编译 `ContinuityPack`，并注入技能选择结果。
     - 技能选择不再只看 `taskType`；还会同时应用项目级 `alwaysOnPolicySkills/defaultCapabilityBundles`，以及技能元数据 `sceneTags/requiredContexts/automationTier`。
+    - 若技能声明 `affectsLayers`，`orchestrator` 会按聚合后的 layer focus 对 `ContinuityPack` 进行裁剪（保留 constitution/lexicon 护栏层）。
     - 若技能命中 `route_override`，仅覆盖本次请求的 provider/model，不修改项目配置。
-    - 若激活技能声明 `stateWrites`，后端会按项目级 `stateWritePolicy` 追加 `story_state` 记录。
+    - 若激活技能声明 `stateWrites`，后端会按项目级 `stateWritePolicy` 追加 `story_state` 记录，并写入 `skillIds/affectsLayers` 运行态元数据。
 - AI 功能任务（前端薄封装，统一走 pipeline）：
   - `generateBlueprintSuggestion` -> `runModuleAiTask(taskType="blueprint.generate_step")`
   - `aiGenerateCharacter` -> `runModuleAiTask(taskType="character.create")`

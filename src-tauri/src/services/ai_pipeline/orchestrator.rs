@@ -172,6 +172,9 @@ impl<'a> PipelineOrchestrator<'a> {
             })?;
             (resolved, selected)
         };
+        let selected_skill_ids = selected_skills.all_skill_ids();
+        let runtime_state_writes = selected_skills.all_state_writes();
+        let runtime_affects_layers = selected_skills.all_affects_layers();
         let route_override_meta = selected_skills.route_override.as_ref().map(|route| {
             json!({
                 "provider": route.provider,
@@ -202,6 +205,11 @@ impl<'a> PipelineOrchestrator<'a> {
                     },
                     "activeBundles": selection_context.active_bundle_ids,
                     "sceneTags": selection_context.scene_tags,
+                    "availableContexts": selection_context.available_contexts,
+                    "explicitSkillIds": selection_context.explicit_skill_ids,
+                    "selectedSkillIds": selected_skill_ids.clone(),
+                    "stateWrites": runtime_state_writes.clone(),
+                    "affectsLayers": runtime_affects_layers.clone(),
                     "routeOverride": route_override_meta,
                 })),
             },
@@ -221,6 +229,7 @@ impl<'a> PipelineOrchestrator<'a> {
             &context,
             self.context_service,
             self.input.chapter_id.as_deref(),
+            &runtime_affects_layers,
         );
 
         self.audit_store.touch_pipeline_phase(
@@ -412,8 +421,6 @@ impl<'a> PipelineOrchestrator<'a> {
                     error: err,
                 });
             }
-            let runtime_state_writes = selected_skills.all_state_writes();
-            let runtime_skill_ids = selected_skills.all_skill_ids();
             self.task_handlers
                 .persist_task_output_with_runtime_state(
                     self.canonical_task,
@@ -424,7 +431,8 @@ impl<'a> PipelineOrchestrator<'a> {
                     RuntimeStateWriteOptions {
                         state_writes: &runtime_state_writes,
                         state_write_policy: &strategy_profile.state_write_policy,
-                        active_skill_ids: &runtime_skill_ids,
+                        active_skill_ids: &selected_skill_ids,
+                        affects_layers: &runtime_affects_layers,
                     },
                 )
                 .map_err(|err| StageError {
@@ -612,11 +620,42 @@ impl<'a> PipelineOrchestrator<'a> {
         profile: &AiStrategyProfile,
         context: &crate::services::context_service::CollectedContext,
     ) -> SkillSelectionContext {
+        let runtime = self.input.skill_selection.as_ref();
+        let runtime_explicit_skill_ids = runtime
+            .map(|selection| selection.explicit_skill_ids.as_slice())
+            .unwrap_or(&[]);
+        let runtime_bundle_ids = runtime
+            .map(|selection| selection.active_bundle_ids.as_slice())
+            .unwrap_or(&[]);
+        let runtime_scene_tags = runtime
+            .map(|selection| selection.scene_tags.as_slice())
+            .unwrap_or(&[]);
+        let runtime_contexts = runtime
+            .map(|selection| selection.available_contexts.as_slice())
+            .unwrap_or(&[]);
+        let inferred_scene_tags = if runtime
+            .map(|selection| selection.disable_inferred_scene_tags)
+            .unwrap_or(false)
+        {
+            Vec::new()
+        } else {
+            self.infer_scene_tags(context)
+        };
+
         SkillSelectionContext {
-            explicit_skill_ids: profile.always_on_policy_skills.clone(),
-            active_bundle_ids: profile.default_capability_bundles.clone(),
-            scene_tags: self.infer_scene_tags(context),
-            available_contexts: self.collect_available_contexts(context),
+            explicit_skill_ids: merge_unique_values(
+                &profile.always_on_policy_skills,
+                runtime_explicit_skill_ids,
+            ),
+            active_bundle_ids: merge_unique_values(
+                &profile.default_capability_bundles,
+                runtime_bundle_ids,
+            ),
+            scene_tags: merge_unique_values(&inferred_scene_tags, runtime_scene_tags),
+            available_contexts: merge_unique_values(
+                &self.collect_available_contexts(context),
+                runtime_contexts,
+            ),
             automation_tier: Some(self.resolve_automation_tier(profile)),
         }
     }
@@ -695,5 +734,52 @@ impl<'a> PipelineOrchestrator<'a> {
         tags.sort();
         tags.dedup();
         tags
+    }
+}
+
+fn merge_unique_values(primary: &[String], secondary: &[String]) -> Vec<String> {
+    let mut values = Vec::new();
+    for item in primary.iter().chain(secondary.iter()) {
+        let normalized = item.trim();
+        if normalized.is_empty() {
+            continue;
+        }
+        if !values
+            .iter()
+            .any(|existing: &String| existing.eq_ignore_ascii_case(normalized))
+        {
+            values.push(normalized.to_string());
+        }
+    }
+    values
+}
+
+#[cfg(test)]
+mod tests {
+    use super::merge_unique_values;
+
+    #[test]
+    fn merge_unique_values_trims_and_deduplicates_case_insensitively() {
+        let merged = merge_unique_values(
+            &[
+                " battle ".to_string(),
+                "dialogue".to_string(),
+                "STATE".to_string(),
+            ],
+            &[
+                "battle".to_string(),
+                " emotion ".to_string(),
+                "state".to_string(),
+            ],
+        );
+        assert_eq!(
+            merged,
+            vec![
+                "battle".to_string(),
+                "dialogue".to_string(),
+                "STATE".to_string(),
+                "emotion".to_string()
+            ]
+        );
     }
 }

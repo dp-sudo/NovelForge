@@ -29,6 +29,14 @@ export type PersistMode = "none" | "formal" | "derived_review";
 
 export type AutomationTier = "auto" | "supervised" | "confirm";
 
+export interface RuntimeSkillSelectionInput {
+  explicitSkillIds?: string[];
+  activeBundleIds?: string[];
+  sceneTags?: string[];
+  availableContexts?: string[];
+  disableInferredSceneTags?: boolean;
+}
+
 export interface RunTaskPipelineInput {
   projectRoot: string;
   taskType: string;
@@ -52,6 +60,7 @@ export interface RunTaskPipelineInput {
    */
   persistMode?: PersistMode;
   automationTier?: AutomationTier;
+  skillSelection?: RuntimeSkillSelectionInput;
 }
 
 export interface AiPipelineEvent {
@@ -183,6 +192,7 @@ export async function runTaskPipeline(
       autoPersist: policy.autoPersist,
       persistMode: policy.persistMode,
       automationTier: policy.automationTier,
+      skillSelection: input.skillSelection,
     },
   });
   const requestId = await withTimeout(

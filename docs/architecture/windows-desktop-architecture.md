@@ -141,9 +141,10 @@
 
 ### 6.4 运行期技能消费与路由覆盖
 - `orchestrator` 在 `route` 阶段构建运行时技能选择上下文，并统一执行 `select_skills_for_task_with_context`。
-- 运行时技能选择上下文包含：`alwaysOnPolicySkills`、`defaultCapabilityBundles`、当前 `automationTier`、可用上下文键、推断出的场景标签。
+- 运行时技能选择上下文包含：`alwaysOnPolicySkills`、`defaultCapabilityBundles`、请求级 `skillSelection` 覆盖、当前 `automationTier`、可用上下文键、推断出的场景标签。
 - `orchestrator` 先解析本次请求最终 provider/model，再把显式路由写入生成请求，避免 `route` 与 `generate` 阶段重复按旧逻辑二次选技能。
-- `ai:pipeline:event.meta` 回传所选技能数量、激活 bundle、推断 scene tag 与 route override 元信息，便于审计。
+- 若技能声明 `affectsLayers`，`orchestrator` 会按聚合层焦点裁剪 `ContinuityPack`（constitution/lexicon 护栏层固定保留）。
+- `ai:pipeline:event.meta` 回传所选技能数量、技能 IDs、stateWrites、affectsLayers、激活 bundle、推断 scene tag 与 route override 元信息，便于审计。
 
 ### 6.5 写后回写与来源轨迹
 - `save_chapter_content` 写正文后调用 `StoryStateService.record_window_progress` 回写窗口状态。

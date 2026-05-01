@@ -1,4 +1,5 @@
 use serde::Serialize;
+use std::collections::HashSet;
 
 use crate::services::context_service::{CollectedContext, ContextService, StoryStateSummary};
 
@@ -44,6 +45,7 @@ impl ContinuityPackCompiler {
         context: &CollectedContext,
         context_service: &ContextService,
         chapter_id: Option<&str>,
+        affects_layers: &[String],
     ) -> ContinuityPack {
         let depth = ContinuityPackDepth::parse(depth);
         let mut pack = ContinuityPack {
@@ -52,7 +54,7 @@ impl ContinuityPackCompiler {
         };
 
         if depth == ContinuityPackDepth::Minimal {
-            return pack;
+            return apply_layer_focus(pack, affects_layers);
         }
 
         pack.constitution_context = context_service.get_constitution_context(context);
@@ -114,8 +116,66 @@ impl ContinuityPackCompiler {
                 };
         }
 
-        pack
+        apply_layer_focus(pack, affects_layers)
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum ContinuityLayer {
+    Constitution,
+    Canon,
+    LexiconPolicy,
+    State,
+    Promise,
+    WindowPlan,
+    RecentContinuity,
+}
+
+fn parse_continuity_layer(raw: &str) -> Option<ContinuityLayer> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "constitution" => Some(ContinuityLayer::Constitution),
+        "canon" => Some(ContinuityLayer::Canon),
+        "lexicon" | "lexicon_policy" | "policy" => Some(ContinuityLayer::LexiconPolicy),
+        "state" => Some(ContinuityLayer::State),
+        "promise" => Some(ContinuityLayer::Promise),
+        "window" | "window_plan" => Some(ContinuityLayer::WindowPlan),
+        "recent" | "recent_continuity" => Some(ContinuityLayer::RecentContinuity),
+        _ => None,
+    }
+}
+
+fn parse_layer_focus(affects_layers: &[String]) -> HashSet<ContinuityLayer> {
+    affects_layers
+        .iter()
+        .filter_map(|raw| parse_continuity_layer(raw))
+        .collect()
+}
+
+fn apply_layer_focus(mut pack: ContinuityPack, affects_layers: &[String]) -> ContinuityPack {
+    let focus = parse_layer_focus(affects_layers);
+    if focus.is_empty() {
+        return pack;
+    }
+
+    if !focus.contains(&ContinuityLayer::Canon) {
+        pack.canon_context.clear();
+    }
+    if !focus.contains(&ContinuityLayer::State) {
+        pack.state_context.clear();
+    }
+    if !focus.contains(&ContinuityLayer::Promise) {
+        pack.promise_context.clear();
+    }
+    if !focus.contains(&ContinuityLayer::WindowPlan) {
+        pack.window_plan_context.clear();
+    }
+    if !focus.contains(&ContinuityLayer::RecentContinuity) {
+        pack.recent_continuity_context.clear();
+    }
+
+    // 编排收敛策略：无论技能 focus 指向哪里，都保留宪法层与术语/文风约束。
+    // 这两层是全局稳定性护栏，不随局部技能切换而关闭。
+    pack
 }
 
 fn build_lexicon_policy_context(context: &CollectedContext) -> Vec<String> {
@@ -183,7 +243,7 @@ fn display_language_style(raw: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{ContextService, ContinuityPackCompiler};
+    use super::{apply_layer_focus, ContextService, ContinuityPack, ContinuityPackCompiler};
     use crate::services::context_service::{
         BlueprintStepSummary, ChapterSummary, CollectedContext, GlobalContext, RelatedContext,
     };
@@ -237,6 +297,7 @@ mod tests {
             &context,
             &service,
             Some("ch-1"),
+            &[],
         );
         assert!(!pack.lexicon_policy_context.is_empty());
         assert!(pack.constitution_context.is_empty());
@@ -268,6 +329,7 @@ mod tests {
             &context,
             &service,
             Some("ch-1"),
+            &[],
         );
         let style_line = pack
             .lexicon_policy_context
@@ -276,5 +338,28 @@ mod tests {
             .expect("style line exists");
         assert!(style_line.contains("文风=口语化"));
         assert!(!style_line.contains("语言=colloquial"));
+    }
+
+    #[test]
+    fn layer_focus_keeps_guardrails_and_selected_layers() {
+        let pack = ContinuityPack {
+            constitution_context: vec!["const".to_string()],
+            canon_context: vec!["canon".to_string()],
+            lexicon_policy_context: vec!["lexicon".to_string()],
+            state_context: vec!["state".to_string()],
+            promise_context: vec!["promise".to_string()],
+            window_plan_context: vec!["window".to_string()],
+            recent_continuity_context: vec!["recent".to_string()],
+        };
+
+        let filtered = apply_layer_focus(pack, &["state".to_string(), "window_plan".to_string()]);
+
+        assert_eq!(filtered.constitution_context, vec!["const".to_string()]);
+        assert_eq!(filtered.lexicon_policy_context, vec!["lexicon".to_string()]);
+        assert!(filtered.canon_context.is_empty());
+        assert_eq!(filtered.state_context, vec!["state".to_string()]);
+        assert!(filtered.promise_context.is_empty());
+        assert_eq!(filtered.window_plan_context, vec!["window".to_string()]);
+        assert!(filtered.recent_continuity_context.is_empty());
     }
 }

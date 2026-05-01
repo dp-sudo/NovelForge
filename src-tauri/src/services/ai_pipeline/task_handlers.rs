@@ -29,6 +29,7 @@ pub struct RuntimeStateWriteOptions<'a> {
     pub state_writes: &'a [String],
     pub state_write_policy: &'a str,
     pub active_skill_ids: &'a [String],
+    pub affects_layers: &'a [String],
 }
 
 impl<'a> Default for RuntimeStateWriteOptions<'a> {
@@ -37,6 +38,7 @@ impl<'a> Default for RuntimeStateWriteOptions<'a> {
             state_writes: &[],
             state_write_policy: "manual_only",
             active_skill_ids: &[],
+            affects_layers: &[],
         }
     }
 }
@@ -352,6 +354,7 @@ impl TaskHandlers {
                 records,
                 state_write_key,
                 runtime_options.active_skill_ids,
+                runtime_options.affects_layers,
             ) else {
                 continue;
             };
@@ -397,6 +400,7 @@ impl TaskHandlers {
         records: &[PersistedRecord],
         state_write_key: &str,
         active_skill_ids: &[String],
+        affects_layers: &[String],
     ) -> Option<StoryStateInput> {
         let normalized_key = state_write_key.trim();
         if normalized_key.is_empty() {
@@ -446,6 +450,7 @@ impl TaskHandlers {
                 "automationTier": input.automation_tier.as_deref().map(str::trim).filter(|value| !value.is_empty()),
                 "chapterId": input.chapter_id.as_deref().map(str::trim).filter(|value| !value.is_empty()),
                 "skillIds": active_skill_ids,
+                "affectsLayers": affects_layers,
                 "recordRefs": record_refs,
                 "outputPreview": preview_text(normalized_output, 240),
             }),
@@ -2222,6 +2227,7 @@ mod tests {
             auto_persist: true,
             persist_mode: None,
             automation_tier: None,
+            skill_selection: None,
         }
     }
 
@@ -2921,6 +2927,7 @@ mod tests {
                     ],
                     state_write_policy: "chapter_confirmed",
                     active_skill_ids: &["capability.scene-environment".to_string()],
+                    affects_layers: &["state".to_string(), "window_plan".to_string()],
                 },
             )
             .expect("persist with runtime state writes should succeed");

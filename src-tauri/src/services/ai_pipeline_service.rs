@@ -39,6 +39,23 @@ pub struct RunAiTaskPipelineInput {
     pub persist_mode: Option<String>,
     #[serde(default)]
     pub automation_tier: Option<String>,
+    #[serde(default)]
+    pub skill_selection: Option<RuntimeSkillSelectionInput>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeSkillSelectionInput {
+    #[serde(default)]
+    pub explicit_skill_ids: Vec<String>,
+    #[serde(default)]
+    pub active_bundle_ids: Vec<String>,
+    #[serde(default)]
+    pub scene_tags: Vec<String>,
+    #[serde(default)]
+    pub available_contexts: Vec<String>,
+    #[serde(default)]
+    pub disable_inferred_scene_tags: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]

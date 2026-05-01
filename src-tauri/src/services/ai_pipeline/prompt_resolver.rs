@@ -26,6 +26,7 @@ struct PromptRenderContext {
 
 #[derive(Debug, Default)]
 struct RuntimeSkillPromptContext {
+    orchestration_lines: Vec<String>,
     policy_lines: Vec<String>,
     capability_lines: Vec<String>,
     review_lines: Vec<String>,
@@ -196,6 +197,11 @@ impl PromptResolver {
         );
         Self::push_context_section(
             &mut parts,
+            "Skill Orchestration Context",
+            &skill_context.orchestration_lines,
+        );
+        Self::push_context_section(
+            &mut parts,
             "Policy Skill Context",
             &skill_context.policy_lines,
         );
@@ -242,6 +248,7 @@ impl PromptResolver {
         selected_skills: &SelectedSkills,
     ) -> Result<RuntimeSkillPromptContext, AppErrorDto> {
         Ok(RuntimeSkillPromptContext {
+            orchestration_lines: Self::collect_skill_orchestration_lines(selected_skills),
             policy_lines: Self::collect_skill_templates(registry, &selected_skills.policy_skills)?,
             capability_lines: Self::collect_skill_templates(
                 registry,
@@ -249,6 +256,51 @@ impl PromptResolver {
             )?,
             review_lines: Self::collect_skill_templates(registry, &selected_skills.review_skills)?,
         })
+    }
+
+    fn collect_skill_orchestration_lines(selected_skills: &SelectedSkills) -> Vec<String> {
+        let selected_skill_ids = selected_skills.all_skill_ids();
+        if selected_skill_ids.is_empty() {
+            return Vec::new();
+        }
+
+        let mut lines = Vec::new();
+        lines.push(format!(
+            "selectedSkillIds: {}",
+            selected_skill_ids.join(", ")
+        ));
+        let state_writes = selected_skills.all_state_writes();
+        if !state_writes.is_empty() {
+            lines.push(format!(
+                "aggregatedStateWrites: {}",
+                state_writes.join(", ")
+            ));
+        }
+        let affects_layers = selected_skills.all_affects_layers();
+        if !affects_layers.is_empty() {
+            lines.push(format!(
+                "aggregatedAffectsLayers: {}",
+                affects_layers.join(", ")
+            ));
+        }
+
+        for skill in selected_skills.all_skills() {
+            let skill_class = skill.skill_class.as_deref().unwrap_or("unclassified");
+            lines.push(format!(
+                "skill={} class={} alwaysOn={} tier={} bundles={} sceneTags={} requiredContexts={} stateWrites={} affectsLayers={}",
+                skill.id,
+                skill_class,
+                skill.always_on,
+                normalize_metadata_list(skill.automation_tier.iter().cloned().collect::<Vec<_>>()),
+                normalize_metadata_list(skill.bundle_ids.clone()),
+                normalize_metadata_list(skill.scene_tags.clone()),
+                normalize_metadata_list(skill.required_contexts.clone()),
+                normalize_metadata_list(skill.state_writes.clone()),
+                normalize_metadata_list(skill.affects_layers.clone()),
+            ));
+        }
+
+        lines
     }
 
     fn collect_skill_templates(
@@ -418,6 +470,19 @@ impl PromptResolver {
             "consistency.scan" => "请检查章节一致性并输出 JSON。",
             _ => "请根据上述要求生成内容。",
         }
+    }
+}
+
+fn normalize_metadata_list(values: Vec<String>) -> String {
+    let normalized = values
+        .into_iter()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>();
+    if normalized.is_empty() {
+        "-".to_string()
+    } else {
+        normalized.join("|")
     }
 }
 
@@ -605,6 +670,7 @@ mod tests {
                 auto_persist: false,
                 persist_mode: None,
                 automation_tier: None,
+                skill_selection: None,
             },
             "chapter.plan" => RunAiTaskPipelineInput {
                 project_root: "F:\\NovelForge".to_string(),
@@ -619,6 +685,7 @@ mod tests {
                 auto_persist: false,
                 persist_mode: None,
                 automation_tier: None,
+                skill_selection: None,
             },
             "chapter.continue" => RunAiTaskPipelineInput {
                 project_root: "F:\\NovelForge".to_string(),
@@ -633,6 +700,7 @@ mod tests {
                 auto_persist: false,
                 persist_mode: None,
                 automation_tier: None,
+                skill_selection: None,
             },
             "chapter.rewrite" | "prose.naturalize" => RunAiTaskPipelineInput {
                 project_root: "F:\\NovelForge".to_string(),
@@ -647,6 +715,7 @@ mod tests {
                 auto_persist: false,
                 persist_mode: None,
                 automation_tier: None,
+                skill_selection: None,
             },
             "character.create"
             | "world.create_rule"
@@ -665,6 +734,7 @@ mod tests {
                 auto_persist: false,
                 persist_mode: None,
                 automation_tier: None,
+                skill_selection: None,
             },
             "consistency.scan" => RunAiTaskPipelineInput {
                 project_root: "F:\\NovelForge".to_string(),
@@ -679,6 +749,7 @@ mod tests {
                 auto_persist: true,
                 persist_mode: None,
                 automation_tier: None,
+                skill_selection: None,
             },
             "blueprint.generate_step" => RunAiTaskPipelineInput {
                 project_root: "F:\\NovelForge".to_string(),
@@ -693,6 +764,7 @@ mod tests {
                 auto_persist: true,
                 persist_mode: None,
                 automation_tier: None,
+                skill_selection: None,
             },
             "timeline.review" | "relationship.review" | "dashboard.review" | "export.review" => {
                 RunAiTaskPipelineInput {
@@ -708,6 +780,7 @@ mod tests {
                     auto_persist: false,
                     persist_mode: None,
                     automation_tier: None,
+                    skill_selection: None,
                 }
             }
             "custom" => RunAiTaskPipelineInput {
@@ -723,6 +796,7 @@ mod tests {
                 auto_persist: false,
                 persist_mode: None,
                 automation_tier: None,
+                skill_selection: None,
             },
             _ => panic!("unexpected task type: {}", task_type),
         }
@@ -829,6 +903,7 @@ mod tests {
             auto_persist: false,
             persist_mode: None,
             automation_tier: None,
+            skill_selection: None,
         };
 
         let err = resolver
@@ -982,6 +1057,8 @@ mod tests {
         assert!(rendered.contains("Policy Skill Context"));
         assert!(rendered.contains("Capability Skill Context"));
         assert!(rendered.contains("Review Skill Context"));
+        assert!(rendered.contains("Skill Orchestration Context"));
+        assert!(rendered.contains("selectedSkillIds:"));
         assert!(rendered.contains("### Skill: runtime.policy.guard"));
         assert!(rendered.contains("### Skill: runtime.capability.scene"));
         assert!(rendered.contains("### Skill: runtime.review.logic"));

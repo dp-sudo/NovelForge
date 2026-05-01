@@ -103,6 +103,25 @@ impl SelectedSkills {
         state_writes
     }
 
+    pub fn all_affects_layers(&self) -> Vec<String> {
+        let mut affects_layers: Vec<String> = Vec::new();
+        for skill in self.all_skills() {
+            for item in &skill.affects_layers {
+                let normalized = item.trim();
+                if normalized.is_empty() {
+                    continue;
+                }
+                if !affects_layers
+                    .iter()
+                    .any(|existing| existing.eq_ignore_ascii_case(normalized))
+                {
+                    affects_layers.push(normalized.to_string());
+                }
+            }
+        }
+        affects_layers
+    }
+
     pub fn all_skill_ids(&self) -> Vec<String> {
         self.all_skills().map(|skill| skill.id.clone()).collect()
     }
@@ -1171,5 +1190,36 @@ mod tests {
         assert_eq!(selected_confirm.review_skills.len(), 1);
         assert_eq!(selected_confirm.review_skills[0].id, "review.combat-check");
     }
-}
 
+    #[test]
+    fn all_affects_layers_deduplicates_case_insensitively() {
+        let registry = create_test_registry("affects-layers");
+
+        let mut skill_a = build_manifest("capability.state-a", "capability");
+        skill_a.trigger_conditions = vec!["chapter.draft".to_string()];
+        skill_a.affects_layers = vec!["state".to_string(), "canon".to_string()];
+        registry
+            .create_skill(&skill_a, "state skill a")
+            .expect("create skill a");
+
+        let mut skill_b = build_manifest("capability.state-b", "capability");
+        skill_b.trigger_conditions = vec!["chapter.draft".to_string()];
+        skill_b.affects_layers = vec!["STATE".to_string(), "window_plan".to_string()];
+        registry
+            .create_skill(&skill_b, "state skill b")
+            .expect("create skill b");
+
+        let selected = registry
+            .select_skills_for_task("chapter.draft")
+            .expect("select draft skills");
+
+        assert_eq!(
+            selected.all_affects_layers(),
+            vec![
+                "state".to_string(),
+                "canon".to_string(),
+                "window_plan".to_string()
+            ]
+        );
+    }
+}
