@@ -99,7 +99,8 @@
 3. 用户点“确认入库”后调用：
    - `apply_asset_candidate`
    - `apply_structured_draft`
-4. 后端落库后回写草案状态（`applied` 或保留 pending）。
+   - `reject_structured_draft`（忽略草案）
+4. 后端落库后回写草案状态：`pending -> applied | rejected`；批次内无 `pending` 时，`structured_draft_batches.status = completed`。
 
 ### 4.6 Provider/模型/任务路由
 - 保存 Provider：

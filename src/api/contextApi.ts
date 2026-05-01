@@ -150,6 +150,12 @@ export interface ApplyStructuredDraftResult {
   secondaryTargetId: string | null;
 }
 
+export interface RejectStructuredDraftResult {
+  draftItemId: string;
+  draftItemStatus: string;
+  batchStatus: string;
+}
+
 export interface SummaryFeedbackData {
   keyVariableDelta: string[];
   driftWarnings: string[];
@@ -300,5 +306,17 @@ export async function applyStructuredDraft(
     projectRoot,
     chapterId,
     input,
+  });
+}
+
+export async function rejectStructuredDraft(
+  projectRoot: string,
+  chapterId: string,
+  draftItemId: string
+): Promise<RejectStructuredDraftResult> {
+  return invokeCommand<RejectStructuredDraftResult>("reject_structured_draft", {
+    projectRoot,
+    chapterId,
+    draftItemId,
   });
 }

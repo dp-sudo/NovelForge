@@ -266,6 +266,14 @@ pub struct ApplyStructuredDraftResult {
     pub secondary_target_id: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RejectStructuredDraftResult {
+    pub draft_item_id: String,
+    pub draft_item_status: String,
+    pub batch_status: String,
+}
+
 #[derive(Debug, Clone)]
 struct ExtractedRelationshipDraft {
     source_label: String,
@@ -1565,34 +1573,106 @@ impl ContextService {
                     |row| row.get::<_, String>(0),
                 )
                 .map_err(draft_pool_query_batch_error)?;
-            let pending_count: i64 = tx
-                .query_row(
-                    "SELECT COUNT(*) FROM structured_draft_items WHERE batch_id = ?1 AND status = 'pending'",
-                    params![&batch_id],
-                    |row| row.get(0),
-                )
-                .map_err(|err| draft_pool_query_error("查询批次状态失败", err))?;
-            tx.execute(
-                "UPDATE structured_draft_batches
-                 SET status = ?1,
-                     updated_at = ?2
-                 WHERE id = ?3",
-                params![
-                    if pending_count == 0 {
-                        "applied"
-                    } else {
-                        "pending"
-                    },
-                    &now,
-                    &batch_id
-                ],
-            )
-            .map_err(|err| draft_pool_write_error("回写草案批次失败", err))?;
+            Self::refresh_draft_batch_status_in_transaction(&tx, &batch_id, &now)?;
         }
 
         tx.commit()
             .map_err(|err| draft_pool_write_error("保存结构化草案失败", err))?;
         Ok(result)
+    }
+
+    pub fn reject_structured_draft(
+        &self,
+        project_root: &str,
+        chapter_id: &str,
+        draft_item_id: &str,
+    ) -> Result<RejectStructuredDraftResult, AppErrorDto> {
+        let normalized_root = normalize_project_root(project_root)?;
+        let mut conn = open_project_database(normalized_root)?;
+        let project_id = get_project_id(&conn)?;
+        if !chapter_exists(&conn, &project_id, chapter_id)? {
+            return Err(chapter_not_found_error());
+        }
+
+        let normalized_item_id = draft_item_id.trim();
+        if normalized_item_id.is_empty() {
+            return Err(draft_pool_item_error(
+                "DRAFT_ITEM_INVALID",
+                "草案项ID不能为空",
+            ));
+        }
+
+        let tx = conn.transaction().map_err(project_db_write_error)?;
+        let (current_status, batch_id): (String, String) = tx
+            .query_row(
+                "SELECT status, batch_id
+                 FROM structured_draft_items
+                 WHERE id = ?1 AND project_id = ?2 AND chapter_id = ?3
+                 LIMIT 1",
+                params![normalized_item_id, &project_id, chapter_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
+            .map_err(draft_pool_query_pool_error)?
+            .ok_or_else(|| draft_pool_item_error("DRAFT_ITEM_NOT_FOUND", "草案项不存在"))?;
+
+        if current_status != "pending" {
+            return Err(draft_pool_item_error(
+                "DRAFT_ITEM_ALREADY_PROCESSED",
+                "草案项已处理",
+            ));
+        }
+
+        let now = now_iso();
+        tx.execute(
+            "UPDATE structured_draft_items
+             SET status = 'rejected',
+                 applied_target_type = NULL,
+                 applied_target_id = NULL,
+                 applied_target_field = NULL,
+                 applied_at = NULL,
+                 updated_at = ?1
+             WHERE id = ?2",
+            params![&now, normalized_item_id],
+        )
+        .map_err(|err| draft_pool_write_error("回写草案项状态失败", err))?;
+        let batch_status = Self::refresh_draft_batch_status_in_transaction(&tx, &batch_id, &now)?;
+
+        tx.commit()
+            .map_err(|err| draft_pool_write_error("保存草案拒绝结果失败", err))?;
+        Ok(RejectStructuredDraftResult {
+            draft_item_id: normalized_item_id.to_string(),
+            draft_item_status: "rejected".to_string(),
+            batch_status,
+        })
+    }
+
+    fn refresh_draft_batch_status_in_transaction(
+        tx: &rusqlite::Transaction<'_>,
+        batch_id: &str,
+        now: &str,
+    ) -> Result<String, AppErrorDto> {
+        let pending_count: i64 = tx
+            .query_row(
+                "SELECT COUNT(*) FROM structured_draft_items WHERE batch_id = ?1 AND status = 'pending'",
+                params![batch_id],
+                |row| row.get(0),
+            )
+            .map_err(|err| draft_pool_query_error("查询批次状态失败", err))?;
+        let batch_status = if pending_count == 0 {
+            "completed"
+        } else {
+            "pending"
+        };
+        tx.execute(
+            "UPDATE structured_draft_batches
+             SET status = ?1,
+                 updated_at = ?2
+             WHERE id = ?3",
+            params![batch_status, now, batch_id],
+        )
+        .map_err(|err| draft_pool_write_error("回写草案批次失败", err))?;
+        Ok(batch_status.to_string())
     }
 
     fn persist_structured_draft_pool(
@@ -2943,7 +3023,7 @@ mod tests {
     use std::fs;
     use std::path::PathBuf;
 
-    use rusqlite::params;
+    use rusqlite::{params, Connection};
     use uuid::Uuid;
 
     use super::{
@@ -2964,6 +3044,86 @@ mod tests {
 
     fn remove_temp_workspace(path: &PathBuf) {
         let _ = fs::remove_dir_all(path);
+    }
+
+    fn seed_draft_batch(
+        conn: &Connection,
+        project_id: &str,
+        chapter_id: &str,
+        source_task_type: &str,
+    ) -> (String, String) {
+        let run_id = Uuid::new_v4().to_string();
+        let batch_id = Uuid::new_v4().to_string();
+        let now = "2026-05-01T00:00:00Z";
+        conn.execute(
+            "INSERT INTO ai_pipeline_runs(
+                id, project_id, chapter_id, task_type, ui_action, status, phase, duration_ms, created_at, completed_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, 'succeeded', 'persist', 0, ?6, ?6)",
+            params![
+                &run_id,
+                project_id,
+                chapter_id,
+                source_task_type,
+                "editor.context.extract",
+                now
+            ],
+        )
+        .expect("insert pipeline run");
+        conn.execute(
+            "INSERT INTO structured_draft_batches(
+                id, run_id, project_id, chapter_id, source_task_type, content_hash, status, created_at, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'pending', ?7, ?7)",
+            params![
+                &batch_id,
+                &run_id,
+                project_id,
+                chapter_id,
+                source_task_type,
+                format!("hash-{}", Uuid::new_v4()),
+                now
+            ],
+        )
+        .expect("insert draft batch");
+        (run_id, batch_id)
+    }
+
+    fn seed_draft_item(
+        conn: &Connection,
+        item_id: &str,
+        batch_id: &str,
+        run_id: &str,
+        project_id: &str,
+        chapter_id: &str,
+        draft_kind: &str,
+        source_label: &str,
+        target_label: Option<&str>,
+        normalized_key: &str,
+        payload_json: &str,
+    ) {
+        let now = "2026-05-01T00:00:00Z";
+        conn.execute(
+            "INSERT INTO structured_draft_items(
+                id, batch_id, run_id, project_id, chapter_id, draft_kind, source_label, target_label,
+                normalized_key, confidence, occurrences, evidence_text, payload_json, status, created_at, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 'pending', ?14, ?14)",
+            params![
+                item_id,
+                batch_id,
+                run_id,
+                project_id,
+                chapter_id,
+                draft_kind,
+                source_label,
+                target_label,
+                normalized_key,
+                0.91_f64,
+                1_i64,
+                "测试证据",
+                payload_json,
+                now,
+            ],
+        )
+        .expect("insert draft item");
     }
 
     #[test]
@@ -3119,6 +3279,295 @@ mod tests {
             )
             .expect("relation count");
         assert_eq!(relation_count, 1);
+
+        remove_temp_workspace(&workspace);
+    }
+
+    #[test]
+    fn reject_structured_draft_single_item_completes_batch() {
+        let workspace = create_temp_workspace();
+        let project_service = ProjectService;
+        let chapter_service = ChapterService;
+        let context_service = ContextService;
+
+        let project = project_service
+            .create_project(CreateProjectInput {
+                name: "草案忽略单项测试".to_string(),
+                author: None,
+                genre: "测试".to_string(),
+                target_words: None,
+                save_directory: workspace.to_string_lossy().to_string(),
+            })
+            .expect("project created");
+        let chapter = chapter_service
+            .create_chapter(
+                &project.project_root,
+                ChapterInput {
+                    title: "第一章".to_string(),
+                    summary: None,
+                    target_words: None,
+                    status: None,
+                },
+            )
+            .expect("chapter created");
+
+        let conn = open_database(std::path::Path::new(&project.project_root)).expect("open db");
+        let project_id: String = conn
+            .query_row("SELECT id FROM projects LIMIT 1", [], |row| row.get(0))
+            .expect("query project id");
+        let (run_id, batch_id) = seed_draft_batch(&conn, &project_id, &chapter.id, "chapter.draft");
+        let item_id = Uuid::new_v4().to_string();
+        seed_draft_item(
+            &conn,
+            &item_id,
+            &batch_id,
+            &run_id,
+            &project_id,
+            &chapter.id,
+            "relationship",
+            "林夜",
+            Some("李伯"),
+            "relationship:linye|libo|ally",
+            "{\"relationshipType\":\"同盟\"}",
+        );
+        drop(conn);
+
+        let rejected = context_service
+            .reject_structured_draft(&project.project_root, &chapter.id, &item_id)
+            .expect("reject structured draft");
+        assert_eq!(rejected.draft_item_id, item_id);
+        assert_eq!(rejected.draft_item_status, "rejected");
+        assert_eq!(rejected.batch_status, "completed");
+
+        let conn = open_database(std::path::Path::new(&project.project_root)).expect("open db");
+        let item_status: String = conn
+            .query_row(
+                "SELECT status FROM structured_draft_items WHERE id = ?1",
+                params![&rejected.draft_item_id],
+                |row| row.get(0),
+            )
+            .expect("query rejected item status");
+        let batch_status: String = conn
+            .query_row(
+                "SELECT status FROM structured_draft_batches WHERE id = ?1",
+                params![&batch_id],
+                |row| row.get(0),
+            )
+            .expect("query draft batch status");
+        assert_eq!(item_status, "rejected");
+        assert_eq!(batch_status, "completed");
+        drop(conn);
+
+        let err = context_service
+            .reject_structured_draft(&project.project_root, &chapter.id, &item_id)
+            .expect_err("processed item should not be rejected again");
+        assert_eq!(err.code, "DRAFT_ITEM_ALREADY_PROCESSED");
+
+        remove_temp_workspace(&workspace);
+    }
+
+    #[test]
+    fn reject_structured_draft_all_items_updates_batch_lifecycle() {
+        let workspace = create_temp_workspace();
+        let project_service = ProjectService;
+        let chapter_service = ChapterService;
+        let context_service = ContextService;
+
+        let project = project_service
+            .create_project(CreateProjectInput {
+                name: "草案批量忽略测试".to_string(),
+                author: None,
+                genre: "测试".to_string(),
+                target_words: None,
+                save_directory: workspace.to_string_lossy().to_string(),
+            })
+            .expect("project created");
+        let chapter = chapter_service
+            .create_chapter(
+                &project.project_root,
+                ChapterInput {
+                    title: "第一章".to_string(),
+                    summary: None,
+                    target_words: None,
+                    status: None,
+                },
+            )
+            .expect("chapter created");
+
+        let conn = open_database(std::path::Path::new(&project.project_root)).expect("open db");
+        let project_id: String = conn
+            .query_row("SELECT id FROM projects LIMIT 1", [], |row| row.get(0))
+            .expect("query project id");
+        let (run_id, batch_id) =
+            seed_draft_batch(&conn, &project_id, &chapter.id, "chapter.continue");
+        let first_item_id = Uuid::new_v4().to_string();
+        let second_item_id = Uuid::new_v4().to_string();
+        seed_draft_item(
+            &conn,
+            &first_item_id,
+            &batch_id,
+            &run_id,
+            &project_id,
+            &chapter.id,
+            "relationship",
+            "林夜",
+            Some("李伯"),
+            "relationship:linye|libo|ally",
+            "{\"relationshipType\":\"同盟\"}",
+        );
+        seed_draft_item(
+            &conn,
+            &second_item_id,
+            &batch_id,
+            &run_id,
+            &project_id,
+            &chapter.id,
+            "scene",
+            "青石镇",
+            None,
+            "scene:qingshizhen|place",
+            "{\"sceneType\":\"地点场景\"}",
+        );
+        drop(conn);
+
+        let first_reject = context_service
+            .reject_structured_draft(&project.project_root, &chapter.id, &first_item_id)
+            .expect("reject first draft item");
+        assert_eq!(first_reject.batch_status, "pending");
+
+        let second_reject = context_service
+            .reject_structured_draft(&project.project_root, &chapter.id, &second_item_id)
+            .expect("reject second draft item");
+        assert_eq!(second_reject.batch_status, "completed");
+
+        let conn = open_database(std::path::Path::new(&project.project_root)).expect("open db");
+        let (rejected_count, batch_status): (i64, String) = conn
+            .query_row(
+                "SELECT
+                   (SELECT COUNT(*) FROM structured_draft_items WHERE batch_id = ?1 AND status = 'rejected'),
+                   (SELECT status FROM structured_draft_batches WHERE id = ?1)",
+                params![&batch_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("query rejected count and batch status");
+        assert_eq!(rejected_count, 2);
+        assert_eq!(batch_status, "completed");
+
+        remove_temp_workspace(&workspace);
+    }
+
+    #[test]
+    fn apply_and_reject_structured_draft_mixed_items_completes_batch() {
+        let workspace = create_temp_workspace();
+        let project_service = ProjectService;
+        let chapter_service = ChapterService;
+        let context_service = ContextService;
+
+        let project = project_service
+            .create_project(CreateProjectInput {
+                name: "草案混合处理测试".to_string(),
+                author: None,
+                genre: "测试".to_string(),
+                target_words: None,
+                save_directory: workspace.to_string_lossy().to_string(),
+            })
+            .expect("project created");
+        let chapter = chapter_service
+            .create_chapter(
+                &project.project_root,
+                ChapterInput {
+                    title: "第一章".to_string(),
+                    summary: None,
+                    target_words: None,
+                    status: None,
+                },
+            )
+            .expect("chapter created");
+
+        let conn = open_database(std::path::Path::new(&project.project_root)).expect("open db");
+        let project_id: String = conn
+            .query_row("SELECT id FROM projects LIMIT 1", [], |row| row.get(0))
+            .expect("query project id");
+        let (run_id, batch_id) =
+            seed_draft_batch(&conn, &project_id, &chapter.id, "chapter.continue");
+        let applied_item_id = Uuid::new_v4().to_string();
+        let rejected_item_id = Uuid::new_v4().to_string();
+        seed_draft_item(
+            &conn,
+            &applied_item_id,
+            &batch_id,
+            &run_id,
+            &project_id,
+            &chapter.id,
+            "relationship",
+            "林夜",
+            Some("李伯"),
+            "relationship:linye|libo|ally",
+            "{\"relationshipType\":\"同盟\"}",
+        );
+        seed_draft_item(
+            &conn,
+            &rejected_item_id,
+            &batch_id,
+            &run_id,
+            &project_id,
+            &chapter.id,
+            "scene",
+            "青石镇",
+            None,
+            "scene:qingshizhen|place",
+            "{\"sceneType\":\"地点场景\"}",
+        );
+        drop(conn);
+
+        let applied = context_service
+            .apply_structured_draft(
+                &project.project_root,
+                &chapter.id,
+                ApplyStructuredDraftInput {
+                    draft_item_id: Some(applied_item_id.clone()),
+                    draft_kind: "relationship".to_string(),
+                    source_label: "林夜".to_string(),
+                    target_label: Some("李伯".to_string()),
+                    relationship_type: Some("同盟".to_string()),
+                    involvement_type: None,
+                    scene_type: None,
+                    evidence: Some("林夜与李伯并肩迎敌".to_string()),
+                },
+            )
+            .expect("apply first item");
+        assert_eq!(applied.draft_item_status.as_deref(), Some("applied"));
+
+        let conn = open_database(std::path::Path::new(&project.project_root)).expect("open db");
+        let batch_status_after_apply: String = conn
+            .query_row(
+                "SELECT status FROM structured_draft_batches WHERE id = ?1",
+                params![&batch_id],
+                |row| row.get(0),
+            )
+            .expect("query batch status after apply");
+        assert_eq!(batch_status_after_apply, "pending");
+        drop(conn);
+
+        let rejected = context_service
+            .reject_structured_draft(&project.project_root, &chapter.id, &rejected_item_id)
+            .expect("reject second item");
+        assert_eq!(rejected.batch_status, "completed");
+
+        let conn = open_database(std::path::Path::new(&project.project_root)).expect("open db");
+        let (applied_status, rejected_status, batch_status): (String, String, String) = conn
+            .query_row(
+                "SELECT
+                   (SELECT status FROM structured_draft_items WHERE id = ?1),
+                   (SELECT status FROM structured_draft_items WHERE id = ?2),
+                   (SELECT status FROM structured_draft_batches WHERE id = ?3)",
+                params![&applied_item_id, &rejected_item_id, &batch_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .expect("query mixed lifecycle status");
+        assert_eq!(applied_status, "applied");
+        assert_eq!(rejected_status, "rejected");
+        assert_eq!(batch_status, "completed");
 
         remove_temp_workspace(&workspace);
     }

@@ -49,6 +49,12 @@ interface EditorContextPanelProps {
   onApplyRelationshipDraft: (draft: ChapterContext["relationshipDrafts"][number]) => Promise<void>;
   onApplyInvolvementDraft: (draft: ChapterContext["involvementDrafts"][number]) => Promise<void>;
   onApplySceneDraft: (draft: ChapterContext["sceneDrafts"][number]) => Promise<void>;
+  onRejectStructuredDraft: (
+    draft:
+      | ChapterContext["relationshipDrafts"][number]
+      | ChapterContext["involvementDrafts"][number]
+      | ChapterContext["sceneDrafts"][number],
+  ) => Promise<void>;
 }
 
 export function EditorContextPanel(props: EditorContextPanelProps) {
@@ -63,6 +69,7 @@ export function EditorContextPanel(props: EditorContextPanelProps) {
     onApplyRelationshipDraft,
     onApplyInvolvementDraft,
     onApplySceneDraft,
+    onRejectStructuredDraft,
   } = props;
 
   const [currentTab, setCurrentTab] = useState<"characters" | "world" | "plot" | "glossary">("characters");
@@ -251,13 +258,22 @@ export function EditorContextPanel(props: EditorContextPanelProps) {
                         </div>
                         <p className="text-[11px] text-primary mt-1">{draft.relationshipType}</p>
                         <p className="text-xs text-surface-400 mt-1">{draft.evidence}</p>
-                        <button
-                          onClick={() => void onApplyRelationshipDraft(draft)}
-                          disabled={status === "applying" || status === "applied" || status === "rejected"}
-                          className="mt-2 px-2 py-1 text-[11px] bg-surface-800 text-surface-200 border border-surface-600 rounded hover:bg-surface-700 disabled:opacity-40 transition-colors"
-                        >
-                          确认入库
-                        </button>
+                        <div className="mt-2 flex items-center gap-2">
+                          <button
+                            onClick={() => void onApplyRelationshipDraft(draft)}
+                            disabled={status === "applying" || status === "applied" || status === "rejected"}
+                            className="px-2 py-1 text-[11px] bg-surface-800 text-surface-200 border border-surface-600 rounded hover:bg-surface-700 disabled:opacity-40 transition-colors"
+                          >
+                            确认入库
+                          </button>
+                          <button
+                            onClick={() => void onRejectStructuredDraft(draft)}
+                            disabled={status === "applying" || status === "applied" || status === "rejected"}
+                            className="px-2 py-1 text-[11px] bg-surface-900 text-surface-300 border border-surface-700 rounded hover:bg-surface-800 disabled:opacity-40 transition-colors"
+                          >
+                            忽略
+                          </button>
+                        </div>
                       </div>
                     );
                   })
@@ -283,13 +299,22 @@ export function EditorContextPanel(props: EditorContextPanelProps) {
                           {draft.involvementType} · {draft.occurrences} 次
                         </p>
                         <p className="text-xs text-surface-400 mt-1">{draft.evidence}</p>
-                        <button
-                          onClick={() => void onApplyInvolvementDraft(draft)}
-                          disabled={status === "applying" || status === "applied" || status === "rejected"}
-                          className="mt-2 px-2 py-1 text-[11px] bg-surface-800 text-surface-200 border border-surface-600 rounded hover:bg-surface-700 disabled:opacity-40 transition-colors"
-                        >
-                          确认入库
-                        </button>
+                        <div className="mt-2 flex items-center gap-2">
+                          <button
+                            onClick={() => void onApplyInvolvementDraft(draft)}
+                            disabled={status === "applying" || status === "applied" || status === "rejected"}
+                            className="px-2 py-1 text-[11px] bg-surface-800 text-surface-200 border border-surface-600 rounded hover:bg-surface-700 disabled:opacity-40 transition-colors"
+                          >
+                            确认入库
+                          </button>
+                          <button
+                            onClick={() => void onRejectStructuredDraft(draft)}
+                            disabled={status === "applying" || status === "applied" || status === "rejected"}
+                            className="px-2 py-1 text-[11px] bg-surface-900 text-surface-300 border border-surface-700 rounded hover:bg-surface-800 disabled:opacity-40 transition-colors"
+                          >
+                            忽略
+                          </button>
+                        </div>
                       </div>
                     );
                   })
@@ -313,13 +338,22 @@ export function EditorContextPanel(props: EditorContextPanelProps) {
                         </div>
                         <p className="text-[11px] text-primary mt-1">{draft.sceneType}</p>
                         <p className="text-xs text-surface-400 mt-1">{draft.evidence}</p>
-                        <button
-                          onClick={() => void onApplySceneDraft(draft)}
-                          disabled={status === "applying" || status === "applied" || status === "rejected"}
-                          className="mt-2 px-2 py-1 text-[11px] bg-surface-800 text-surface-200 border border-surface-600 rounded hover:bg-surface-700 disabled:opacity-40 transition-colors"
-                        >
-                          确认入库
-                        </button>
+                        <div className="mt-2 flex items-center gap-2">
+                          <button
+                            onClick={() => void onApplySceneDraft(draft)}
+                            disabled={status === "applying" || status === "applied" || status === "rejected"}
+                            className="px-2 py-1 text-[11px] bg-surface-800 text-surface-200 border border-surface-600 rounded hover:bg-surface-700 disabled:opacity-40 transition-colors"
+                          >
+                            确认入库
+                          </button>
+                          <button
+                            onClick={() => void onRejectStructuredDraft(draft)}
+                            disabled={status === "applying" || status === "applied" || status === "rejected"}
+                            className="px-2 py-1 text-[11px] bg-surface-900 text-surface-300 border border-surface-700 rounded hover:bg-surface-800 disabled:opacity-40 transition-colors"
+                          >
+                            忽略
+                          </button>
+                        </div>
                       </div>
                     );
                   })

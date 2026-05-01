@@ -99,6 +99,7 @@
   - `materializeChapterStructuredDrafts -> materialize_chapter_structured_drafts`
   - `applyAssetCandidate -> apply_asset_candidate`
   - `applyStructuredDraft -> apply_structured_draft`
+  - `rejectStructuredDraft -> reject_structured_draft`
   - `summarizeStateDeltaForFeedback`、`getSummaryFeedback`（前端本地反馈组装，不触发新增 command）
 - `exportApi.ts`：`exportChapter -> export_chapter`、`exportBook -> export_book`
 - `settingsApi.ts`：
@@ -284,6 +285,7 @@
   - `materialize_chapter_structured_drafts(projectRoot, chapterId) -> ChapterContext`
   - `apply_asset_candidate(projectRoot, chapterId, input) -> ApplyAssetCandidateResult`
   - `apply_structured_draft(projectRoot, chapterId, input) -> ApplyStructuredDraftResult`
+  - `reject_structured_draft(projectRoot, chapterId, draftItemId) -> RejectStructuredDraftResult`
 
 ## 5. Pipeline 事件协议（`ai:pipeline:event`）
 事件载荷（camelCase）：
@@ -314,13 +316,14 @@ interface AppErrorDto {
 - 问题2修复：模块化 AI 命令（`ai_generate_*`、`ai_scan_consistency`、`generate_blueprint_suggestion`）已从 Rust command 面移除。
 - 问题4修复：compatibility-only 命令仅用于历史兼容，不作为官方接入路径。
 - 结构化抽取结果默认仅入草案池，需显式确认命令才落核心资产表。
+- 结构化草案状态机：`pending -> applied | rejected`；当批次内无 `pending` 时，`structured_draft_batches.status = completed`。
 - 项目级 AI 策略运行期真相源为 `project.sqlite.projects.ai_strategy_profile`（不走 `project.json` 日常双写）。
 
 ## 8. 最小回归链路
 1. 新建项目 -> 新建章节 -> 保存正文 -> 恢复草稿。
 2. 编辑器 9 按钮任一任务可触发 pipeline 并收到 done/error。
 3. `get_chapter_context` 返回 `assetCandidates` 与三类 `*Drafts`。
-4. `apply_asset_candidate` 与 `apply_structured_draft` 可成功入库。
+4. `apply_asset_candidate` 与 `apply_structured_draft/reject_structured_draft` 可成功执行并回写草案状态。
 5. 任务路由页面保存后，`list_task_routes` 回显 canonical 结果。
 6. `save_ai_strategy_profile/get_ai_strategy_profile` 可在 `project.sqlite.projects.ai_strategy_profile` 往返读写。
 

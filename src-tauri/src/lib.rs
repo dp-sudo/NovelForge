@@ -240,6 +240,7 @@ pub fn run() {
             commands::context_commands::materialize_chapter_structured_drafts,
             commands::context_commands::apply_asset_candidate,
             commands::context_commands::apply_structured_draft,
+            commands::context_commands::reject_structured_draft,
             commands::dashboard_commands::get_dashboard_stats,
             commands::search_commands::search_project,
             commands::search_commands::search_project_semantic,

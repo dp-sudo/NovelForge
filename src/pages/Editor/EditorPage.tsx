@@ -23,6 +23,7 @@ import {
   applyAssetCandidate,
   applyStructuredDraft,
   getChapterContext,
+  rejectStructuredDraft,
   type ChapterContext
 } from "../../api/contextApi";
 import type { ChapterRecord } from "../../api/chapterApi";
@@ -653,6 +654,29 @@ export function EditorPage() {
     }
   }
 
+  async function handleRejectStructuredDraft(draft: { id: string }) {
+    if (!projectRoot || !chapterId) return;
+    const draftItemId = normalizeDraftItemId(draft.id);
+    if (!draftItemId) {
+      setEditorNotice("仅已持久化草案支持忽略");
+      return;
+    }
+    setStructuredDraftStatus((prev) => ({ ...prev, [draft.id]: "applying" }));
+    try {
+      await rejectStructuredDraft(projectRoot, chapterId, draftItemId);
+      setStructuredDraftStatus((prev) => {
+        const next = { ...prev };
+        delete next[draft.id];
+        return next;
+      });
+      setEditorNotice("草案已忽略");
+      await refreshChapterContext(projectRoot, chapterId);
+    } catch (err) {
+      setStructuredDraftStatus((prev) => ({ ...prev, [draft.id]: "error" }));
+      setEditorNotice(err instanceof Error ? err.message : "草案忽略失败");
+    }
+  }
+
   const volumeFilterOptions = useMemo(
     () => [
       { value: "all", label: "全部卷" },
@@ -881,6 +905,7 @@ export function EditorPage() {
         onApplyRelationshipDraft={handleApplyRelationshipDraft}
         onApplyInvolvementDraft={handleApplyInvolvementDraft}
         onApplySceneDraft={handleApplySceneDraft}
+        onRejectStructuredDraft={handleRejectStructuredDraft}
       />
 
       <Modal open={showSnapshotModal} onClose={() => setShowSnapshotModal(false)} title="章节快照" width="lg">
