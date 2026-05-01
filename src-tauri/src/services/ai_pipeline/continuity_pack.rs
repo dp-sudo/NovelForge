@@ -31,6 +31,57 @@ impl ContinuityPackDepth {
             _ => Self::Standard,
         }
     }
+
+    fn rank(self) -> u8 {
+        match self {
+            Self::Minimal => 1,
+            Self::Standard => 2,
+            Self::Deep => 3,
+        }
+    }
+
+    fn max(self, other: Self) -> Self {
+        if self.rank() >= other.rank() {
+            self
+        } else {
+            other
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Minimal => "minimal",
+            Self::Standard => "standard",
+            Self::Deep => "deep",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContinuityPackCompleteness {
+    pub requested_depth: String,
+    pub effective_depth: String,
+    pub enforced_minimum_depth: Option<String>,
+    pub required_layers: Vec<String>,
+    pub present_layers: Vec<String>,
+    pub missing_layers: Vec<String>,
+    pub is_complete: bool,
+}
+
+fn required_min_depth(canonical_task: &str) -> Option<ContinuityPackDepth> {
+    match canonical_task {
+        "chapter.draft" | "chapter.continue" | "chapter.rewrite" | "prose.naturalize" => {
+            Some(ContinuityPackDepth::Deep)
+        }
+        _ => None,
+    }
+}
+
+fn resolve_effective_depth(canonical_task: &str, requested_depth: &str) -> ContinuityPackDepth {
+    let requested = ContinuityPackDepth::parse(requested_depth);
+    let minimum = required_min_depth(canonical_task).unwrap_or(ContinuityPackDepth::Minimal);
+    requested.max(minimum)
 }
 
 #[derive(Default)]
@@ -47,7 +98,7 @@ impl ContinuityPackCompiler {
         chapter_id: Option<&str>,
         affects_layers: &[String],
     ) -> ContinuityPack {
-        let depth = ContinuityPackDepth::parse(depth);
+        let depth = resolve_effective_depth(canonical_task, depth);
         let mut pack = ContinuityPack {
             lexicon_policy_context: build_lexicon_policy_context(context),
             ..ContinuityPack::default()
@@ -118,6 +169,73 @@ impl ContinuityPackCompiler {
 
         apply_layer_focus(pack, affects_layers)
     }
+}
+
+pub fn assess_continuity_pack_completeness(
+    canonical_task: &str,
+    requested_depth: &str,
+    pack: &ContinuityPack,
+) -> ContinuityPackCompleteness {
+    let requested = ContinuityPackDepth::parse(requested_depth);
+    let effective = resolve_effective_depth(canonical_task, requested_depth);
+    let required_layers = required_layers_for_task(canonical_task, effective);
+    let present_layers = required_layers
+        .iter()
+        .filter_map(|layer| {
+            let present = match layer.as_str() {
+                "constitution" => !pack.constitution_context.is_empty(),
+                "canon" => !pack.canon_context.is_empty(),
+                "lexicon_policy" => !pack.lexicon_policy_context.is_empty(),
+                "state" => !pack.state_context.is_empty(),
+                "promise" => !pack.promise_context.is_empty(),
+                "window_plan" => !pack.window_plan_context.is_empty(),
+                "recent_continuity" => !pack.recent_continuity_context.is_empty(),
+                _ => false,
+            };
+            if present {
+                Some(layer.clone())
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    let missing_layers = required_layers
+        .iter()
+        .filter(|layer| !present_layers.iter().any(|present| present == *layer))
+        .cloned()
+        .collect::<Vec<_>>();
+    let enforced_minimum_depth = required_min_depth(canonical_task)
+        .filter(|minimum| minimum.rank() > requested.rank())
+        .map(|depth| depth.as_str().to_string());
+
+    ContinuityPackCompleteness {
+        requested_depth: requested.as_str().to_string(),
+        effective_depth: effective.as_str().to_string(),
+        enforced_minimum_depth,
+        required_layers,
+        present_layers,
+        missing_layers: missing_layers.clone(),
+        is_complete: missing_layers.is_empty(),
+    }
+}
+
+fn required_layers_for_task(canonical_task: &str, effective: ContinuityPackDepth) -> Vec<String> {
+    let mut layers = vec![
+        "constitution".to_string(),
+        "canon".to_string(),
+        "lexicon_policy".to_string(),
+        "state".to_string(),
+        "promise".to_string(),
+    ];
+    let chapter_task_requires_full = matches!(
+        canonical_task,
+        "chapter.draft" | "chapter.continue" | "chapter.rewrite" | "prose.naturalize"
+    );
+    if chapter_task_requires_full || effective == ContinuityPackDepth::Deep {
+        layers.push("window_plan".to_string());
+        layers.push("recent_continuity".to_string());
+    }
+    layers
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -243,7 +361,10 @@ fn display_language_style(raw: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{apply_layer_focus, ContextService, ContinuityPack, ContinuityPackCompiler};
+    use super::{
+        apply_layer_focus, assess_continuity_pack_completeness, ContextService, ContinuityPack,
+        ContinuityPackCompiler,
+    };
     use crate::services::context_service::{
         BlueprintStepSummary, ChapterSummary, CollectedContext, GlobalContext, RelatedContext,
     };
@@ -293,7 +414,7 @@ mod tests {
 
         let pack = compiler.compile(
             "",
-            "chapter.draft",
+            "dashboard.review",
             "minimal",
             &context,
             &service,
@@ -325,7 +446,7 @@ mod tests {
 
         let pack = compiler.compile(
             "",
-            "chapter.draft",
+            "dashboard.review",
             "minimal",
             &context,
             &service,
@@ -362,5 +483,32 @@ mod tests {
         assert!(filtered.promise_context.is_empty());
         assert_eq!(filtered.window_plan_context, vec!["window".to_string()]);
         assert!(filtered.recent_continuity_context.is_empty());
+    }
+
+    #[test]
+    fn chapter_task_enforces_deep_minimum_and_reports_missing_layers() {
+        let compiler = ContinuityPackCompiler;
+        let context = sample_context();
+        let service = ContextService;
+
+        let pack = compiler.compile(
+            "",
+            "chapter.draft",
+            "standard",
+            &context,
+            &service,
+            Some("ch-1"),
+            &[],
+        );
+        let completeness = assess_continuity_pack_completeness("chapter.draft", "standard", &pack);
+        assert_eq!(completeness.requested_depth, "standard");
+        assert_eq!(completeness.effective_depth, "deep");
+        assert_eq!(completeness.enforced_minimum_depth.as_deref(), Some("deep"));
+        assert!(completeness
+            .required_layers
+            .contains(&"window_plan".to_string()));
+        assert!(completeness
+            .required_layers
+            .contains(&"recent_continuity".to_string()));
     }
 }

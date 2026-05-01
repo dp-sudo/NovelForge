@@ -30,12 +30,17 @@ fn normalize_project_root(project_root: &str) -> Result<&str, AppErrorDto> {
 }
 
 fn pipeline_db_open_error(err: impl ToString) -> AppErrorDto {
-    AppErrorDto::new("PIPELINE_DB_OPEN_FAILED", "数据库打开失败", false).with_detail(err.to_string())
+    AppErrorDto::new("PIPELINE_DB_OPEN_FAILED", "数据库打开失败", false)
+        .with_detail(err.to_string())
 }
 
 fn pipeline_insert_error(err: impl ToString) -> AppErrorDto {
-    AppErrorDto::new("PIPELINE_AUDIT_INSERT_FAILED", "记录 pipeline 运行失败", false)
-        .with_detail(err.to_string())
+    AppErrorDto::new(
+        "PIPELINE_AUDIT_INSERT_FAILED",
+        "记录 pipeline 运行失败",
+        false,
+    )
+    .with_detail(err.to_string())
 }
 
 fn open_project_database(project_root: &str) -> Result<Connection, AppErrorDto> {
@@ -118,6 +123,28 @@ impl PipelineAuditStore {
             params![phase, request_id],
         );
     }
+
+    pub fn update_pipeline_meta(
+        &self,
+        project_root: &str,
+        request_id: &str,
+        meta: &serde_json::Value,
+    ) {
+        let conn = match open_project_database(project_root) {
+            Ok(conn) => conn,
+            Err(_) => return,
+        };
+        let meta_json = match serde_json::to_string(meta) {
+            Ok(raw) => raw,
+            Err(_) => return,
+        };
+        let _ = conn.execute(
+            "UPDATE ai_pipeline_runs
+             SET meta_json = ?1
+             WHERE id = ?2",
+            params![meta_json, request_id],
+        );
+    }
 }
 
 #[cfg(test)]
@@ -186,7 +213,14 @@ mod tests {
     fn insert_pipeline_run_rejects_blank_project_root() {
         let store = PipelineAuditStore;
         let err = store
-            .insert_pipeline_run("   ", "req-blank-root", None, "chapter", None, "phase-start")
+            .insert_pipeline_run(
+                "   ",
+                "req-blank-root",
+                None,
+                "chapter",
+                None,
+                "phase-start",
+            )
             .expect_err("blank root should be rejected");
         assert_eq!(err.code, "PROJECT_INVALID_PATH");
     }

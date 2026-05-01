@@ -66,12 +66,10 @@ fn ensure_updater_configured() -> Result<(), AppErrorDto> {
         .any(|value| !value.trim().is_empty());
 
     if placeholder_pubkey || !has_valid_endpoint {
-        return Err(AppErrorDto::new(
-            "UPDATER_NOT_CONFIGURED",
-            "更新器配置不完整",
-            true,
-        )
-        .with_suggested_action("请先配置真实 pubkey 与更新端点后再检查更新"));
+        return Err(
+            AppErrorDto::new("UPDATER_NOT_CONFIGURED", "更新器配置不完整", true)
+                .with_suggested_action("请先配置真实 pubkey 与更新端点后再检查更新"),
+        );
     }
 
     Ok(())
@@ -97,7 +95,8 @@ fn no_update_info(current_version: String) -> AppUpdateInfo {
     }
 }
 
-const DEPRECATED_LOAD_PROVIDER_LOG: &str = "[DEPRECATED_COMMAND] load_provider is compatibility-only";
+const DEPRECATED_LOAD_PROVIDER_LOG: &str =
+    "[DEPRECATED_COMMAND] load_provider is compatibility-only";
 const DEPRECATED_LOAD_PROVIDER_CONFIG_LOG: &str =
     "[DEPRECATED_COMMAND] load_provider_config is compatibility-only";
 const DEPRECATED_SAVE_PROVIDER_CONFIG_LOG: &str =
@@ -145,7 +144,8 @@ fn collect_task_route_delete_ids(routes: &[TaskRoute], route_id: &str) -> Vec<St
             .iter()
             .filter(|route| {
                 route.id != route_id
-                    && task_routing::canonical_task_type(&route.task_type).as_ref() == canonical_target
+                    && task_routing::canonical_task_type(&route.task_type).as_ref()
+                        == canonical_target
                     && seen_ids.insert(route.id.clone())
             })
             .map(|route| route.id.clone()),
@@ -154,13 +154,11 @@ fn collect_task_route_delete_ids(routes: &[TaskRoute], route_id: &str) -> Vec<St
 }
 
 fn updater_init_error(err: impl ToString) -> AppErrorDto {
-    AppErrorDto::new("UPDATER_INIT_FAILED", "无法初始化更新器", false)
-        .with_detail(err.to_string())
+    AppErrorDto::new("UPDATER_INIT_FAILED", "无法初始化更新器", false).with_detail(err.to_string())
 }
 
 fn updater_check_error(err: impl ToString) -> AppErrorDto {
-    AppErrorDto::new("UPDATER_CHECK_FAILED", "无法检查更新", true)
-        .with_detail(err.to_string())
+    AppErrorDto::new("UPDATER_CHECK_FAILED", "无法检查更新", true).with_detail(err.to_string())
 }
 
 fn updater_install_error(err: impl ToString) -> AppErrorDto {
@@ -278,7 +276,11 @@ pub async fn load_provider(
     state: State<'_, AppState>,
 ) -> Result<ProviderConfig, AppErrorDto> {
     // 问题4修复(Deprecated 命令面): 兼容入口保留，但官方调用面改为 settingsApi.list_providers/save_provider。
-    log_deprecated_command(DEPRECATED_LOAD_PROVIDER_LOG, "load_provider", source.as_deref());
+    log_deprecated_command(
+        DEPRECATED_LOAD_PROVIDER_LOG,
+        "load_provider",
+        source.as_deref(),
+    );
     state.settings_service.load_provider(&provider_id)
 }
 
@@ -368,6 +370,16 @@ pub async fn save_task_route(
     } else {
         None
     };
+    r.model_pool_id = r
+        .model_pool_id
+        .as_ref()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    r.fallback_model_pool_id = r
+        .fallback_model_pool_id
+        .as_ref()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
 
     if r.provider_id.is_empty() {
         return Err(invalid_input_error("供应商不能为空"));
@@ -380,6 +392,14 @@ pub async fn save_task_route(
     let existing_same_task = existing_routes.iter().find(|existing| {
         task_routing::canonical_task_type(&existing.task_type).as_ref() == r.task_type
     });
+    if let Some(existing) = existing_same_task {
+        if r.model_pool_id.is_none() {
+            r.model_pool_id = existing.model_pool_id.clone();
+        }
+        if r.fallback_model_pool_id.is_none() {
+            r.fallback_model_pool_id = existing.fallback_model_pool_id.clone();
+        }
+    }
     match (r.id.is_empty(), existing_same_task) {
         (true, Some(existing)) => {
             r.id = existing.id.clone();
@@ -514,6 +534,8 @@ mod tests {
             model_id: "model".to_string(),
             fallback_provider_id: None,
             fallback_model_id: None,
+            model_pool_id: None,
+            fallback_model_pool_id: None,
             max_retries: 1,
             created_at: None,
             updated_at: None,

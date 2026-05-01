@@ -177,6 +177,8 @@ impl AiPipelineService {
                             "outputLength": success.output_text.chars().count(),
                             "providerId": success.route.provider_id,
                             "modelId": success.route.model_id,
+                            "modelPoolId": success.route.model_pool_id,
+                            "fallbackModelPoolId": success.route.fallback_model_pool_id,
                             "persistedRecords": success.persisted_records.clone(),
                         })),
                     },

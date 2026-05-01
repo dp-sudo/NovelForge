@@ -13,6 +13,26 @@ use crate::services::project_service::get_project_id;
 const ACTIVE_STATUS: &str = "active";
 const SUPERSEDED_STATUS: &str = "superseded";
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum StoryStateTaxonomy {
+    Emotion,
+    SceneEnvironment,
+    RelationshipTemperature,
+    Generic,
+}
+
+impl StoryStateTaxonomy {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Emotion => "emotion",
+            Self::SceneEnvironment => "scene_environment",
+            Self::RelationshipTemperature => "relationship_temperature",
+            Self::Generic => "generic",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StoryStateRow {
@@ -43,6 +63,44 @@ pub struct StoryStateInput {
 pub struct StoryStateService;
 
 impl StoryStateService {
+    pub fn classify_taxonomy(subject_type: &str, state_kind: &str) -> StoryStateTaxonomy {
+        match (
+            subject_type.trim().to_ascii_lowercase().as_str(),
+            state_kind.trim().to_ascii_lowercase().as_str(),
+        ) {
+            ("character", "emotion") => StoryStateTaxonomy::Emotion,
+            ("scene", "environment") => StoryStateTaxonomy::SceneEnvironment,
+            ("relationship", "temperature") => StoryStateTaxonomy::RelationshipTemperature,
+            _ => StoryStateTaxonomy::Generic,
+        }
+    }
+
+    pub fn enrich_payload_with_taxonomy(
+        subject_type: &str,
+        state_kind: &str,
+        payload_json: Value,
+    ) -> Value {
+        let taxonomy = Self::classify_taxonomy(subject_type, state_kind);
+        let value_snapshot = payload_json.clone();
+        match payload_json {
+            Value::Object(mut object) => {
+                object
+                    .entry("schemaVersion".to_string())
+                    .or_insert(json!(1));
+                object
+                    .entry("category".to_string())
+                    .or_insert(json!(taxonomy.as_str()));
+                object.entry("value".to_string()).or_insert(value_snapshot);
+                Value::Object(object)
+            }
+            other => json!({
+                "schemaVersion": 1,
+                "category": taxonomy.as_str(),
+                "value": other,
+            }),
+        }
+    }
+
     pub fn upsert_state(
         &self,
         project_root: &str,
@@ -71,16 +129,27 @@ impl StoryStateService {
         input: StoryStateInput,
         now: &str,
     ) -> Result<StoryStateRow, AppErrorDto> {
-        if !input.payload_json.is_object() {
+        let StoryStateInput {
+            subject_type,
+            subject_id,
+            scope,
+            state_kind,
+            payload_json,
+            source_chapter_id,
+        } = input;
+
+        if !payload_json.is_object() {
             return Err(AppErrorDto::new(
                 "INVALID_STORY_STATE_PAYLOAD",
                 "状态载荷必须是 JSON 对象",
                 true,
             ));
         }
+        let payload_json =
+            Self::enrich_payload_with_taxonomy(&subject_type, &state_kind, payload_json);
 
         let state_id = Uuid::new_v4().to_string();
-        let payload_json = serde_json::to_string(&input.payload_json).map_err(|err| {
+        let payload_json_raw = serde_json::to_string(&payload_json).map_err(|err| {
             AppErrorDto::new("INVALID_STORY_STATE_PAYLOAD", "状态载荷序列化失败", true)
                 .with_detail(err.to_string())
         })?;
@@ -98,10 +167,10 @@ impl StoryStateService {
                 SUPERSEDED_STATUS,
                 now,
                 project_id,
-                input.subject_type,
-                input.subject_id,
-                input.scope,
-                input.state_kind,
+                subject_type,
+                subject_id,
+                scope,
+                state_kind,
                 ACTIVE_STATUS
             ],
         )
@@ -113,12 +182,12 @@ impl StoryStateService {
             params![
                 state_id,
                 project_id,
-                input.subject_type,
-                input.subject_id,
-                input.scope,
-                input.state_kind,
-                payload_json,
-                input.source_chapter_id,
+                subject_type,
+                subject_id,
+                scope,
+                state_kind,
+                payload_json_raw,
+                source_chapter_id,
                 ACTIVE_STATUS,
                 now,
                 now
@@ -128,12 +197,12 @@ impl StoryStateService {
 
         Ok(StoryStateRow {
             id: state_id,
-            subject_type: input.subject_type,
-            subject_id: input.subject_id,
-            scope: input.scope,
-            state_kind: input.state_kind,
-            payload_json: input.payload_json,
-            source_chapter_id: input.source_chapter_id,
+            subject_type,
+            subject_id,
+            scope,
+            state_kind,
+            payload_json,
+            source_chapter_id,
             status: ACTIVE_STATUS.to_string(),
             created_at: now.to_string(),
             updated_at: now.to_string(),
@@ -162,14 +231,18 @@ impl StoryStateService {
 
         let rows = stmt
             .query_map(params![project_id, subject_type, subject_id], |row| {
+                let subject_type: String = row.get(1)?;
+                let state_kind: String = row.get(4)?;
                 let payload_raw: String = row.get(5)?;
                 let payload_json = serde_json::from_str(&payload_raw).unwrap_or(Value::Null);
+                let payload_json =
+                    Self::enrich_payload_with_taxonomy(&subject_type, &state_kind, payload_json);
                 Ok(StoryStateRow {
                     id: row.get(0)?,
-                    subject_type: row.get(1)?,
+                    subject_type,
                     subject_id: row.get(2)?,
                     scope: row.get(3)?,
-                    state_kind: row.get(4)?,
+                    state_kind,
                     payload_json,
                     source_chapter_id: row.get(6)?,
                     status: row.get(7)?,
@@ -260,7 +333,7 @@ mod tests {
     use serde_json::json;
     use uuid::Uuid;
 
-    use super::{StoryStateInput, StoryStateService};
+    use super::{StoryStateInput, StoryStateService, StoryStateTaxonomy};
     use crate::infra::database::open_database;
     use crate::services::project_service::{CreateProjectInput, ProjectService};
 
@@ -348,6 +421,79 @@ mod tests {
         assert_eq!(superseded_count, 1);
 
         remove_temp_workspace(&workspace);
+    }
+
+    #[test]
+    fn story_state_payload_is_enriched_with_taxonomy_for_emotion() {
+        let workspace = create_temp_workspace();
+        let project = ProjectService
+            .create_project(CreateProjectInput {
+                name: "state-ledger-taxonomy-emotion".to_string(),
+                author: None,
+                genre: "测试".to_string(),
+                target_words: None,
+                save_directory: workspace.to_string_lossy().to_string(),
+            })
+            .expect("project created");
+        let svc = StoryStateService;
+
+        svc.upsert_state(
+            &project.project_root,
+            StoryStateInput {
+                subject_type: "character".to_string(),
+                subject_id: "char-1".to_string(),
+                scope: "chapter".to_string(),
+                state_kind: "emotion".to_string(),
+                payload_json: json!({ "emotion": "anger" }),
+                source_chapter_id: Some("chapter-1".to_string()),
+            },
+        )
+        .expect("save emotion state");
+
+        let rows = svc
+            .list_latest_states(&project.project_root, Some("character"), Some("char-1"))
+            .expect("list latest states");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(
+            rows[0]
+                .payload_json
+                .get("category")
+                .and_then(|value| value.as_str()),
+            Some(StoryStateTaxonomy::Emotion.as_str())
+        );
+        assert_eq!(
+            rows[0]
+                .payload_json
+                .get("value")
+                .and_then(|value| value.get("emotion"))
+                .and_then(|value| value.as_str()),
+            Some("anger")
+        );
+
+        remove_temp_workspace(&workspace);
+    }
+
+    #[test]
+    fn story_state_payload_keeps_legacy_keys_while_backfilling_taxonomy() {
+        let normalized = StoryStateService::enrich_payload_with_taxonomy(
+            "relationship",
+            "relationship",
+            json!({
+                "relationshipType": "ally",
+                "evidence": "legacy payload",
+            }),
+        );
+        assert_eq!(
+            normalized
+                .get("relationshipType")
+                .and_then(|value| value.as_str()),
+            Some("ally")
+        );
+        assert_eq!(
+            normalized.get("category").and_then(|value| value.as_str()),
+            Some(StoryStateTaxonomy::Generic.as_str())
+        );
+        assert!(normalized.get("value").is_some());
     }
 
     #[test]

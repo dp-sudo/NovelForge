@@ -70,6 +70,8 @@
 
 #### 4.3.1 章节链路（Task 10 对齐）
 1. 编译 `Continuity Pack`（Constitution/Canon/Lexicon Policy/State/Promise/Window/Recent）。
+   - 章节关键任务（`chapter.draft` / `chapter.continue` / `chapter.rewrite` / `prose.naturalize`）会强制最小深度为 `deep`（即使项目策略配置为 `standard/minimal`）。
+   - 若编排后缺失必需上下文层，后端会在 `ai:pipeline:event` 发出 `type="warning"`、`errorCode="PIPELINE_CONTEXT_INCOMPLETE"`，并在 `meta.warningCode = "context_incomplete"` 中返回缺失层清单。
 2. 装配技能栈（workflow/capability/extractor/policy/review），运行时会同时应用：
    - 项目级 `alwaysOnPolicySkills`
    - 项目级 `defaultCapabilityBundles`
@@ -111,6 +113,7 @@
   - 问题4修复：`list_task_routes` 为纯读接口，仅返回 canonical 去重视图。
 - 路由写入：
   - `save_task_route` 做 canonical、字段 trim、重试次数边界控制（1..8）。
+  - 路由对象新增可选池字段：`modelPoolId` / `fallbackModelPoolId`（兼容旧 provider/model 路由）。
 
 ### 4.7 设置、备份与发布能力
 - Settings 前端已拆分：

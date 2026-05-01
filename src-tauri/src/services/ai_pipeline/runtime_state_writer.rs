@@ -1,5 +1,7 @@
 use crate::services::ai_pipeline_service::{PersistedRecord, RunAiTaskPipelineInput};
-use crate::services::story_state_service::StoryStateInput;
+use crate::services::story_state_service::{
+    StoryStateInput, StoryStateService, StoryStateTaxonomy,
+};
 
 pub fn should_persist_runtime_state_writes(
     canonical_task: &str,
@@ -79,6 +81,13 @@ pub fn build_runtime_story_state_input(
             })
         })
         .collect::<Vec<_>>();
+    let taxonomy = StoryStateService::classify_taxonomy(&subject_type, &state_kind);
+    let structured_value = build_structured_runtime_state_value(
+        taxonomy,
+        &subject_id,
+        canonical_task,
+        normalized_output,
+    );
 
     Some(StoryStateInput {
         subject_type,
@@ -97,6 +106,9 @@ pub fn build_runtime_story_state_input(
             "affectsLayers": affects_layers,
             "recordRefs": record_refs,
             "outputPreview": preview_text(normalized_output, 240),
+            "schemaVersion": 1,
+            "category": taxonomy.as_str(),
+            "value": structured_value,
         }),
         source_chapter_id: input.chapter_id.clone(),
     })
@@ -140,6 +152,36 @@ fn resolve_runtime_state_subject_id<'a>(
     }
 }
 
+fn build_structured_runtime_state_value(
+    taxonomy: StoryStateTaxonomy,
+    subject_id: &str,
+    canonical_task: &str,
+    normalized_output: &str,
+) -> serde_json::Value {
+    let output_preview = preview_text(normalized_output, 180);
+    match taxonomy {
+        StoryStateTaxonomy::Emotion => serde_json::json!({
+            "subjectId": subject_id,
+            "emotionSummary": output_preview,
+            "sourceTask": canonical_task,
+        }),
+        StoryStateTaxonomy::SceneEnvironment => serde_json::json!({
+            "sceneId": subject_id,
+            "environmentSummary": output_preview,
+            "sourceTask": canonical_task,
+        }),
+        StoryStateTaxonomy::RelationshipTemperature => serde_json::json!({
+            "relationshipId": subject_id,
+            "temperatureSummary": output_preview,
+            "sourceTask": canonical_task,
+        }),
+        StoryStateTaxonomy::Generic => serde_json::json!({
+            "summary": output_preview,
+            "sourceTask": canonical_task,
+        }),
+    }
+}
+
 fn preview_text(raw: &str, limit: usize) -> String {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
@@ -158,8 +200,8 @@ fn preview_text(raw: &str, limit: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::should_persist_runtime_state_writes;
-    use crate::services::ai_pipeline_service::RunAiTaskPipelineInput;
+    use super::{build_runtime_story_state_input, should_persist_runtime_state_writes};
+    use crate::services::ai_pipeline_service::{PersistedRecord, RunAiTaskPipelineInput};
 
     fn build_pipeline_input(
         project_root: &str,
@@ -223,5 +265,99 @@ mod tests {
             "derived_review",
             "chapter_confirmed",
         ));
+    }
+
+    #[test]
+    fn build_runtime_story_state_input_emits_structured_taxonomy_payload() {
+        let input = build_pipeline_input(
+            "C:\\tmp\\novelforge",
+            "chapter.draft",
+            Some("chapter-1".to_string()),
+        );
+        let state_input = build_runtime_story_state_input(
+            "chapter.draft",
+            &input,
+            "主角在废墟中压抑愤怒，雨夜空气潮冷。",
+            "req-state-1",
+            "formal",
+            &[],
+            "character.emotion",
+            &["bundle.emotion-progression".to_string()],
+            &["state".to_string()],
+        )
+        .expect("build story state input");
+        assert_eq!(state_input.subject_type, "character");
+        assert_eq!(state_input.state_kind, "emotion");
+        assert_eq!(
+            state_input
+                .payload_json
+                .get("category")
+                .and_then(|value| value.as_str()),
+            Some("emotion")
+        );
+        assert_eq!(
+            state_input
+                .payload_json
+                .get("value")
+                .and_then(|value| value.get("emotionSummary"))
+                .and_then(|value| value.as_str())
+                .is_some(),
+            true
+        );
+    }
+
+    #[test]
+    fn build_runtime_story_state_input_supports_scene_and_relationship_taxonomy() {
+        let input = build_pipeline_input(
+            "C:\\tmp\\novelforge",
+            "chapter.continue",
+            Some("chapter-9".to_string()),
+        );
+        let relationship_record = PersistedRecord {
+            entity_type: "character_relationship_batch".to_string(),
+            entity_id: "rel-batch-1".to_string(),
+            action: "inserted:2".to_string(),
+        };
+
+        let scene_state = build_runtime_story_state_input(
+            "chapter.continue",
+            &input,
+            "古桥下河雾翻涌，灯火被夜风吹得忽明忽暗。",
+            "req-state-2",
+            "formal",
+            &[],
+            "scene.environment",
+            &[],
+            &[],
+        )
+        .expect("build scene state");
+        assert_eq!(
+            scene_state
+                .payload_json
+                .get("category")
+                .and_then(|value| value.as_str()),
+            Some("scene_environment")
+        );
+
+        let relationship_state = build_runtime_story_state_input(
+            "relationship.review",
+            &input,
+            "两人从互疑转为脆弱同盟，信任尚未稳定。",
+            "req-state-3",
+            "derived_review",
+            &[relationship_record],
+            "relationship.temperature",
+            &[],
+            &[],
+        )
+        .expect("build relationship state");
+        assert_eq!(relationship_state.subject_id, "rel-batch-1");
+        assert_eq!(
+            relationship_state
+                .payload_json
+                .get("category")
+                .and_then(|value| value.as_str()),
+            Some("relationship_temperature")
+        );
     }
 }

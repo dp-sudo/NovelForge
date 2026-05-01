@@ -10,7 +10,9 @@ use std::path::PathBuf;
 
 use rusqlite::{params, Connection};
 
-use crate::adapters::llm_types::{ModelRecord, ProviderConfig, TaskRoute};
+use crate::adapters::llm_types::{
+    ModelPoolEntry, ModelPoolRecord, ModelRecord, ProviderConfig, TaskRoute,
+};
 use crate::errors::AppErrorDto;
 use crate::services::task_routing;
 use uuid::Uuid;
@@ -144,6 +146,8 @@ fn ensure_default_task_routes_initialized(conn: &Connection) -> Result<(), AppEr
             model_id: model_id.clone(),
             fallback_provider_id: None,
             fallback_model_id: None,
+            model_pool_id: None,
+            fallback_model_pool_id: None,
             max_retries: 1,
             created_at: Some(now.clone()),
             updated_at: Some(now.clone()),
@@ -257,8 +261,7 @@ pub fn load_all_providers(conn: &Connection) -> Result<Vec<ProviderConfig>, AppE
         })?;
 
     providers.collect::<Result<Vec<_>, _>>().map_err(|e| {
-        AppErrorDto::new("DB_READ_FAILED", "读取供应商配置失败", true)
-            .with_detail(e.to_string())
+        AppErrorDto::new("DB_READ_FAILED", "读取供应商配置失败", true).with_detail(e.to_string())
     })
 }
 
@@ -338,8 +341,7 @@ pub fn delete_provider(conn: &Connection, provider_id: &str) -> Result<(), AppEr
         params![provider_id],
     )
     .map_err(|e| {
-        AppErrorDto::new("DB_DELETE_FAILED", "无法删除供应商配置", true)
-            .with_detail(e.to_string())
+        AppErrorDto::new("DB_DELETE_FAILED", "无法删除供应商配置", true).with_detail(e.to_string())
     })?;
     Ok(())
 }
@@ -382,8 +384,7 @@ pub fn load_models(conn: &Connection, provider_id: &str) -> Result<Vec<ModelReco
             })
         })
         .map_err(|e| {
-            AppErrorDto::new("DB_READ_FAILED", "无法加载模型列表", true)
-                .with_detail(e.to_string())
+            AppErrorDto::new("DB_READ_FAILED", "无法加载模型列表", true).with_detail(e.to_string())
         })?;
 
     rows.collect::<Result<Vec<_>, _>>().map_err(|e| {
@@ -431,8 +432,7 @@ pub fn upsert_model(conn: &Connection, model: &ModelRecord) -> Result<bool, AppE
             ],
         )
         .map_err(|e| {
-            AppErrorDto::new("DB_WRITE_FAILED", "无法更新模型信息", true)
-                .with_detail(e.to_string())
+            AppErrorDto::new("DB_WRITE_FAILED", "无法更新模型信息", true).with_detail(e.to_string())
         })?;
         Ok(false)
     } else {
@@ -480,8 +480,7 @@ pub fn insert_refresh_log(
         ],
     )
     .map_err(|e| {
-        AppErrorDto::new("DB_WRITE_FAILED", "无法写入刷新日志", true)
-            .with_detail(e.to_string())
+        AppErrorDto::new("DB_WRITE_FAILED", "无法写入刷新日志", true).with_detail(e.to_string())
     })?;
     Ok(())
 }
@@ -493,12 +492,12 @@ pub fn load_task_routes(conn: &Connection) -> Result<Vec<TaskRoute>, AppErrorDto
     let mut stmt = conn
         .prepare(
             "SELECT id, task_type, provider_id, model_id,
-                fallback_provider_id, fallback_model_id, max_retries, created_at, updated_at
+                fallback_provider_id, fallback_model_id, model_pool_id, fallback_model_pool_id,
+                max_retries, created_at, updated_at
          FROM llm_task_routes ORDER BY task_type",
         )
         .map_err(|e| {
-            AppErrorDto::new("DB_READ_FAILED", "无法加载任务路由", true)
-                .with_detail(e.to_string())
+            AppErrorDto::new("DB_READ_FAILED", "无法加载任务路由", true).with_detail(e.to_string())
         })?;
 
     let rows = stmt
@@ -510,19 +509,19 @@ pub fn load_task_routes(conn: &Connection) -> Result<Vec<TaskRoute>, AppErrorDto
                 model_id: row.get(3)?,
                 fallback_provider_id: row.get(4)?,
                 fallback_model_id: row.get(5)?,
-                max_retries: row.get(6)?,
-                created_at: Some(row.get::<_, String>(7)?),
-                updated_at: Some(row.get::<_, String>(8)?),
+                model_pool_id: row.get(6)?,
+                fallback_model_pool_id: row.get(7)?,
+                max_retries: row.get(8)?,
+                created_at: Some(row.get::<_, String>(9)?),
+                updated_at: Some(row.get::<_, String>(10)?),
             })
         })
         .map_err(|e| {
-            AppErrorDto::new("DB_READ_FAILED", "无法加载任务路由", true)
-                .with_detail(e.to_string())
+            AppErrorDto::new("DB_READ_FAILED", "无法加载任务路由", true).with_detail(e.to_string())
         })?;
 
     rows.collect::<Result<Vec<_>, _>>().map_err(|e| {
-        AppErrorDto::new("DB_READ_FAILED", "读取任务路由失败", true)
-            .with_detail(e.to_string())
+        AppErrorDto::new("DB_READ_FAILED", "读取任务路由失败", true).with_detail(e.to_string())
     })
 }
 
@@ -534,12 +533,16 @@ pub fn upsert_task_route(
 ) -> Result<(), AppErrorDto> {
     conn.execute(
         "INSERT INTO llm_task_routes (id, task_type, provider_id, model_id,
-         fallback_provider_id, fallback_model_id, max_retries, created_at, updated_at)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)
+         fallback_provider_id, fallback_model_id, model_pool_id, fallback_model_pool_id,
+         max_retries, created_at, updated_at)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)
          ON CONFLICT(id) DO UPDATE SET
          task_type=excluded.task_type, provider_id=excluded.provider_id,
          model_id=excluded.model_id, fallback_provider_id=excluded.fallback_provider_id,
-         fallback_model_id=excluded.fallback_model_id, max_retries=excluded.max_retries,
+         fallback_model_id=excluded.fallback_model_id,
+         model_pool_id=excluded.model_pool_id,
+         fallback_model_pool_id=excluded.fallback_model_pool_id,
+         max_retries=excluded.max_retries,
          updated_at=excluded.updated_at",
         params![
             route.id,
@@ -548,14 +551,15 @@ pub fn upsert_task_route(
             route.model_id,
             route.fallback_provider_id,
             route.fallback_model_id,
+            route.model_pool_id,
+            route.fallback_model_pool_id,
             route.max_retries,
             now,
             now
         ],
     )
     .map_err(|e| {
-        AppErrorDto::new("DB_WRITE_FAILED", "无法保存任务路由", true)
-            .with_detail(e.to_string())
+        AppErrorDto::new("DB_WRITE_FAILED", "无法保存任务路由", true).with_detail(e.to_string())
     })?;
     Ok(())
 }
@@ -567,10 +571,106 @@ pub fn delete_task_route(conn: &Connection, route_id: &str) -> Result<(), AppErr
         params![route_id],
     )
     .map_err(|e| {
-        AppErrorDto::new("DB_DELETE_FAILED", "无法删除任务路由", true)
-            .with_detail(e.to_string())
+        AppErrorDto::new("DB_DELETE_FAILED", "无法删除任务路由", true).with_detail(e.to_string())
     })?;
     Ok(())
+}
+
+pub fn load_model_pools(conn: &Connection) -> Result<Vec<ModelPoolRecord>, AppErrorDto> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, display_name, role, enabled, entries_json, fallback_pool_id, created_at, updated_at
+             FROM llm_model_pools
+             ORDER BY role, id",
+        )
+        .map_err(|e| {
+            AppErrorDto::new("DB_READ_FAILED", "无法加载模型池配置", true)
+                .with_detail(e.to_string())
+        })?;
+    let rows = stmt
+        .query_map([], |row| {
+            let entries_raw: String = row.get(4)?;
+            let entries =
+                serde_json::from_str::<Vec<ModelPoolEntry>>(&entries_raw).unwrap_or_default();
+            Ok(ModelPoolRecord {
+                id: row.get(0)?,
+                display_name: row.get(1)?,
+                role: row.get(2)?,
+                enabled: row.get::<_, i64>(3)? != 0,
+                entries,
+                fallback_pool_id: row.get(5)?,
+                created_at: Some(row.get::<_, String>(6)?),
+                updated_at: Some(row.get::<_, String>(7)?),
+            })
+        })
+        .map_err(|e| {
+            AppErrorDto::new("DB_READ_FAILED", "无法加载模型池配置", true)
+                .with_detail(e.to_string())
+        })?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(|e| {
+        AppErrorDto::new("DB_READ_FAILED", "读取模型池配置失败", true).with_detail(e.to_string())
+    })
+}
+
+#[allow(dead_code)]
+pub fn upsert_model_pool(
+    conn: &Connection,
+    pool: &ModelPoolRecord,
+    now: &str,
+) -> Result<(), AppErrorDto> {
+    let entries = normalize_model_pool_entries(&pool.entries);
+    let entries_json = serde_json::to_string(&entries).map_err(|e| {
+        AppErrorDto::new("DB_WRITE_FAILED", "模型池条目序列化失败", true).with_detail(e.to_string())
+    })?;
+    conn.execute(
+        "INSERT INTO llm_model_pools(
+            id, display_name, role, enabled, entries_json, fallback_pool_id, created_at, updated_at
+         ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+         ON CONFLICT(id) DO UPDATE SET
+            display_name = excluded.display_name,
+            role = excluded.role,
+            enabled = excluded.enabled,
+            entries_json = excluded.entries_json,
+            fallback_pool_id = excluded.fallback_pool_id,
+            updated_at = excluded.updated_at",
+        params![
+            pool.id,
+            pool.display_name,
+            pool.role,
+            if pool.enabled { 1_i64 } else { 0_i64 },
+            entries_json,
+            pool.fallback_pool_id,
+            now,
+            now,
+        ],
+    )
+    .map_err(|e| {
+        AppErrorDto::new("DB_WRITE_FAILED", "无法保存模型池配置", true).with_detail(e.to_string())
+    })?;
+    Ok(())
+}
+
+#[allow(dead_code)]
+fn normalize_model_pool_entries(entries: &[ModelPoolEntry]) -> Vec<ModelPoolEntry> {
+    let mut normalized = Vec::new();
+    for entry in entries {
+        let provider_id = entry.provider_id.trim();
+        let model_id = entry.model_id.trim();
+        if provider_id.is_empty() || model_id.is_empty() {
+            continue;
+        }
+        let duplicate = normalized.iter().any(|existing: &ModelPoolEntry| {
+            existing.provider_id == provider_id && existing.model_id == model_id
+        });
+        if duplicate {
+            continue;
+        }
+        normalized.push(ModelPoolEntry {
+            provider_id: provider_id.to_string(),
+            model_id: model_id.to_string(),
+        });
+    }
+    normalized
 }
 
 // ── app_settings CRUD ──
@@ -580,8 +680,7 @@ pub fn load_app_setting(conn: &Connection, key: &str) -> Result<Option<String>, 
     let mut stmt = conn
         .prepare("SELECT value FROM app_settings WHERE key = ?1")
         .map_err(|e| {
-            AppErrorDto::new("DB_READ_FAILED", "无法读取应用设置", true)
-                .with_detail(e.to_string())
+            AppErrorDto::new("DB_READ_FAILED", "无法读取应用设置", true).with_detail(e.to_string())
         })?;
 
     let result = stmt.query_row(params![key], |row| row.get::<_, String>(0));
@@ -589,10 +688,10 @@ pub fn load_app_setting(conn: &Connection, key: &str) -> Result<Option<String>, 
     match result {
         Ok(value) => Ok(Some(value)),
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-        Err(e) => Err(
-            AppErrorDto::new("DB_READ_FAILED", "无法读取应用设置", true)
-                .with_detail(e.to_string()),
-        ),
+        Err(e) => {
+            Err(AppErrorDto::new("DB_READ_FAILED", "无法读取应用设置", true)
+                .with_detail(e.to_string()))
+        }
     }
 }
 
@@ -609,8 +708,7 @@ pub fn save_app_setting(
         params![key, value, now],
     )
     .map_err(|e| {
-        AppErrorDto::new("DB_WRITE_FAILED", "无法保存应用设置", true)
-            .with_detail(e.to_string())
+        AppErrorDto::new("DB_WRITE_FAILED", "无法保存应用设置", true).with_detail(e.to_string())
     })?;
     Ok(())
 }
@@ -630,8 +728,7 @@ pub fn load_refresh_logs(
          ORDER BY created_at DESC LIMIT ?2",
         )
         .map_err(|e| {
-            AppErrorDto::new("DB_READ_FAILED", "无法加载刷新日志", true)
-                .with_detail(e.to_string())
+            AppErrorDto::new("DB_READ_FAILED", "无法加载刷新日志", true).with_detail(e.to_string())
         })?;
 
     let rows = stmt
@@ -649,13 +746,11 @@ pub fn load_refresh_logs(
             })
         })
         .map_err(|e| {
-            AppErrorDto::new("DB_READ_FAILED", "无法加载刷新日志", true)
-                .with_detail(e.to_string())
+            AppErrorDto::new("DB_READ_FAILED", "无法加载刷新日志", true).with_detail(e.to_string())
         })?;
 
     rows.collect::<Result<Vec<_>, _>>().map_err(|e| {
-        AppErrorDto::new("DB_READ_FAILED", "读取刷新日志失败", true)
-            .with_detail(e.to_string())
+        AppErrorDto::new("DB_READ_FAILED", "读取刷新日志失败", true).with_detail(e.to_string())
     })
 }
 
@@ -692,33 +787,21 @@ fn ensure_column(
 ) -> Result<(), AppErrorDto> {
     let pragma = format!("PRAGMA table_info({})", table);
     let mut stmt = conn.prepare(&pragma).map_err(|e| {
-        AppErrorDto::new(
-            "APP_DB_SCHEMA_READ_FAILED",
-            "无法读取应用数据库结构",
-            false,
-        )
-        .with_detail(e.to_string())
+        AppErrorDto::new("APP_DB_SCHEMA_READ_FAILED", "无法读取应用数据库结构", false)
+            .with_detail(e.to_string())
     })?;
 
     let rows = stmt
         .query_map([], |row| row.get::<_, String>(1))
         .map_err(|e| {
-            AppErrorDto::new(
-                "APP_DB_SCHEMA_READ_FAILED",
-                "无法读取应用数据库结构",
-                false,
-            )
-            .with_detail(e.to_string())
+            AppErrorDto::new("APP_DB_SCHEMA_READ_FAILED", "无法读取应用数据库结构", false)
+                .with_detail(e.to_string())
         })?;
 
     for name in rows {
         if name.map_err(|e| {
-            AppErrorDto::new(
-                "APP_DB_SCHEMA_READ_FAILED",
-                "无法读取应用数据库结构",
-                false,
-            )
-            .with_detail(e.to_string())
+            AppErrorDto::new("APP_DB_SCHEMA_READ_FAILED", "无法读取应用数据库结构", false)
+                .with_detail(e.to_string())
         })? == column
         {
             return Ok(());
@@ -727,12 +810,8 @@ fn ensure_column(
 
     let alter = format!("ALTER TABLE {} ADD COLUMN {} {}", table, column, ddl);
     conn.execute(&alter, []).map_err(|e| {
-        AppErrorDto::new(
-            "APP_DB_MIGRATION_FAILED",
-            "无法迁移应用数据库结构",
-            false,
-        )
-        .with_detail(e.to_string())
+        AppErrorDto::new("APP_DB_MIGRATION_FAILED", "无法迁移应用数据库结构", false)
+            .with_detail(e.to_string())
     })?;
     Ok(())
 }
@@ -762,12 +841,8 @@ fn migrate_legacy_database_if_needed(target_db_path: &Path) -> Result<(), AppErr
     }
 
     fs::copy(&legacy_db_path, target_db_path).map_err(|err| {
-        AppErrorDto::new(
-            "APP_DB_MIGRATION_FAILED",
-            "无法迁移旧版应用数据库",
-            false,
-        )
-        .with_detail(err.to_string())
+        AppErrorDto::new("APP_DB_MIGRATION_FAILED", "无法迁移旧版应用数据库", false)
+            .with_detail(err.to_string())
     })?;
 
     for suffix in [".wal", ".shm"] {
@@ -842,6 +917,8 @@ mod tests {
             model_id: "deepseek-chat".to_string(),
             fallback_provider_id: None,
             fallback_model_id: None,
+            model_pool_id: None,
+            fallback_model_pool_id: None,
             max_retries: 1,
             created_at: Some(now.clone()),
             updated_at: Some(now.clone()),
@@ -863,5 +940,39 @@ mod tests {
             );
         }
     }
-}
 
+    #[test]
+    fn model_pool_upsert_and_load_roundtrip() {
+        let conn = setup_app_conn();
+        let now = crate::infra::time::now_iso();
+        let pool = ModelPoolRecord {
+            id: "drafter".to_string(),
+            display_name: "Drafter Pool".to_string(),
+            role: "drafter".to_string(),
+            enabled: true,
+            entries: vec![
+                ModelPoolEntry {
+                    provider_id: "deepseek".to_string(),
+                    model_id: "deepseek-chat".to_string(),
+                },
+                // duplicate should be deduped on write
+                ModelPoolEntry {
+                    provider_id: "deepseek".to_string(),
+                    model_id: "deepseek-chat".to_string(),
+                },
+            ],
+            fallback_pool_id: Some("reviewer".to_string()),
+            created_at: Some(now.clone()),
+            updated_at: Some(now.clone()),
+        };
+
+        upsert_model_pool(&conn, &pool, &now).expect("upsert model pool");
+        let loaded = load_model_pools(&conn).expect("load model pools");
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].id, "drafter");
+        assert_eq!(loaded[0].entries.len(), 1);
+        assert_eq!(loaded[0].entries[0].provider_id, "deepseek");
+        assert_eq!(loaded[0].entries[0].model_id, "deepseek-chat");
+        assert_eq!(loaded[0].fallback_pool_id.as_deref(), Some("reviewer"));
+    }
+}

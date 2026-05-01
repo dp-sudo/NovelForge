@@ -5,7 +5,9 @@ use serde_json::json;
 use crate::adapters::llm_types::{ContentBlock, Message, UnifiedGenerateRequest};
 use crate::errors::AppErrorDto;
 use crate::services::ai_pipeline::audit_store::PipelineAuditStore;
-use crate::services::ai_pipeline::continuity_pack::ContinuityPackCompiler;
+use crate::services::ai_pipeline::continuity_pack::{
+    assess_continuity_pack_completeness, ContinuityPackCompiler,
+};
 use crate::services::ai_pipeline::freeze_guard::{detect_freeze_conflict, freeze_conflict_error};
 use crate::services::ai_pipeline::persist_policy::{
     infer_legacy_persist_mode, is_derived_review_task, parse_persist_mode,
@@ -170,11 +172,8 @@ impl<'a> PipelineOrchestrator<'a> {
                 error: freeze_conflict_error(conflict),
             });
         }
-        let selection_context = self.build_skill_selection_context(
-            &strategy_profile,
-            &context,
-            &certainty_zones,
-        );
+        let selection_context =
+            self.build_skill_selection_context(&strategy_profile, &context, &certainty_zones);
 
         self.audit_store.touch_pipeline_phase(
             &self.input.project_root,
@@ -239,6 +238,8 @@ impl<'a> PipelineOrchestrator<'a> {
                 meta: Some(json!({
                     "providerId": route.provider_id.clone(),
                     "modelId": route.model_id.clone(),
+                    "modelPoolId": route.model_pool_id.clone(),
+                    "fallbackModelPoolId": route.fallback_model_pool_id.clone(),
                     "attempts": route.attempts.clone(),
                     "selectedSkills": {
                         "workflow": selected_skills.workflow_skills.len(),
@@ -258,6 +259,25 @@ impl<'a> PipelineOrchestrator<'a> {
                 })),
             },
         );
+        self.audit_store.update_pipeline_meta(
+            &self.input.project_root,
+            self.request_id,
+            &json!({
+                "routeDecision": {
+                    "taskType": self.canonical_task,
+                    "providerId": route.provider_id.clone(),
+                    "modelId": route.model_id.clone(),
+                    "modelPoolId": route.model_pool_id.clone(),
+                    "fallbackModelPoolId": route.fallback_model_pool_id.clone(),
+                    "attempts": route.attempts.clone(),
+                },
+                "skillSelection": {
+                    "selectedSkillIds": selected_skill_ids.clone(),
+                    "stateWrites": runtime_state_writes.clone(),
+                    "affectsLayers": runtime_affects_layers.clone(),
+                },
+            }),
+        );
         self.pipeline_service
             .check_cancelled(self.request_id)
             .map_err(|err| StageError {
@@ -275,6 +295,35 @@ impl<'a> PipelineOrchestrator<'a> {
             self.input.chapter_id.as_deref(),
             &runtime_affects_layers,
         );
+        let continuity_completeness = assess_continuity_pack_completeness(
+            self.canonical_task,
+            &continuity_depth,
+            &continuity_pack,
+        );
+        if !continuity_completeness.is_complete {
+            self.pipeline_service.emit_event(
+                self.app_handle,
+                AiPipelineEvent {
+                    request_id: self.request_id.to_string(),
+                    phase: PHASE_CONTEXT.to_string(),
+                    event_type: "warning".to_string(),
+                    delta: None,
+                    error_code: Some("PIPELINE_CONTEXT_INCOMPLETE".to_string()),
+                    message: Some("context_incomplete".to_string()),
+                    recoverable: Some(true),
+                    meta: Some(json!({
+                        "warningCode": "context_incomplete",
+                        "taskType": self.canonical_task,
+                        "requestedDepth": continuity_completeness.requested_depth.clone(),
+                        "effectiveDepth": continuity_completeness.effective_depth.clone(),
+                        "enforcedMinimumDepth": continuity_completeness.enforced_minimum_depth.clone(),
+                        "requiredLayers": continuity_completeness.required_layers.clone(),
+                        "presentLayers": continuity_completeness.present_layers.clone(),
+                        "missingLayers": continuity_completeness.missing_layers.clone(),
+                    })),
+                },
+            );
+        }
 
         self.audit_store.touch_pipeline_phase(
             &self.input.project_root,
@@ -292,7 +341,10 @@ impl<'a> PipelineOrchestrator<'a> {
                 message: Some("building prompt".to_string()),
                 recoverable: None,
                 meta: Some(json!({
-                    "continuityDepth": continuity_depth,
+                    "continuityDepth": continuity_completeness.effective_depth,
+                    "requestedContinuityDepth": continuity_completeness.requested_depth,
+                    "contextComplete": continuity_completeness.is_complete,
+                    "missingLayers": continuity_completeness.missing_layers,
                 })),
             },
         );
@@ -335,6 +387,7 @@ impl<'a> PipelineOrchestrator<'a> {
                 meta: Some(json!({
                     "providerId": route.provider_id.clone(),
                     "modelId": route.model_id.clone(),
+                    "modelPoolId": route.model_pool_id.clone(),
                 })),
             },
         );

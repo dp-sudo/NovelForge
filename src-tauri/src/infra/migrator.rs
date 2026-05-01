@@ -60,6 +60,10 @@ fn project_migrations() -> Vec<Migration> {
             version: "0007_blueprint_certainty_zones",
             sql: include_str!("../../migrations/project/0007_blueprint_certainty_zones.sql"),
         },
+        Migration {
+            version: "0008_pipeline_run_meta",
+            sql: include_str!("../../migrations/project/0008_pipeline_run_meta.sql"),
+        },
     ]
 }
 
@@ -77,6 +81,10 @@ fn app_migrations() -> Vec<Migration> {
         Migration {
             version: "0003_task_route_unique",
             sql: include_str!("../../migrations/app/0003_task_route_unique.sql"),
+        },
+        Migration {
+            version: "0004_model_pools",
+            sql: include_str!("../../migrations/app/0004_model_pools.sql"),
         },
     ]
 }
@@ -261,6 +269,18 @@ mod tests {
         count > 0
     }
 
+    fn has_column(conn: &Connection, table: &str, column: &str) -> bool {
+        let mut stmt = conn
+            .prepare(&format!("PRAGMA table_info({table})"))
+            .expect("prepare table info");
+        let columns = stmt
+            .query_map([], |row| row.get::<_, String>(1))
+            .expect("query table info")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("collect table columns");
+        columns.iter().any(|name| name == column)
+    }
+
     fn insert_provider(conn: &Connection, provider_id: &str) {
         conn.execute(
             "INSERT INTO llm_providers(
@@ -338,6 +358,54 @@ mod tests {
             "llm_task_routes",
             "ux_llm_task_routes_task_type"
         ));
+    }
+
+    #[test]
+    fn app_model_pool_migration_creates_table_and_task_route_pool_columns() {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        conn.execute_batch(include_str!("../../migrations/app/0001_init.sql"))
+            .expect("apply app 0001");
+        conn.execute_batch(include_str!("../../migrations/app/0002_skill_index.sql"))
+            .expect("apply app 0002");
+        conn.execute_batch(include_str!(
+            "../../migrations/app/0003_task_route_unique.sql"
+        ))
+        .expect("apply app 0003");
+        insert_migration_marker(&conn, "0001_init");
+        insert_migration_marker(&conn, "0002_skill_index");
+        insert_migration_marker(&conn, "0003_task_route_unique");
+        insert_provider(&conn, "provider-a");
+        conn.execute(
+            "INSERT INTO llm_task_routes(id, task_type, provider_id, model_id, max_retries, created_at, updated_at)
+             VALUES(?1, ?2, ?3, ?4, 1, ?5, ?6)",
+            params![
+                "route-1",
+                "chapter.draft",
+                "provider-a",
+                "model-a",
+                "2026-05-01T10:00:00Z",
+                "2026-05-01T10:00:00Z"
+            ],
+        )
+        .expect("insert route");
+
+        run_app_pending(&conn).expect("apply app pending migrations");
+
+        assert!(has_table(&conn, "llm_model_pools"));
+        assert!(has_column(&conn, "llm_task_routes", "model_pool_id"));
+        assert!(has_column(
+            &conn,
+            "llm_task_routes",
+            "fallback_model_pool_id"
+        ));
+        let seeded_pool_id: Option<String> = conn
+            .query_row(
+                "SELECT model_pool_id FROM llm_task_routes WHERE id = 'route-1'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("read pool id");
+        assert_eq!(seeded_pool_id.as_deref(), Some("drafter"));
     }
 
     #[test]
@@ -454,6 +522,7 @@ mod tests {
         run_project_pending(&conn).expect("apply project pending migrations");
 
         assert!(has_table(&conn, "ai_pipeline_runs"));
+        assert!(has_column(&conn, "ai_pipeline_runs", "meta_json"));
         assert!(has_table(&conn, "structured_draft_batches"));
         assert!(has_table(&conn, "structured_draft_items"));
         assert!(has_table(&conn, "story_state"));

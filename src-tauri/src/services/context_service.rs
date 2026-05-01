@@ -645,10 +645,14 @@ impl ContextService {
             .list_chapter_states(normalized_root, chapter_id)?
             .into_iter()
             .map(|row| StoryStateSummary {
+                payload: StoryStateService::enrich_payload_with_taxonomy(
+                    &row.subject_type,
+                    &row.state_kind,
+                    row.payload_json,
+                ),
                 subject_type: row.subject_type,
                 subject_id: row.subject_id,
                 state_kind: row.state_kind,
-                payload: row.payload_json,
             })
             .collect();
 
@@ -920,10 +924,14 @@ impl ContextService {
             .map(|rows| {
                 rows.into_iter()
                     .map(|row| StoryStateSummary {
+                        payload: StoryStateService::enrich_payload_with_taxonomy(
+                            &row.subject_type,
+                            &row.state_kind,
+                            row.payload_json,
+                        ),
                         subject_type: row.subject_type,
                         subject_id: row.subject_id,
                         state_kind: row.state_kind,
-                        payload: row.payload_json,
                     })
                     .collect()
             })

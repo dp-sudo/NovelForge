@@ -103,6 +103,8 @@ export interface TaskRoute {
   modelId: string;
   fallbackProviderId?: string;
   fallbackModelId?: string;
+  modelPoolId?: string;
+  fallbackModelPoolId?: string;
   maxRetries: number;
   createdAt?: string;
   updatedAt?: string;

@@ -26,7 +26,7 @@ bundleIds: [bundle.scene-environment, bundle.character-expression]
 alwaysOn: false
 triggerConditions: [context.collect]
 requiredContexts: [chapter, canon]
-stateWrites: [relationship.relationship, character.involvement, scene.environment]
+stateWrites: [relationship.relationship, relationship.temperature, character.involvement, character.emotion, scene.environment]
 automationTier: auto
 sceneTags: [dialogue, emotion, environment]
 affectsLayers: [canon, state, recent_continuity]

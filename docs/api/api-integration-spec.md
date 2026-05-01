@@ -212,6 +212,7 @@
   - `list_task_routes()`
   - `save_task_route(route)`
   - `delete_task_route(routeId)`
+  - `route` 结构新增可选字段：`modelPoolId`、`fallbackModelPoolId`
 - Registry：
   - `check_remote_registry(url)`
   - `apply_registry_update(url)`
@@ -266,9 +267,11 @@
     - 当仅走 `autoPersist` 推导路径时，前端会记录 `PIPELINE.LEGACY_POLICY_BRIDGE` 诊断日志。
   - 运行时行为：
     - `prompt` 前会编译 `ContinuityPack`，并注入技能选择结果。
+    - 章节关键任务会强制最小上下文深度为 `deep`；若关键层缺失，将发出 `warning` 事件（`errorCode=PIPELINE_CONTEXT_INCOMPLETE`，`meta.warningCode=context_incomplete`）。
     - 技能选择不再只看 `taskType`；还会同时应用项目级 `alwaysOnPolicySkills/defaultCapabilityBundles`，以及技能元数据 `sceneTags/requiredContexts/automationTier`。
     - 若技能声明 `affectsLayers`，`orchestrator` 会按聚合后的 layer focus 对 `ContinuityPack` 进行裁剪（保留 constitution/lexicon 护栏层）。
     - 若技能命中 `route_override`，仅覆盖本次请求的 provider/model，不修改项目配置。
+    - 默认路由支持 `task -> model pool -> provider/model` 兼容链路；路由解析结果会包含 `modelPoolId` 元信息。
     - 若激活技能声明 `stateWrites`，后端会按项目级 `stateWritePolicy` 追加 `story_state` 记录，并写入 `skillIds/affectsLayers` 运行态元数据。
     - 若检测到用户指令改写冻结区条目，后端返回 `PIPELINE_FREEZE_CONFLICT` 并阻断执行。
 - AI 功能任务（前端薄封装，统一走 pipeline）：
@@ -291,7 +294,7 @@
 事件载荷（camelCase）：
 - `requestId: string`
 - `phase: "validate" | "context" | "route" | "prompt" | "generate" | "postprocess" | "persist" | "done" | string`
-- `type: "start" | "progress" | "delta" | "done" | "error"`
+- `type: "start" | "progress" | "delta" | "done" | "error" | "warning"`
 - `delta?: string`
 - `errorCode?: string`
 - `message?: string`

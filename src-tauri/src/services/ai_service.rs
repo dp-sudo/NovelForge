@@ -32,6 +32,8 @@ pub struct TaskRouteResolution {
     pub canonical_task_type: String,
     pub provider_id: String,
     pub model_id: String,
+    pub model_pool_id: Option<String>,
+    pub fallback_model_pool_id: Option<String>,
     pub attempts: Vec<TaskRouteAttempt>,
 }
 
@@ -82,16 +84,32 @@ impl AiService {
                 model_id,
             })
             .collect::<Vec<_>>();
+        let model_pool_id = route
+            .as_ref()
+            .and_then(|item| item.model_pool_id.clone())
+            .filter(|value| !value.trim().is_empty());
+        let fallback_model_pool_id = route
+            .as_ref()
+            .and_then(|item| item.fallback_model_pool_id.clone())
+            .filter(|value| !value.trim().is_empty());
         TaskRouteResolution {
             canonical_task_type,
             provider_id,
             model_id,
+            model_pool_id,
+            fallback_model_pool_id,
             attempts,
         }
     }
 
     fn is_usable_route(route: &TaskRoute) -> bool {
-        !route.provider_id.trim().is_empty() && !route.model_id.trim().is_empty()
+        let direct = !route.provider_id.trim().is_empty() && !route.model_id.trim().is_empty();
+        let pooled = route
+            .model_pool_id
+            .as_ref()
+            .map(|value| !value.trim().is_empty())
+            .unwrap_or(false);
+        direct || pooled
     }
 
     fn pick_task_route<'a>(routes: &'a [TaskRoute], task_type: &str) -> Option<&'a TaskRoute> {
@@ -108,6 +126,120 @@ impl AiService {
                 && task_routing::canonical_task_type(&r.task_type).as_ref()
                     == canonical_task.as_ref()
         })
+    }
+
+    fn default_model_pool_id_for_task(canonical_task: &str) -> Option<&'static str> {
+        match canonical_task {
+            "chapter.plan" | "blueprint.generate_step" => Some("planner"),
+            "chapter.draft" | "chapter.continue" | "chapter.rewrite" | "prose.naturalize" => {
+                Some("drafter")
+            }
+            "consistency.scan"
+            | "timeline.review"
+            | "relationship.review"
+            | "dashboard.review"
+            | "export.review" => Some("reviewer"),
+            "character.create"
+            | "world.create_rule"
+            | "plot.create_node"
+            | "glossary.create_term" => Some("extractor"),
+            "narrative.create_obligation" => Some("state"),
+            _ => None,
+        }
+    }
+
+    fn pool_entries(pool: &crate::adapters::llm_types::ModelPoolRecord) -> Vec<(String, String)> {
+        pool.entries
+            .iter()
+            .filter_map(|entry| {
+                let provider = entry.provider_id.trim();
+                let model = entry.model_id.trim();
+                if provider.is_empty() || model.is_empty() {
+                    None
+                } else {
+                    Some((provider.to_string(), model.to_string()))
+                }
+            })
+            .collect()
+    }
+
+    fn resolve_with_model_pool_if_configured(
+        conn: &rusqlite::Connection,
+        canonical_task: &str,
+        route: &TaskRoute,
+    ) -> Result<(String, String, TaskRoute), AppErrorDto> {
+        let pools = app_database::load_model_pools(conn)?;
+        let explicit_pool_id = route
+            .model_pool_id
+            .as_ref()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        let fallback_pool_id = route
+            .fallback_model_pool_id
+            .as_ref()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        let pool_id = explicit_pool_id
+            .or_else(|| {
+                Self::default_model_pool_id_for_task(canonical_task).map(|value| value.to_string())
+            })
+            .filter(|value| !value.is_empty());
+
+        let Some(pool_id) = pool_id else {
+            return Ok((
+                route.provider_id.clone(),
+                route.model_id.clone(),
+                route.clone(),
+            ));
+        };
+
+        let Some(primary_pool) = pools.iter().find(|pool| pool.id == pool_id && pool.enabled)
+        else {
+            return Ok((
+                route.provider_id.clone(),
+                route.model_id.clone(),
+                route.clone(),
+            ));
+        };
+        let primary_entries = Self::pool_entries(primary_pool);
+        let Some((provider_id, model_id)) = primary_entries.first().cloned() else {
+            return Ok((
+                route.provider_id.clone(),
+                route.model_id.clone(),
+                route.clone(),
+            ));
+        };
+
+        let mut resolved_route = route.clone();
+        resolved_route.provider_id = provider_id.clone();
+        resolved_route.model_id = model_id.clone();
+        resolved_route.model_pool_id = Some(primary_pool.id.clone());
+
+        let mut fallback_target = primary_entries.get(1).cloned();
+        let fallback_pool_id = fallback_pool_id.or_else(|| {
+            primary_pool
+                .fallback_pool_id
+                .as_ref()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+        });
+        if fallback_target.is_none() {
+            if let Some(fallback_pool_id) = fallback_pool_id.as_ref() {
+                if let Some(pool) = pools
+                    .iter()
+                    .find(|pool| pool.id == *fallback_pool_id && pool.enabled)
+                {
+                    fallback_target = Self::pool_entries(pool).into_iter().next();
+                    resolved_route.fallback_model_pool_id = Some(pool.id.clone());
+                }
+            }
+        }
+        if let Some((fallback_provider, fallback_model)) = fallback_target {
+            resolved_route.fallback_provider_id = Some(fallback_provider);
+            resolved_route.fallback_model_id = Some(fallback_model);
+        }
+
+        Ok((provider_id, model_id, resolved_route))
     }
 
     fn build_attempt_chain(
@@ -208,7 +340,9 @@ impl AiService {
         let canonical_task = task_routing::canonical_task_type(task_type).into_owned();
 
         if let Some(r) = Self::pick_task_route(&routes, task_type) {
-            return Ok((r.provider_id.clone(), r.model_id.clone(), Some(r.clone())));
+            let (provider_id, model_id, resolved_route) =
+                Self::resolve_with_model_pool_if_configured(&conn, &canonical_task, r)?;
+            return Ok((provider_id, model_id, Some(resolved_route)));
         }
 
         // 未知技能/任务类型可显式回退到 "custom" 路由。
@@ -216,22 +350,18 @@ impl AiService {
             if let Some(custom_route) = Self::pick_task_route(&routes, "custom") {
                 let mut inferred = custom_route.clone();
                 inferred.task_type = canonical_task.clone();
-                return Ok((
-                    custom_route.provider_id.clone(),
-                    custom_route.model_id.clone(),
-                    Some(inferred),
-                ));
+                let (provider_id, model_id, resolved_route) =
+                    Self::resolve_with_model_pool_if_configured(&conn, &canonical_task, &inferred)?;
+                return Ok((provider_id, model_id, Some(resolved_route)));
             }
         }
 
         // 兼容旧行为：`custom` 仍可回退到第一条可用路由。
         if canonical_task == "custom" {
             if let Some(first) = routes.iter().find(|r| Self::is_usable_route(r)) {
-                return Ok((
-                    first.provider_id.clone(),
-                    first.model_id.clone(),
-                    Some(first.clone()),
-                ));
+                let (provider_id, model_id, resolved_route) =
+                    Self::resolve_with_model_pool_if_configured(&conn, &canonical_task, first)?;
+                return Ok((provider_id, model_id, Some(resolved_route)));
             }
         }
 
@@ -386,6 +516,8 @@ impl AiService {
             model_id: model.to_string(),
             fallback_provider_id: None,
             fallback_model_id: None,
+            model_pool_id: None,
+            fallback_model_pool_id: None,
             max_retries: 1,
             created_at: None,
             updated_at: None,
@@ -519,10 +651,14 @@ impl AiService {
 #[cfg(test)]
 mod tests {
     use super::AiService;
+    use crate::adapters::llm_types::{ModelPoolEntry, ModelPoolRecord, ProviderConfig, TaskRoute};
     use crate::errors::AppErrorDto;
+    use crate::infra::app_database;
     use crate::services::skill_registry::{SkillManifest, SkillRegistry, SkillTaskRouteOverride};
+    use rusqlite::Connection;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
+    use uuid::Uuid;
 
     fn create_test_registry(name: &str) -> SkillRegistry {
         let unique = SystemTime::now()
@@ -568,6 +704,36 @@ mod tests {
         }
     }
 
+    fn setup_app_conn() -> Connection {
+        let conn = Connection::open_in_memory().expect("open in-memory app db");
+        crate::infra::migrator::run_app_pending(&conn).expect("run app migrations");
+        conn
+    }
+
+    fn sample_provider(id: &str, default_model: &str) -> ProviderConfig {
+        ProviderConfig {
+            id: id.to_string(),
+            display_name: id.to_string(),
+            vendor: "openai".to_string(),
+            protocol: "openai_responses".to_string(),
+            base_url: "https://example.invalid".to_string(),
+            endpoint_path: None,
+            api_key: None,
+            auth_mode: "bearer".to_string(),
+            auth_header_name: None,
+            anthropic_version: None,
+            beta_headers: None,
+            custom_headers: None,
+            default_model: Some(default_model.to_string()),
+            timeout_ms: 120_000,
+            connect_timeout_ms: 15_000,
+            max_retries: 2,
+            model_refresh_mode: Some("registry".to_string()),
+            models_path: None,
+            last_model_refresh_at: None,
+        }
+    }
+
     #[test]
     fn pipeline_stream_error_roundtrip() {
         let encoded = AiService::encode_pipeline_stream_error(&AppErrorDto::new(
@@ -605,5 +771,74 @@ mod tests {
                 .expect("resolve route with skill override");
         assert_eq!(resolution.provider_id, "provider-override");
         assert_eq!(resolution.model_id, "model-override");
+    }
+
+    #[test]
+    fn model_pool_route_mapping_prefers_pool_entry_and_uses_fallback_pool() {
+        let conn = setup_app_conn();
+        let now = crate::infra::time::now_iso();
+        app_database::upsert_provider(&conn, &sample_provider("deepseek", "deepseek-chat"), &now)
+            .expect("upsert deepseek");
+        app_database::upsert_provider(&conn, &sample_provider("openai", "gpt-5.5"), &now)
+            .expect("upsert openai");
+
+        let primary_pool = ModelPoolRecord {
+            id: "drafter".to_string(),
+            display_name: "Drafter Pool".to_string(),
+            role: "drafter".to_string(),
+            enabled: true,
+            entries: vec![ModelPoolEntry {
+                provider_id: "deepseek".to_string(),
+                model_id: "deepseek-v4-flash".to_string(),
+            }],
+            fallback_pool_id: Some("reviewer".to_string()),
+            created_at: Some(now.clone()),
+            updated_at: Some(now.clone()),
+        };
+        let fallback_pool = ModelPoolRecord {
+            id: "reviewer".to_string(),
+            display_name: "Reviewer Pool".to_string(),
+            role: "reviewer".to_string(),
+            enabled: true,
+            entries: vec![ModelPoolEntry {
+                provider_id: "openai".to_string(),
+                model_id: "gpt-5.5".to_string(),
+            }],
+            fallback_pool_id: None,
+            created_at: Some(now.clone()),
+            updated_at: Some(now.clone()),
+        };
+        app_database::upsert_model_pool(&conn, &primary_pool, &now).expect("upsert primary pool");
+        app_database::upsert_model_pool(&conn, &fallback_pool, &now).expect("upsert fallback pool");
+
+        let route = TaskRoute {
+            id: Uuid::new_v4().to_string(),
+            task_type: "chapter.draft".to_string(),
+            provider_id: "legacy-provider".to_string(),
+            model_id: "legacy-model".to_string(),
+            fallback_provider_id: None,
+            fallback_model_id: None,
+            model_pool_id: Some("drafter".to_string()),
+            fallback_model_pool_id: None,
+            max_retries: 2,
+            created_at: Some(now.clone()),
+            updated_at: Some(now.clone()),
+        };
+
+        let (provider_id, model_id, resolved_route) =
+            AiService::resolve_with_model_pool_if_configured(&conn, "chapter.draft", &route)
+                .expect("resolve with model pool");
+        assert_eq!(provider_id, "deepseek");
+        assert_eq!(model_id, "deepseek-v4-flash");
+        assert_eq!(resolved_route.model_pool_id.as_deref(), Some("drafter"));
+        assert_eq!(
+            resolved_route.fallback_model_pool_id.as_deref(),
+            Some("reviewer")
+        );
+        assert_eq!(
+            resolved_route.fallback_provider_id.as_deref(),
+            Some("openai")
+        );
+        assert_eq!(resolved_route.fallback_model_id.as_deref(), Some("gpt-5.5"));
     }
 }

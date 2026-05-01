@@ -28,7 +28,7 @@ bundleIds: [bundle.emotion-progression, bundle.character-expression]
 alwaysOn: false
 triggerConditions: [relationship.review]
 requiredContexts: [chapter, canon, state]
-stateWrites: [relationship.relationship]
+stateWrites: [relationship.relationship, relationship.temperature]
 automationTier: confirm
 sceneTags: [dialogue, emotion]
 affectsLayers: [canon, state, promise, recent_continuity]

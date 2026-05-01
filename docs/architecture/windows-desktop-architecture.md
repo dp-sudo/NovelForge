@@ -107,6 +107,7 @@
   - `project/0005_entity_provenance.sql`（正式资产来源轨迹）
   - `project/0006_story_state.sql`（状态账本）
   - `project/0007_blueprint_certainty_zones.sql`（蓝图确定性分区显式字段 `certainty_zones_json`）
+  - `project/0008_pipeline_run_meta.sql`（Pipeline run 元数据 `meta_json`）
 - 兼容补列：
   - `database.rs::ensure_compatible_schema()` 在打开/初始化时补齐 `projects.writing_style`、`projects.ai_strategy_profile` 等历史缺列。
 
@@ -116,6 +117,7 @@
   - `app/0001_init.sql`
   - `app/0002_skill_index.sql`
   - `app/0003_task_route_unique.sql`（canonical + 去重 + `task_type` 唯一索引）
+  - `app/0004_model_pools.sql`（模型池表 + 路由池字段）
 - 编辑器设置通过 `app_settings` 的 `editor_settings` 键持久化。
 - 应用级 Provider/模型/路由运行期真相源在 `novelforge.db`；项目级 AI 策略真相源在 `project.sqlite`。
 
@@ -128,6 +130,10 @@
 - canonical 函数：`task_routing::canonical_task_type()`。
 - 路由解析：`AiService::resolve_route()`。
 - 未命中核心任务时，可回退 `custom` 路由（若已配置）。
+- 新增池级兼容链路：`task route -> model pool -> provider/model`。
+  - 池表：`llm_model_pools`（`planner/drafter/reviewer/extractor/state`）。
+  - 任务路由可选字段：`model_pool_id`、`fallback_model_pool_id`。
+  - 兼容模式：无池配置时回退原 `provider/model/fallback` 路由。
 
 ### 6.2 Pipeline 编排（`AiPipelineService`）
 - 阶段：`validate -> context -> route -> prompt -> generate -> postprocess -> persist -> done`
@@ -153,6 +159,7 @@
 - `orchestrator` 先解析本次请求最终 provider/model，再把显式路由写入生成请求，避免 `route` 与 `generate` 阶段重复按旧逻辑二次选技能。
 - 若技能声明 `affectsLayers`，`orchestrator` 会按聚合层焦点裁剪 `ContinuityPack`（constitution/lexicon 护栏层固定保留）。
 - `ai:pipeline:event.meta` 回传所选技能数量、技能 IDs、stateWrites、affectsLayers、激活 bundle、推断 scene tag 与 route override 元信息，便于审计。
+- `ai_pipeline_runs.meta_json` 会记录路由决策（包含 `modelPoolId` 与 fallback 池信息），用于回放与审计。
 
 ### 6.5 写后回写与来源轨迹
 - `save_chapter_content` 写正文后调用 `StoryStateService.record_window_progress` 回写窗口状态。
