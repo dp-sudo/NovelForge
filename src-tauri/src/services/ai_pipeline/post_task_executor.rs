@@ -72,6 +72,32 @@ fn infer_stamina_state(text: &str) -> Option<&'static str> {
     None
 }
 
+fn infer_danger_level(text: &str) -> Option<&'static str> {
+    if text.contains("绝境") || text.contains("围攻") || text.contains("濒死") {
+        return Some("extreme");
+    }
+    if text.contains("高危") || text.contains("伏击") || text.contains("爆炸") {
+        return Some("high");
+    }
+    if text.contains("紧张") || text.contains("警戒") {
+        return Some("medium");
+    }
+    if text.contains("平静") || text.contains("安全") {
+        return Some("low");
+    }
+    None
+}
+
+fn infer_spatial_constraint(text: &str) -> Option<&'static str> {
+    if text.contains("密室") || text.contains("狭窄") || text.contains("封闭") {
+        return Some("closed");
+    }
+    if text.contains("广场") || text.contains("开阔") || text.contains("旷野") {
+        return Some("open");
+    }
+    None
+}
+
 impl PostTaskExecutor {
     #[allow(clippy::too_many_arguments)]
     pub fn execute(
@@ -208,6 +234,8 @@ impl PostTaskExecutor {
         let relationship_temperature = infer_relationship_temperature(normalized_output);
         let injury_state = infer_injury_state(normalized_output);
         let stamina_state = infer_stamina_state(normalized_output);
+        let danger_level = infer_danger_level(normalized_output);
+        let spatial_constraint = infer_spatial_constraint(normalized_output);
 
         let payload = json!({
             "sceneType": scene_type,
@@ -215,6 +243,8 @@ impl PostTaskExecutor {
             "relationshipTemperature": relationship_temperature,
             "injuryState": injury_state,
             "staminaState": stamina_state,
+            "dangerLevel": danger_level,
+            "spatialConstraint": spatial_constraint,
         });
 
         let save_result = StoryStateService.upsert_state(
@@ -234,7 +264,42 @@ impl PostTaskExecutor {
                 status: "succeeded".to_string(),
                 summary: "state snapshot extracted".to_string(),
                 error: None,
-                meta: Some(payload),
+                meta: Some({
+                    let meta = payload;
+                    if let Some(level) = danger_level {
+                        let _ = StoryStateService.upsert_state(
+                            project_root,
+                            StoryStateInput {
+                                subject_type: "scene".to_string(),
+                                subject_id: chapter_id.to_string(),
+                                scope: "chapter".to_string(),
+                                state_kind: "danger_level".to_string(),
+                                payload_json: json!({
+                                    "dangerLevel": level,
+                                    "sceneType": scene_type,
+                                }),
+                                source_chapter_id: Some(chapter_id.to_string()),
+                            },
+                        );
+                    }
+                    if let Some(constraint) = spatial_constraint {
+                        let _ = StoryStateService.upsert_state(
+                            project_root,
+                            StoryStateInput {
+                                subject_type: "scene".to_string(),
+                                subject_id: chapter_id.to_string(),
+                                scope: "chapter".to_string(),
+                                state_kind: "spatial_constraint".to_string(),
+                                payload_json: json!({
+                                    "spatialConstraint": constraint,
+                                    "sceneType": scene_type,
+                                }),
+                                source_chapter_id: Some(chapter_id.to_string()),
+                            },
+                        );
+                    }
+                    meta
+                }),
             },
             Err(err) => PostTaskResult {
                 task_type: "extract_state".to_string(),
@@ -301,6 +366,41 @@ mod tests {
         assert!(
             results.iter().any(|item| item.status == "failed"),
             "expected at least one failed post-task result"
+        );
+    }
+
+    #[test]
+    fn extract_state_meta_includes_scene_risk_and_spatial_constraint() {
+        let executor = PostTaskExecutor;
+        let context_service = ContextService;
+        let results = executor.execute(
+            "unused-project-root",
+            Some("chapter-1"),
+            "combat",
+            &[],
+            "密室内遭遇伏击，战况高危，主角受伤流血。",
+            &context_service,
+        );
+        let extract_state = results
+            .iter()
+            .find(|item| item.task_type == "extract_state")
+            .expect("extract_state result");
+        assert!(extract_state.meta.is_some());
+        assert_eq!(
+            extract_state
+                .meta
+                .as_ref()
+                .and_then(|value| value.get("dangerLevel"))
+                .and_then(|value| value.as_str()),
+            Some("high")
+        );
+        assert_eq!(
+            extract_state
+                .meta
+                .as_ref()
+                .and_then(|value| value.get("spatialConstraint"))
+                .and_then(|value| value.as_str()),
+            Some("closed")
         );
     }
 }

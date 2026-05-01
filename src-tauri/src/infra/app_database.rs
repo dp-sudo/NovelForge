@@ -789,6 +789,44 @@ pub fn upsert_model_pool(
 }
 
 #[allow(dead_code)]
+pub fn delete_model_pool(conn: &Connection, pool_id: &str) -> Result<(), AppErrorDto> {
+    let normalized = pool_id.trim();
+    if normalized.is_empty() {
+        return Err(AppErrorDto::new("INVALID_INPUT", "模型池ID不能为空", true));
+    }
+
+    conn.execute(
+        "UPDATE llm_task_routes
+         SET model_pool_id = NULL
+         WHERE model_pool_id = ?1",
+        params![normalized],
+    )
+    .map_err(|e| {
+        AppErrorDto::new("DB_WRITE_FAILED", "无法清理任务路由主模型池引用", true)
+            .with_detail(e.to_string())
+    })?;
+    conn.execute(
+        "UPDATE llm_task_routes
+         SET fallback_model_pool_id = NULL
+         WHERE fallback_model_pool_id = ?1",
+        params![normalized],
+    )
+    .map_err(|e| {
+        AppErrorDto::new("DB_WRITE_FAILED", "无法清理任务路由兜底模型池引用", true)
+            .with_detail(e.to_string())
+    })?;
+    conn.execute(
+        "DELETE FROM llm_model_pools WHERE id = ?1",
+        params![normalized],
+    )
+    .map_err(|e| {
+        AppErrorDto::new("DB_DELETE_FAILED", "无法删除模型池配置", true)
+            .with_detail(e.to_string())
+    })?;
+    Ok(())
+}
+
+#[allow(dead_code)]
 fn normalize_model_pool_entries(entries: &[ModelPoolEntry]) -> Vec<ModelPoolEntry> {
     let mut normalized = Vec::new();
     for entry in entries {

@@ -31,7 +31,7 @@ bundleIds: [bundle.character-expression, bundle.emotion-progression, bundle.scen
 alwaysOn: false
 triggerConditions: [chapter.draft]
 requiredContexts: [chapter, canon, state]
-stateWrites: [chapter.progress, character.emotion, scene.environment, relationship.temperature]
+stateWrites: [chapter.progress, character.emotion, character.action, character.appearance, character.knowledge, scene.environment, scene.danger_level, scene.spatial_constraint, relationship.temperature]
 automationTier: supervised
 sceneTags: []
 affectsLayers: [canon, state, promise, window_plan, recent_continuity]

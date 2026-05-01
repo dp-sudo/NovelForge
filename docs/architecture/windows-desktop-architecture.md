@@ -1,8 +1,8 @@
 # NovelForge Windows 桌面端技术架构文档
 
 ## 1. 文档信息
-- 版本：v0.10
-- 状态：S22（阶段二：晋升统一、审查轨迹、确定性分区扩展、回报机制、场景后置链）
+- 版本：v0.11
+- 状态：S23（阶段三：模型池管理、扩展状态 taxonomy、场景感知编排闭环）
 - 最后更新：2026-05-02
 - 代码基线：`src/` + `src-tauri/src/`
 
@@ -51,6 +51,7 @@
   - AI Pipeline：`run_ai_task_pipeline`, `cancel_ai_task_pipeline`。
   - 结构化确认：`apply_asset_candidate`, `apply_structured_draft`, `reject_structured_draft`, `get_review_trail`。
   - 回报查询：`get_feedback_events`。
+  - 模型池管理：`list_model_pools`, `create_model_pool`, `update_model_pool`, `delete_model_pool`。
   - 晋升策略：`list_promotion_policies`, `save_promotion_policy`。
   - 写作风格：`save_writing_style`, `get_writing_style`。
   - 项目级 AI 策略：`save_ai_strategy_profile`, `get_ai_strategy_profile`。
@@ -121,7 +122,7 @@
   - `database.rs::ensure_compatible_schema()` 在打开/初始化时补齐 `projects.writing_style`、`projects.ai_strategy_profile` 等历史缺列。
 
 ### 5.3 应用级数据库（`%LOCALAPPDATA%\\NovelForge\\novelforge.db`）
-- 表：`llm_providers`, `llm_models`, `llm_model_refresh_logs`, `llm_task_routes`, `llm_model_registry_state`, `app_settings`, `promotion_policies`, `feedback_rules`
+- 表：`llm_providers`, `llm_models`, `llm_model_refresh_logs`, `llm_model_pools`, `llm_task_routes`, `llm_model_registry_state`, `app_settings`, `promotion_policies`, `feedback_rules`
 - 迁移现状：
   - `app/0001_init.sql`
   - `app/0002_skill_index.sql`
@@ -196,7 +197,7 @@
 - AI：pipeline run/cancel，模块化 AI 任务通过前端 API 薄封装统一转发到 pipeline（legacy stream 命令已移除）。
 - Context：上下文聚合、资产候选采纳、结构化草案确认/否决、审查轨迹查询。
 - Dashboard：统计总览 + 回报事件面板（`feedback_events`）。
-- Settings：Provider/模型/路由/registry、编辑器设置、授权、更新。
+- Settings：Provider/模型/模型池/路由/registry、编辑器设置、授权、更新。
 - Skills：技能列表/详情/内容读取、创建、编辑、删除、导入、重置、重载。
 - Search/Integrity：关键字+语义检索、索引重建、项目完整性检查。
 

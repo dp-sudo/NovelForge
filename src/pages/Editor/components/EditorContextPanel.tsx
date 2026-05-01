@@ -417,11 +417,15 @@ export function EditorContextPanel(props: EditorContextPanelProps) {
                 {context.stateSummary.length > 0 && (
                   <div className="mt-2">
                     <div className="text-surface-500 mb-1">最新状态:</div>
-                    {context.stateSummary.slice(0, 3).map((item, index) => (
-                      <div key={`${item.subjectType}:${item.subjectId}:${item.stateKind}:${index}`} className="text-surface-400">
-                        {item.subjectType}/{item.subjectId} · {item.stateKind}
-                      </div>
-                    ))}
+                    {context.stateSummary.slice(0, 3).map((item, index) => {
+                      const payloadPreview = JSON.stringify(item.payload);
+                      return (
+                        <div key={`${item.subjectType}:${item.subjectId}:${item.stateKind}:${index}`} className="text-surface-400 mb-1">
+                          <div>{item.subjectType}/{item.subjectId} · {item.stateKind}</div>
+                          <div className="text-[11px] text-surface-500 break-words">{payloadPreview.slice(0, 140)}</div>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>

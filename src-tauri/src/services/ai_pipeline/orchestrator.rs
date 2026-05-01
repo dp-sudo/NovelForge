@@ -610,6 +610,32 @@ impl<'a> PipelineOrchestrator<'a> {
                 self.request_id,
                 &json!(results.clone()),
             );
+            self.audit_store.update_pipeline_meta(
+                &self.input.project_root,
+                self.request_id,
+                &json!({
+                    "routeDecision": {
+                        "taskType": self.canonical_task,
+                        "providerId": route.provider_id.clone(),
+                        "modelId": route.model_id.clone(),
+                        "modelPoolId": route.model_pool_id.clone(),
+                        "fallbackModelPoolId": route.fallback_model_pool_id.clone(),
+                        "postTasks": route.post_tasks.clone(),
+                        "attempts": route.attempts.clone(),
+                    },
+                    "skillSelection": {
+                        "selectedSkillIds": selected_skill_ids.clone(),
+                        "stateWrites": runtime_state_writes.clone(),
+                        "affectsLayers": runtime_affects_layers.clone(),
+                    },
+                    "sceneDecision": {
+                        "sceneType": scene_classification.scene_type.clone(),
+                        "sceneConfidence": scene_classification.confidence,
+                        "matchedFeatures": scene_classification.matched_features.clone(),
+                    },
+                    "postTaskResults": results.clone(),
+                }),
+            );
             self.pipeline_service.emit_event(
                 self.app_handle,
                 AiPipelineEvent {

@@ -1,5 +1,6 @@
 mod adapters;
 mod commands;
+mod domain;
 mod errors;
 mod infra;
 mod services;
@@ -207,6 +208,10 @@ pub fn run() {
             commands::settings_commands::refresh_provider_models,
             commands::settings_commands::get_provider_models,
             commands::settings_commands::get_refresh_logs,
+            commands::settings_commands::list_model_pools,
+            commands::settings_commands::create_model_pool,
+            commands::settings_commands::update_model_pool,
+            commands::settings_commands::delete_model_pool,
             commands::settings_commands::list_task_routes,
             commands::settings_commands::save_task_route,
             commands::settings_commands::delete_task_route,

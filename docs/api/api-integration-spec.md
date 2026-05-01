@@ -2,7 +2,7 @@
 
 ## 1. 文档信息
 - 版本：v1.1
-- 状态：S22（阶段二：晋升策略、审查轨迹、回报机制、场景后置链）
+- 状态：S23（阶段三：模型池管理、扩展状态 taxonomy、场景感知编排闭环）
 - 最后更新：2026-05-02
 - 代码基线：`src/api/*`、`src-tauri/src/commands/*`
 
@@ -21,7 +21,7 @@
 - 统一调用：`src/api/tauriClient.ts`
 - 业务模块：
   - `projectApi`, `chapterApi`, `blueprintApi`, `characterApi`, `worldApi`, `glossaryApi`, `plotApi`, `narrativeApi`
-  - `consistencyApi`, `statsApi`, `settingsApi`, `skillsApi`, `contextApi`, `pipelineApi`, `moduleAiApi`, `exportApi`, `timelineApi`
+  - `consistencyApi`, `statsApi`, `settingsApi`, `modelPoolApi`, `skillsApi`, `contextApi`, `pipelineApi`, `moduleAiApi`, `exportApi`, `timelineApi`
 
 ### 3.1 前端函数清单（按文件）
 - `tauriClient.ts`：`invokeCommand`、`registerUnloadCleanup`、`logUI`
@@ -42,6 +42,7 @@
 - `moduleAiApi.ts`：`runModuleAiTask`
 - `exportApi.ts`：`exportChapter`、`exportBook`
 - `settingsApi.ts`：`listProviders`、`saveProvider`、`deleteProvider`、`testProviderConnection`、`refreshProviderModels`、`getProviderModels`、`getRefreshLogs`、`listTaskRoutes`、`saveTaskRoute`、`deleteTaskRoute`、`listPromotionPolicies`、`savePromotionPolicy`、`checkRemoteRegistry`、`applyRegistryUpdate`、`loadEditorSettings`、`saveEditorSettings`、`saveWritingStyle`、`getWritingStyle`、`saveAiStrategyProfile`、`getAiStrategyProfile`、`saveProjectAiStrategy`、`getProjectAiStrategy`、`initProjectRepository`、`getProjectRepositoryStatus`、`commitProjectSnapshot`、`listProjectHistory`、`getLicenseStatus`、`activateLicense`、`checkAppUpdate`、`installAppUpdate`、`getDeprecatedCommandUsageReport`
+- `modelPoolApi.ts`：`listModelPools`、`createModelPool`、`updateModelPool`、`deleteModelPool`
 - `skillsApi.ts`：`listSkills`、`getSkill`、`getSkillContent`、`createSkill`、`updateSkill`、`deleteSkill`、`importSkillFile`、`resetBuiltinSkill`、`refreshSkills`
 
 ### 3.2 前端关键类型/接口清单（按文件）
@@ -111,6 +112,11 @@
   - 编辑器/策略：`loadEditorSettings -> load_editor_settings`、`saveEditorSettings -> save_editor_settings`、`saveWritingStyle -> save_writing_style`、`getWritingStyle -> get_writing_style`、`saveAiStrategyProfile -> save_ai_strategy_profile`、`getAiStrategyProfile -> get_ai_strategy_profile`、`saveProjectAiStrategy -> save_ai_strategy_profile`、`getProjectAiStrategy -> get_ai_strategy_profile`
   - Git/授权/更新：`initProjectRepository -> init_project_repository`、`getProjectRepositoryStatus -> get_project_repository_status`、`commitProjectSnapshot -> commit_project_snapshot`、`listProjectHistory -> list_project_history`、`getLicenseStatus -> get_license_status`、`activateLicense -> activate_license`、`checkAppUpdate -> check_app_update`、`installAppUpdate -> install_app_update`
   - 兼容桥审计：`getDeprecatedCommandUsageReport -> get_deprecated_command_usage_report`
+- `modelPoolApi.ts`：
+  - `listModelPools -> list_model_pools`
+  - `createModelPool -> create_model_pool`
+  - `updateModelPool -> update_model_pool`
+  - `deleteModelPool -> delete_model_pool`
 - `skillsApi.ts`：`listSkills -> list_skills`、`getSkill -> get_skill`、`getSkillContent -> get_skill_content`、`createSkill -> create_skill`、`updateSkill -> update_skill`、`deleteSkill -> delete_skill`、`importSkillFile -> import_skill_file`、`resetBuiltinSkill -> reset_builtin_skill`、`refreshSkills -> refresh_skills`
 - `pipelineApi.ts`：
   - `runTaskPipeline -> run_ai_task_pipeline`
@@ -217,6 +223,11 @@
   - `save_task_route(route)`
   - `delete_task_route(routeId)`
   - `route` 结构新增可选字段：`modelPoolId`、`fallbackModelPoolId`、`postTasks`
+- 模型池：
+  - `list_model_pools() -> ModelPoolConfig[]`
+  - `create_model_pool(input: { name, poolType, models }) -> ModelPoolConfig`
+  - `update_model_pool(poolId, config) -> ModelPoolConfig`
+  - `delete_model_pool(poolId) -> void`
 - Registry：
   - `check_remote_registry(url)`
   - `apply_registry_update(url)`

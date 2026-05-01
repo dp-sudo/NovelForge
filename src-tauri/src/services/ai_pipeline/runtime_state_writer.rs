@@ -165,9 +165,34 @@ fn build_structured_runtime_state_value(
             "emotionSummary": output_preview,
             "sourceTask": canonical_task,
         }),
+        StoryStateTaxonomy::CharacterAction => serde_json::json!({
+            "subjectId": subject_id,
+            "actionSummary": output_preview,
+            "sourceTask": canonical_task,
+        }),
+        StoryStateTaxonomy::CharacterAppearance => serde_json::json!({
+            "subjectId": subject_id,
+            "appearanceSummary": output_preview,
+            "sourceTask": canonical_task,
+        }),
+        StoryStateTaxonomy::CharacterKnowledge => serde_json::json!({
+            "subjectId": subject_id,
+            "knowledgeBoundary": output_preview,
+            "sourceTask": canonical_task,
+        }),
         StoryStateTaxonomy::SceneEnvironment => serde_json::json!({
             "sceneId": subject_id,
             "environmentSummary": output_preview,
+            "sourceTask": canonical_task,
+        }),
+        StoryStateTaxonomy::SceneDangerLevel => serde_json::json!({
+            "sceneId": subject_id,
+            "dangerLevelSummary": output_preview,
+            "sourceTask": canonical_task,
+        }),
+        StoryStateTaxonomy::SceneSpatialConstraint => serde_json::json!({
+            "sceneId": subject_id,
+            "spatialConstraintSummary": output_preview,
             "sourceTask": canonical_task,
         }),
         StoryStateTaxonomy::RelationshipTemperature => serde_json::json!({
@@ -358,6 +383,75 @@ mod tests {
                 .get("category")
                 .and_then(|value| value.as_str()),
             Some("relationship_temperature")
+        );
+    }
+
+    #[test]
+    fn build_runtime_story_state_input_supports_extended_character_and_scene_taxonomy() {
+        let input = build_pipeline_input(
+            "C:\\tmp\\novelforge",
+            "chapter.draft",
+            Some("chapter-3".to_string()),
+        );
+
+        let action_state = build_runtime_story_state_input(
+            "chapter.draft",
+            &input,
+            "主角翻身闪避后迅速拔刀。",
+            "req-state-action",
+            "formal",
+            &[],
+            "character.action",
+            &[],
+            &[],
+        )
+        .expect("build action state");
+        assert_eq!(
+            action_state
+                .payload_json
+                .get("category")
+                .and_then(|value| value.as_str()),
+            Some("character_action")
+        );
+
+        let knowledge_state = build_runtime_story_state_input(
+            "chapter.draft",
+            &input,
+            "角色已得知密道机关位置，但尚未知晓主谋身份。",
+            "req-state-knowledge",
+            "formal",
+            &[],
+            "character.knowledge",
+            &[],
+            &[],
+        )
+        .expect("build knowledge state");
+        assert_eq!(
+            knowledge_state
+                .payload_json
+                .get("category")
+                .and_then(|value| value.as_str()),
+            Some("character_knowledge")
+        );
+
+        let danger_state = build_runtime_story_state_input(
+            "chapter.draft",
+            &input,
+            "街区进入高危状态，巡逻密度明显提升。",
+            "req-state-danger",
+            "formal",
+            &[],
+            "scene.danger_level",
+            &[],
+            &[],
+        )
+        .expect("build danger state");
+        assert_eq!(
+            danger_state
+                .payload_json
+                .get("category")
+                .and_then(|value| value.as_str()),
+            Some("scene_danger_level")
         );
     }
 }

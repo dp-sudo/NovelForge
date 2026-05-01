@@ -1,9 +1,9 @@
 # NovelForge 运行流程文档（Main / Renderer / API / Service）
 
 ## 1. 文档信息
-- 版本：v1.0
-- 状态：S21（全面文档维护：流程验证 + 命令契约确认）
-- 最后更新：2026-05-01
+- 版本：v1.1
+- 状态：S23（阶段三：模型池管理 + 扩展状态 taxonomy + 场景感知后置链）
+- 最后更新：2026-05-02
 
 ## 2. 运行时角色
 ### 2.1 Main（Tauri + Rust）
@@ -67,6 +67,8 @@
 6. 若报错，前端按 `errorCode + phase` 映射建议动作并展示。
    - 命中冻结区改写冲突时，后端返回 `PIPELINE_FREEZE_CONFLICT` 并阻断执行（不再仅做持久化降级）。
 7. 用户可触发 `cancel_ai_task_pipeline` 取消进行中的任务。
+8. 章节任务在 `route` 阶段会解析并记录池级决策（`modelPoolId` / `fallbackModelPoolId` / resolved provider-model）。
+9. 章节任务在 `done` 前会执行“场景判别 + 后置任务链”，并将结果写入 `ai_pipeline_runs.post_task_results` 与 `ai_pipeline_runs.meta_json`。
 
 #### 4.3.1 章节链路（Task 10 对齐）
 1. 编译 `Continuity Pack`（Constitution/Canon/Lexicon Policy/State/Promise/Window/Recent）。
@@ -79,7 +81,9 @@
    - 技能元数据 `sceneTags/requiredContexts/automationTier`
    - 可选 `route override`
 3. 生成章节计划/草稿/改写等任务输出。
-4. 写后回写 `Canon + State`：正式资产入库并写 `entity_provenance`，章节保存后回写 `story_state`；若激活技能声明了 `stateWrites`，会按项目级 `stateWritePolicy` 追加运行时状态写入，并附带 `skillIds/affectsLayers` 元数据。
+4. 场景感知编排：`SceneClassifier` 基于语义特征（对话占比、动作密度、战斗信号、信息密度）判别 `dialogue/action/exposition/introspection/combat`，并按路由 `postTasks` + 默认映射合并后置任务。
+5. 后置任务执行：`PostTaskExecutor` 执行 `review_continuity` / `extract_state` / `extract_assets`，后置失败不阻断主任务，结果按任务项记录 `ok/error`。
+6. 写后回写 `Canon + State`：正式资产入库并写 `entity_provenance`，章节保存后回写 `story_state`；若激活技能声明了 `stateWrites`，会按项目级 `stateWritePolicy` 追加运行时状态写入（含 `character.action/appearance/knowledge` 与 `scene.danger_level/spatial_constraint`），并附带 `skillIds/affectsLayers` 元数据。
 
 ### 4.4 编辑器 9 按钮任务映射（canonical）
 - `chapter.continue`（续写章节）
@@ -113,10 +117,11 @@
   - 问题4修复：`list_task_routes` 为纯读接口，仅返回 canonical 去重视图。
 - 路由写入：
   - `save_task_route` 做 canonical、字段 trim、重试次数边界控制（1..8）。
-  - 路由对象新增可选池字段：`modelPoolId` / `fallbackModelPoolId`（兼容旧 provider/model 路由）。
+  - 路由对象新增可选字段：`modelPoolId` / `fallbackModelPoolId` / `postTasks`（兼容旧 provider/model 路由）。
 
 ### 4.7 设置、备份与发布能力
 - Settings 前端已拆分：
+  - `ModelPoolPanel`（模型池增删改查、池内模型配置、fallback 池配置）。
   - `ModelRoutingPanel`（任务路由配置）。
   - `DataOpsPanel`（备份恢复、完整性、语义诊断、Git 快照）。
 - 编辑器设置：`load_editor_settings/save_editor_settings`（app DB）。

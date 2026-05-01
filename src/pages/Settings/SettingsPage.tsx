@@ -40,6 +40,13 @@ import {
   type PromotionPolicy,
 } from "../../api/settingsApi";
 import {
+  createModelPool,
+  deleteModelPool,
+  listModelPools,
+  updateModelPool,
+  type CreateModelPoolInput,
+} from "../../api/modelPoolApi";
+import {
   checkProjectIntegrity,
   createBackup,
   listBackups,
@@ -63,9 +70,11 @@ import { SkillsManager } from "../../components/skills/SkillsManager.js";
 import { AiStrategyPanel } from "../../components/settings/AiStrategyPanel";
 import { TASK_ROUTE_OPTIONS, canonicalTaskType } from "../../utils/taskRouting.js";
 import { ModelRoutingPanel } from "./components/ModelRoutingPanel";
+import { ModelPoolPanel } from "./components/ModelPoolPanel";
 import { DataOpsPanel } from "./components/DataOpsPanel";
+import type { ModelPool } from "../../types/modelPool.js";
 
-type TabKey = "model" | "routing" | "skills" | "aiStrategy" | "editor" | "writing" | "backup" | "about";
+type TabKey = "model" | "modelPool" | "routing" | "skills" | "aiStrategy" | "editor" | "writing" | "backup" | "about";
 
 interface VendorFormState {
   config: LlmProviderConfig;
@@ -146,6 +155,9 @@ export function SettingsPage() {
   const [taskRoutes, setTaskRoutes] = useState<Record<string, TaskRouteFormState>>({});
   const [taskRouteMessage, setTaskRouteMessage] = useState<string | null>(null);
   const [taskRoutesLoading, setTaskRoutesLoading] = useState(true);
+  const [modelPools, setModelPools] = useState<ModelPool[]>([]);
+  const [modelPoolsLoading, setModelPoolsLoading] = useState(true);
+  const [modelPoolMessage, setModelPoolMessage] = useState<string | null>(null);
   const [promotionPolicies, setPromotionPolicies] = useState<PromotionPolicy[]>([]);
   const [promotionPolicyMessage, setPromotionPolicyMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -557,6 +569,23 @@ export function SettingsPage() {
     };
   }
 
+  function normalizeModelPool(pool: ModelPool): ModelPool {
+    return {
+      ...pool,
+      id: pool.id.trim(),
+      displayName: pool.displayName.trim(),
+      role: pool.role.trim(),
+      enabled: Boolean(pool.enabled),
+      fallbackPoolId: pool.fallbackPoolId?.trim() || undefined,
+      entries: (pool.entries || [])
+        .map((entry) => ({
+          providerId: entry.providerId.trim(),
+          modelId: entry.modelId.trim(),
+        }))
+        .filter((entry) => entry.providerId && entry.modelId),
+    };
+  }
+
   function pickPrimaryRouteSeed(configs: LlmProviderConfig[]): { providerId: string; modelId: string } | null {
     for (const preset of VENDOR_PRESETS) {
       const existing = configs.find((config) => config.id === preset.id);
@@ -592,10 +621,12 @@ export function SettingsPage() {
     (async () => {
       setLoading(true);
       setTaskRoutesLoading(true);
+      setModelPoolsLoading(true);
       try {
-        const [configs, routes, policies] = await Promise.all([
+        const [configs, routes, pools, policies] = await Promise.all([
           listProviders(),
           listTaskRoutes(),
+          listModelPools().catch(() => [] as ModelPool[]),
           listPromotionPolicies().catch(() => [] as PromotionPolicy[]),
         ]);
         const configuredIds = configs.map((config) => config.id);
@@ -670,10 +701,12 @@ export function SettingsPage() {
 
         setVendors(map);
         setTaskRoutes(routeMap);
+        setModelPools(pools.map(normalizeModelPool));
         setPromotionPolicies(policies.map(normalizePromotionPolicy));
       } finally {
         setLoading(false);
         setTaskRoutesLoading(false);
+        setModelPoolsLoading(false);
       }
     })();
     (async () => {
@@ -944,8 +977,13 @@ export function SettingsPage() {
     const state = taskRoutes[taskType];
     if (!state) return;
     const route = state.route;
+    const modelPoolId = route.modelPoolId?.trim() || "";
+    const hasPoolRouting = Boolean(modelPoolId);
+    const selectedPool = hasPoolRouting
+      ? modelPools.find((pool) => pool.id === modelPoolId || pool.role === modelPoolId)
+      : null;
 
-    if (!route.providerId.trim()) {
+    if (!hasPoolRouting && !route.providerId.trim()) {
       setTaskRoutes((prev) => ({
         ...prev,
         [taskType]: { ...prev[taskType], error: "请选择供应商" },
@@ -953,12 +991,29 @@ export function SettingsPage() {
       return;
     }
 
-    if (!route.modelId.trim()) {
+    if (!hasPoolRouting && !route.modelId.trim()) {
       setTaskRoutes((prev) => ({
         ...prev,
         [taskType]: { ...prev[taskType], error: "请输入模型ID" },
       }));
       return;
+    }
+
+    if (hasPoolRouting) {
+      if (!selectedPool) {
+        setTaskRoutes((prev) => ({
+          ...prev,
+          [taskType]: { ...prev[taskType], error: "主模型池不存在，请重新选择" },
+        }));
+        return;
+      }
+      if (!selectedPool.entries?.length) {
+        setTaskRoutes((prev) => ({
+          ...prev,
+          [taskType]: { ...prev[taskType], error: "主模型池未配置模型，请先在模型池页面添加" },
+        }));
+        return;
+      }
     }
 
     setTaskRoutes((prev) => ({
@@ -967,11 +1022,23 @@ export function SettingsPage() {
     }));
 
     try {
+      const resolvedProviderId = hasPoolRouting
+        ? selectedPool?.entries[0]?.providerId || route.providerId
+        : route.providerId;
+      const resolvedModelId = hasPoolRouting
+        ? selectedPool?.entries[0]?.modelId || route.modelId
+        : route.modelId;
       const payload: TaskRoute = {
         ...route,
         id: route.id || "",
+        providerId: resolvedProviderId.trim(),
+        modelId: resolvedModelId.trim(),
         fallbackProviderId: route.fallbackProviderId?.trim() || undefined,
         fallbackModelId: route.fallbackModelId?.trim() || undefined,
+        modelPoolId: hasPoolRouting ? modelPoolId : undefined,
+        fallbackModelPoolId: hasPoolRouting
+          ? route.fallbackModelPoolId?.trim() || undefined
+          : undefined,
         maxRetries: Math.max(1, Number(route.maxRetries) || 1),
       };
       const saved = await saveTaskRoute(payload);
@@ -1023,6 +1090,34 @@ export function SettingsPage() {
     }
   }
 
+  async function refreshModelPools(message?: string) {
+    setModelPoolsLoading(true);
+    try {
+      const pools = await listModelPools();
+      setModelPools(pools.map(normalizeModelPool));
+      if (message) {
+        setModelPoolMessage(message);
+      }
+    } finally {
+      setModelPoolsLoading(false);
+    }
+  }
+
+  async function handleCreateModelPool(input: CreateModelPoolInput) {
+    const created = await createModelPool(input);
+    await refreshModelPools(`已创建模型池：${created.displayName}`);
+  }
+
+  async function handleUpdateModelPool(poolId: string, config: ModelPool) {
+    const updated = await updateModelPool(poolId, config);
+    await refreshModelPools(`已保存模型池：${updated.displayName}`);
+  }
+
+  async function handleDeleteModelPool(poolId: string) {
+    await deleteModelPool(poolId);
+    await refreshModelPools("模型池已删除");
+  }
+
   function updatePromotionPolicy(policyId: string, patch: Partial<PromotionPolicy>) {
     setPromotionPolicies((prev) =>
       prev.map((item) => (item.id === policyId ? { ...item, ...patch } : item)),
@@ -1060,6 +1155,7 @@ export function SettingsPage() {
 
   const tabs: { key: TabKey; label: string }[] = [
     { key: "model", label: "模型配置" },
+    { key: "modelPool", label: "模型池" },
     { key: "routing", label: "任务路由" },
     { key: "skills", label: "技能管理" },
     { key: "aiStrategy", label: "AI 策略" },
@@ -1074,6 +1170,12 @@ export function SettingsPage() {
     .map((preset) => preset.id)
     .filter((providerId) => configuredProviderIdSet.has(providerId));
   const hasConfiguredProvidersForRouting = providerIdsForRouting.length > 0;
+  const enabledModelPools = modelPools.filter((pool) => pool.enabled);
+  const modelPoolOptions = enabledModelPools.map((pool) => ({
+    value: pool.id,
+    label: `${pool.displayName} (${pool.role})`,
+  }));
+  const hasConfiguredModelPools = modelPoolOptions.length > 0;
 
   function toProviderLabel(providerId: string): string {
     const preset = VENDOR_PRESETS.find((item) => item.id === providerId);
@@ -1096,6 +1198,18 @@ export function SettingsPage() {
       ? [currentModelId, ...modelIds]
       : modelIds;
     return merged.map((modelId) => ({ value: modelId, label: modelId }));
+  }
+
+  function buildFallbackPoolOptions(currentPoolId: string): { value: string; label: string }[] {
+    return [
+      { value: "", label: "不使用兜底池" },
+      ...enabledModelPools
+        .filter((pool) => pool.id !== currentPoolId)
+        .map((pool) => ({
+          value: pool.id,
+          label: `${pool.displayName} (${pool.role})`,
+        })),
+    ];
   }
 
   return (
@@ -1309,13 +1423,32 @@ export function SettingsPage() {
         </div>
       )}
 
+      {activeTab === "modelPool" && (
+        <ModelPoolPanel
+          modelPoolsLoading={modelPoolsLoading}
+          modelPoolMessage={modelPoolMessage}
+          modelPools={modelPools}
+          providerOptions={providerIdsForRouting.map((providerId) => ({
+            value: providerId,
+            label: toProviderLabel(providerId),
+          }))}
+          buildModelOptions={buildRouteModelOptions}
+          onCreateModelPool={handleCreateModelPool}
+          onUpdateModelPool={handleUpdateModelPool}
+          onDeleteModelPool={handleDeleteModelPool}
+        />
+      )}
+
       {activeTab === "routing" && (
         <div className="space-y-4">
           <ModelRoutingPanel
             hasConfiguredProvidersForRouting={hasConfiguredProvidersForRouting}
+            hasConfiguredModelPools={hasConfiguredModelPools}
             taskRouteMessage={taskRouteMessage}
             taskRoutesLoading={taskRoutesLoading}
             taskRoutes={taskRoutes}
+            modelPoolOptions={modelPoolOptions}
+            buildFallbackPoolOptions={buildFallbackPoolOptions}
             buildRouteProviderOptions={buildRouteProviderOptions}
             buildRouteModelOptions={buildRouteModelOptions}
             onTaskRouteProviderChange={handleTaskRouteProviderChange}

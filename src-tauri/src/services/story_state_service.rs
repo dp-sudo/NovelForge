@@ -6,6 +6,7 @@ use serde_json::{json, Value};
 use uuid::Uuid;
 
 use crate::errors::AppErrorDto;
+use crate::domain::story_state::StateCategory;
 use crate::infra::database::open_database;
 use crate::infra::time::now_iso;
 use crate::services::project_service::get_project_id;
@@ -13,25 +14,7 @@ use crate::services::project_service::get_project_id;
 const ACTIVE_STATUS: &str = "active";
 const SUPERSEDED_STATUS: &str = "superseded";
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum StoryStateTaxonomy {
-    Emotion,
-    SceneEnvironment,
-    RelationshipTemperature,
-    Generic,
-}
-
-impl StoryStateTaxonomy {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Emotion => "emotion",
-            Self::SceneEnvironment => "scene_environment",
-            Self::RelationshipTemperature => "relationship_temperature",
-            Self::Generic => "generic",
-        }
-    }
-}
+pub type StoryStateTaxonomy = StateCategory;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -64,12 +47,20 @@ pub struct StoryStateService;
 
 impl StoryStateService {
     pub fn classify_taxonomy(subject_type: &str, state_kind: &str) -> StoryStateTaxonomy {
-        match (
-            subject_type.trim().to_ascii_lowercase().as_str(),
-            state_kind.trim().to_ascii_lowercase().as_str(),
-        ) {
+        let subject = subject_type.trim().to_ascii_lowercase();
+        let state = state_kind.trim().to_ascii_lowercase();
+        match (subject.as_str(), state.as_str()) {
             ("character", "emotion") => StoryStateTaxonomy::Emotion,
+            ("character", "action") => StoryStateTaxonomy::CharacterAction,
+            ("character", "appearance") => StoryStateTaxonomy::CharacterAppearance,
+            ("character", "knowledge") => StoryStateTaxonomy::CharacterKnowledge,
             ("scene", "environment") => StoryStateTaxonomy::SceneEnvironment,
+            ("scene", "danger_level")
+            | ("scene", "danger-level")
+            | ("scene", "dangerlevel") => StoryStateTaxonomy::SceneDangerLevel,
+            ("scene", "spatial_constraint")
+            | ("scene", "spatial-constraint")
+            | ("scene", "spatialconstraint") => StoryStateTaxonomy::SceneSpatialConstraint,
             ("relationship", "temperature") => StoryStateTaxonomy::RelationshipTemperature,
             _ => StoryStateTaxonomy::Generic,
         }
@@ -494,6 +485,30 @@ mod tests {
             Some(StoryStateTaxonomy::Generic.as_str())
         );
         assert!(normalized.get("value").is_some());
+    }
+
+    #[test]
+    fn story_state_taxonomy_covers_extended_categories() {
+        assert_eq!(
+            StoryStateService::classify_taxonomy("character", "action").as_str(),
+            StoryStateTaxonomy::CharacterAction.as_str()
+        );
+        assert_eq!(
+            StoryStateService::classify_taxonomy("character", "appearance").as_str(),
+            StoryStateTaxonomy::CharacterAppearance.as_str()
+        );
+        assert_eq!(
+            StoryStateService::classify_taxonomy("character", "knowledge").as_str(),
+            StoryStateTaxonomy::CharacterKnowledge.as_str()
+        );
+        assert_eq!(
+            StoryStateService::classify_taxonomy("scene", "danger_level").as_str(),
+            StoryStateTaxonomy::SceneDangerLevel.as_str()
+        );
+        assert_eq!(
+            StoryStateService::classify_taxonomy("scene", "spatial_constraint").as_str(),
+            StoryStateTaxonomy::SceneSpatialConstraint.as_str()
+        );
     }
 
     #[test]

@@ -212,6 +212,42 @@ export function summarizeStateDeltaForFeedback(
         const sceneType = typeof item.payload.sceneType === "string" ? item.payload.sceneType : "场景";
         return `场景状态更新：${sceneLabel}（${sceneType}）`;
       }
+      if (item.subjectType === "character" && item.stateKind === "action") {
+        const summary = typeof item.payload.actionSummary === "string"
+          ? item.payload.actionSummary
+          : typeof item.payload.summary === "string"
+            ? item.payload.summary
+            : "动作变化";
+        return `角色动作更新：${summary}`;
+      }
+      if (item.subjectType === "character" && item.stateKind === "appearance") {
+        const summary = typeof item.payload.appearanceSummary === "string"
+          ? item.payload.appearanceSummary
+          : typeof item.payload.summary === "string"
+            ? item.payload.summary
+            : "外观变化";
+        return `角色外观更新：${summary}`;
+      }
+      if (item.subjectType === "character" && item.stateKind === "knowledge") {
+        const summary = typeof item.payload.knowledgeBoundary === "string"
+          ? item.payload.knowledgeBoundary
+          : typeof item.payload.summary === "string"
+            ? item.payload.summary
+            : "信息边界变化";
+        return `角色知情边界更新：${summary}`;
+      }
+      if (item.subjectType === "scene" && item.stateKind === "danger_level") {
+        const summary = typeof item.payload.dangerLevelSummary === "string"
+          ? item.payload.dangerLevelSummary
+          : "危险等级变化";
+        return `场景危险等级更新：${summary}`;
+      }
+      if (item.subjectType === "scene" && item.stateKind === "spatial_constraint") {
+        const summary = typeof item.payload.spatialConstraintSummary === "string"
+          ? item.payload.spatialConstraintSummary
+          : "空间约束变化";
+        return `场景空间约束更新：${summary}`;
+      }
       return `${item.subjectType}:${item.subjectId} -> ${item.stateKind}`;
     });
 }

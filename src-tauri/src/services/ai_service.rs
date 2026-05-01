@@ -281,6 +281,87 @@ impl AiService {
         attempts
     }
 
+    #[allow(dead_code)]
+    pub fn list_model_pools() -> Result<Vec<ModelPoolRecord>, AppErrorDto> {
+        let conn = app_database::open_or_create()?;
+        app_database::load_model_pools(&conn)
+    }
+
+    #[allow(dead_code)]
+    pub fn create_model_pool(
+        name: &str,
+        pool_type: &str,
+        models: Vec<ModelPoolEntry>,
+    ) -> Result<ModelPoolRecord, AppErrorDto> {
+        let normalized_role = pool_type.trim().to_ascii_lowercase();
+        if normalized_role.is_empty() {
+            return Err(AppErrorDto::new("INVALID_INPUT", "模型池类型不能为空", true));
+        }
+        let conn = app_database::open_or_create()?;
+        let existing = app_database::load_model_pools(&conn)?
+            .into_iter()
+            .find(|pool| pool.role.eq_ignore_ascii_case(normalized_role.as_str()));
+        let id = existing
+            .as_ref()
+            .map(|pool| pool.id.clone())
+            .unwrap_or_else(|| normalized_role.clone());
+        let record = ModelPoolRecord {
+            id,
+            display_name: name.trim().to_string(),
+            role: normalized_role.clone(),
+            enabled: true,
+            entries: models,
+            fallback_pool_id: existing.and_then(|pool| pool.fallback_pool_id),
+            created_at: None,
+            updated_at: None,
+        };
+        let pool_id = record.id.clone();
+        let saved = Self::update_model_pool(&pool_id, record)?;
+        Ok(saved)
+    }
+
+    #[allow(dead_code)]
+    pub fn update_model_pool(
+        pool_id: &str,
+        config: ModelPoolRecord,
+    ) -> Result<ModelPoolRecord, AppErrorDto> {
+        let id = pool_id.trim().to_string();
+        if id.is_empty() {
+            return Err(AppErrorDto::new("INVALID_INPUT", "模型池ID不能为空", true));
+        }
+        let conn = app_database::open_or_create()?;
+        let now = crate::infra::time::now_iso();
+        let mut record = config;
+        record.id = id.clone();
+        record.role = record.role.trim().to_ascii_lowercase();
+        record.display_name = record.display_name.trim().to_string();
+        if record.role.is_empty() {
+            return Err(AppErrorDto::new("INVALID_INPUT", "模型池类型不能为空", true));
+        }
+        if record.display_name.is_empty() {
+            return Err(AppErrorDto::new("INVALID_INPUT", "模型池名称不能为空", true));
+        }
+        record.fallback_pool_id = record
+            .fallback_pool_id
+            .as_ref()
+            .map(|value| value.trim().to_ascii_lowercase())
+            .filter(|value| !value.is_empty() && value != &id);
+        app_database::upsert_model_pool(&conn, &record, &now)?;
+        let saved = app_database::load_model_pools(&conn)?
+            .into_iter()
+            .find(|pool| pool.id == id)
+            .ok_or_else(|| {
+                AppErrorDto::new("MODEL_POOL_NOT_FOUND", "模型池保存后读取失败", false)
+            })?;
+        Ok(saved)
+    }
+
+    #[allow(dead_code)]
+    pub fn delete_model_pool(pool_id: &str) -> Result<(), AppErrorDto> {
+        let conn = app_database::open_or_create()?;
+        app_database::delete_model_pool(&conn, pool_id)
+    }
+
     /// Register a provider adapter at runtime.
     pub async fn register_provider(&self, config: ProviderConfig) {
         let id = config.id.clone();
