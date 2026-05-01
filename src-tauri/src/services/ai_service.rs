@@ -9,7 +9,7 @@ use crate::adapters::{
 };
 use crate::errors::AppErrorDto;
 use crate::infra::{app_database, credential_manager};
-use crate::services::skill_registry::SkillRegistry;
+use crate::services::skill_registry::{RouteOverride, SkillRegistry};
 use crate::services::task_routing;
 
 const PIPELINE_STREAM_ERROR_PREFIX: &str = "__NF_PIPELINE_ERROR__:";
@@ -280,24 +280,75 @@ impl AiService {
         ))
     }
 
+    #[allow(dead_code)]
     pub fn inspect_task_route_with_skill_registry(
         task_type: &str,
         skill_registry: &SkillRegistry,
     ) -> Result<TaskRouteResolution, AppErrorDto> {
         let canonical_task_type = task_routing::canonical_task_type(task_type).into_owned();
-        let req = UnifiedGenerateRequest {
-            model: "default".to_string(),
-            task_type: Some(canonical_task_type.clone()),
-            ..Default::default()
-        };
-        let (provider_id, model_id, route) =
-            Self::resolve_with_skill_override(&req, skill_registry)?;
+        let selected = skill_registry.select_skills_for_task(&canonical_task_type)?;
+        let (provider_id, model_id, route) = Self::resolve_request_target_with_route_override(
+            &canonical_task_type,
+            selected.route_override.as_ref(),
+        )?;
         Ok(Self::build_route_resolution(
             canonical_task_type,
             provider_id,
             model_id,
             route,
         ))
+    }
+
+    pub fn inspect_task_route_with_override(
+        task_type: &str,
+        route_override: Option<&RouteOverride>,
+    ) -> Result<TaskRouteResolution, AppErrorDto> {
+        let canonical_task_type = task_routing::canonical_task_type(task_type).into_owned();
+        let (provider_id, model_id, route) =
+            Self::resolve_request_target_with_route_override(&canonical_task_type, route_override)?;
+        Ok(Self::build_route_resolution(
+            canonical_task_type,
+            provider_id,
+            model_id,
+            route,
+        ))
+    }
+
+    fn resolve_request_target_with_route_override(
+        task_type: &str,
+        route_override: Option<&RouteOverride>,
+    ) -> Result<(String, String, Option<TaskRoute>), AppErrorDto> {
+        if let Some(route_override) = route_override {
+            let provider = route_override.provider.trim().to_string();
+            let model = route_override.model.trim().to_string();
+            if !provider.is_empty() {
+                let resolved_model = if model.is_empty() {
+                    "default".to_string()
+                } else {
+                    model.clone()
+                };
+                let route = Self::build_override_route(task_type, &provider, &resolved_model);
+                return Ok((provider, resolved_model, Some(route)));
+            }
+            if !model.is_empty() {
+                let req = UnifiedGenerateRequest {
+                    model: "default".to_string(),
+                    task_type: Some(task_type.to_string()),
+                    ..Default::default()
+                };
+                let (default_provider, _default_model, _default_route) =
+                    Self::resolve_request_target(&req)?;
+                let route = Self::build_override_route(task_type, &default_provider, &model);
+                return Ok((default_provider, model, Some(route)));
+            }
+        }
+
+        let req = UnifiedGenerateRequest {
+            model: "default".to_string(),
+            task_type: Some(task_type.to_string()),
+            ..Default::default()
+        };
+        Self::resolve_request_target(&req)
     }
 
     /// Resolve target with skill taskRoute override support.
@@ -309,38 +360,19 @@ impl AiService {
     ) -> Result<(String, String, Option<TaskRoute>), AppErrorDto> {
         if let Some(task_type) = req.task_type.as_deref() {
             let selected = skill_registry.select_skills_for_task(task_type)?;
-            if let Some(route_override) = selected.route_override {
-                let provider = route_override.provider.trim().to_string();
-                let model = route_override.model.trim().to_string();
-                if !provider.is_empty() {
-                    let resolved_model = if model.is_empty() {
-                        "default".to_string()
-                    } else {
-                        model.clone()
-                    };
-                    log::info!(
-                        "[SKILL_ROUTE_OVERRIDE] task={} provider={} model={} reason={}",
-                        task_type,
-                        provider,
-                        resolved_model,
-                        route_override.reason
-                    );
-                    let route = Self::build_override_route(task_type, &provider, &resolved_model);
-                    return Ok((provider, resolved_model, Some(route)));
-                }
-                if !model.is_empty() {
-                    let (default_provider, _default_model, _default_route) =
-                        Self::resolve_request_target(req)?;
-                    log::info!(
-                        "[SKILL_ROUTE_OVERRIDE] task={} provider={} model={} reason={}",
-                        task_type,
-                        default_provider,
-                        model,
-                        route_override.reason
-                    );
-                    let route = Self::build_override_route(task_type, &default_provider, &model);
-                    return Ok((default_provider, model, Some(route)));
-                }
+            if let Some(route_override) = selected.route_override.as_ref() {
+                let (provider, model, route) = Self::resolve_request_target_with_route_override(
+                    task_type,
+                    Some(route_override),
+                )?;
+                log::info!(
+                    "[SKILL_ROUTE_OVERRIDE] task={} provider={} model={} reason={}",
+                    task_type,
+                    provider,
+                    model,
+                    route_override.reason
+                );
+                return Ok((provider, model, route));
             }
         }
         Self::resolve_request_target(req)

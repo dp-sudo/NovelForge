@@ -55,15 +55,18 @@ test("技能契约：技能管理支持按 skillClass 展示和筛选", async ()
 
 test("技能运行期契约：orchestrator 传入 registry 并启用 route override 诊断", async () => {
   const orchestrator = await readRepoFile("src-tauri/src/services/ai_pipeline/orchestrator.rs");
-  assert.match(orchestrator, /inspect_task_route_with_skill_registry/);
-  assert.match(orchestrator, /select_skills_for_task/);
-  assert.match(orchestrator, /stream_generate_for_pipeline\(req, Some\(self\.skill_registry\)\)/);
+  assert.match(orchestrator, /select_skills_for_task_with_context/);
+  assert.match(orchestrator, /inspect_task_route_with_override/);
+  assert.match(orchestrator, /activeBundles/);
+  assert.match(orchestrator, /sceneTags/);
+  assert.match(orchestrator, /stream_generate_for_pipeline\(req, None\)/);
 });
 
 test("技能运行期契约：ai_service 消费选择器 route_override", async () => {
   const aiService = await readRepoFile("src-tauri/src/services/ai_service.rs");
   assert.match(aiService, /select_skills_for_task/);
-  assert.match(aiService, /inspect_task_route_with_skill_registry/);
+  assert.match(aiService, /inspect_task_route_with_override/);
+  assert.match(aiService, /resolve_request_target_with_route_override/);
   assert.match(aiService, /SKILL_ROUTE_OVERRIDE/);
   assert.match(aiService, /stream_generate_for_pipeline_uses_skill_route_override/);
 });

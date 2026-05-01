@@ -39,7 +39,8 @@ test("Continuity Pack 契约：编译器结构与深度策略存在", async () =
 test("Continuity Pack 契约：Orchestrator 在 Prompt 前编译并传入 Resolver", async () => {
   const orchestrator = await readRepoFile("src-tauri/src/services/ai_pipeline/orchestrator.rs");
   assert.match(orchestrator, /ContinuityPackCompiler/);
-  assert.match(orchestrator, /resolve_continuity_pack_depth/);
+  assert.match(orchestrator, /load_ai_strategy_profile/);
+  assert.match(orchestrator, /continuity_pack_depth/);
   assert.match(orchestrator, /continuity_pack = ContinuityPackCompiler(?:::default\(\))?\.compile/);
   assert.match(orchestrator, /phase: PHASE_PROMPT/);
   assert.match(orchestrator, /&continuity_pack/);

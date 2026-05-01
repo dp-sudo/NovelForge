@@ -3,7 +3,7 @@
 ## 1. 文档信息
 - 版本：v0.8
 - 状态：S20（AI 生产系统闭环：策略权威源 + State Ledger + Continuity Pack + 技能运行期 + 滚动蓝图）
-- 最后更新：2026-04-30
+- 最后更新：2026-05-01
 - 代码基线：`src/` + `src-tauri/src/`
 
 ## 2. 架构目标
@@ -16,7 +16,7 @@
 ### 2.1 AI 生产系统对象（运行期）
 - `Story Constitution`：`blueprint_steps` + `projects.ai_strategy_profile`（目标、约束、默认策略）。
 - `Canon Registry`：正式资产表（`characters/world_rules/plot_nodes/glossary_terms/narrative_obligations/chapters`）。
-- `State Ledger`：`story_state`（章节写后状态增量，如窗口进度）。
+- `State Ledger`：`story_state`（章节写后状态增量，如窗口进度、结构化确认状态、技能运行时状态写入）。
 - `Execution Workspace`：`ai_pipeline_runs`、`structured_draft_*`、`ai_requests` 与编辑器执行态。
 - `Review Trail`：`entity_provenance` + 派生审阅结果（timeline/relationships review）。
 
@@ -137,16 +137,18 @@
 - 优先读取技能 Markdown 模板（`SkillRegistry`）。
 - 未命中模板时回退 `PromptBuilder`。
 - 章节任务在 `prompt` 前会先编译 `ContinuityPack`（Constitution/Canon/Lexicon Policy/State/Promise/Window/Recent）。
-- `projects.writing_style` 与已选技能栈（workflow/capability/policy/review）会共同注入提示词。
+- `projects.writing_style` 与已选技能栈（workflow/capability/extractor/policy/review）会共同注入提示词。
 
 ### 6.4 运行期技能消费与路由覆盖
-- `orchestrator` 在 `route` 阶段执行 `select_skills_for_task`。
-- `ai_service.stream_generate_for_pipeline` 消费 `route_override`，仅覆盖本次请求 provider/model，不改项目配置。
-- `ai:pipeline:event.meta` 回传所选技能数量与 route override 元信息，便于审计。
+- `orchestrator` 在 `route` 阶段构建运行时技能选择上下文，并统一执行 `select_skills_for_task_with_context`。
+- 运行时技能选择上下文包含：`alwaysOnPolicySkills`、`defaultCapabilityBundles`、当前 `automationTier`、可用上下文键、推断出的场景标签。
+- `orchestrator` 先解析本次请求最终 provider/model，再把显式路由写入生成请求，避免 `route` 与 `generate` 阶段重复按旧逻辑二次选技能。
+- `ai:pipeline:event.meta` 回传所选技能数量、激活 bundle、推断 scene tag 与 route override 元信息，便于审计。
 
 ### 6.5 写后回写与来源轨迹
 - `save_chapter_content` 写正文后调用 `StoryStateService.record_window_progress` 回写窗口状态。
 - `task_handlers.persist_task_output` 在正式资产写入后统一记录 `entity_provenance`。
+- 若已激活技能声明 `stateWrites`，`task_handlers` 会按项目级 `stateWritePolicy` 追加运行时 `story_state` 记录。
 - 手动 CRUD（character/world/plot/glossary/narrative）创建时写入 `source_kind = "user_input"`。
 
 ### 6.6 编辑器结构化抽取闭环

@@ -20,8 +20,26 @@ use crate::services::{
     glossary_service::GlossaryService,
     narrative_service::NarrativeService,
     plot_service::{CreatePlotNodeInput, PlotService},
+    story_state_service::{StoryStateInput, StoryStateService},
     world_service::{CreateWorldRuleInput, WorldService},
 };
+
+#[derive(Clone, Copy)]
+pub struct RuntimeStateWriteOptions<'a> {
+    pub state_writes: &'a [String],
+    pub state_write_policy: &'a str,
+    pub active_skill_ids: &'a [String],
+}
+
+impl<'a> Default for RuntimeStateWriteOptions<'a> {
+    fn default() -> Self {
+        Self {
+            state_writes: &[],
+            state_write_policy: "manual_only",
+            active_skill_ids: &[],
+        }
+    }
+}
 
 #[derive(Clone, Default)]
 pub struct TaskHandlers;
@@ -90,7 +108,24 @@ fn open_pipeline_project_context(project_root: &str) -> Result<(Connection, Stri
     Ok((conn, project_id))
 }
 
+fn preview_text(raw: &str, limit: usize) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    let mut preview = String::new();
+    for (index, ch) in trimmed.chars().enumerate() {
+        if index >= limit {
+            preview.push_str("...");
+            break;
+        }
+        preview.push(ch);
+    }
+    preview
+}
+
 impl TaskHandlers {
+    #[allow(dead_code)]
     pub fn persist_task_output(
         &self,
         canonical_task: &str,
@@ -98,6 +133,26 @@ impl TaskHandlers {
         input: &RunAiTaskPipelineInput,
         normalized_output: &str,
         request_id: &str,
+    ) -> Result<Vec<PersistedRecord>, AppErrorDto> {
+        self.persist_task_output_with_runtime_state(
+            canonical_task,
+            project_root,
+            input,
+            normalized_output,
+            request_id,
+            RuntimeStateWriteOptions::default(),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn persist_task_output_with_runtime_state(
+        &self,
+        canonical_task: &str,
+        project_root: &str,
+        input: &RunAiTaskPipelineInput,
+        normalized_output: &str,
+        request_id: &str,
+        runtime_options: RuntimeStateWriteOptions<'_>,
     ) -> Result<Vec<PersistedRecord>, AppErrorDto> {
         let mut records = Vec::new();
         match canonical_task {
@@ -250,7 +305,179 @@ impl TaskHandlers {
             request_id,
             &records,
         )?;
+        self.record_runtime_story_states(
+            canonical_task,
+            project_root,
+            input,
+            normalized_output,
+            request_id,
+            &records,
+            runtime_options,
+        )?;
         Ok(records)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn record_runtime_story_states(
+        &self,
+        canonical_task: &str,
+        project_root: &str,
+        input: &RunAiTaskPipelineInput,
+        normalized_output: &str,
+        request_id: &str,
+        records: &[PersistedRecord],
+        runtime_options: RuntimeStateWriteOptions<'_>,
+    ) -> Result<(), AppErrorDto> {
+        if runtime_options.state_writes.is_empty()
+            || !Self::should_persist_runtime_state_writes(
+                canonical_task,
+                input,
+                runtime_options.state_write_policy,
+            )
+        {
+            return Ok(());
+        }
+
+        let mut conn = open_project_database(project_root)?;
+        let project_id = get_project_id(&conn)?;
+        let now = now_iso();
+        let tx = conn.transaction().map_err(project_db_open_error)?;
+
+        for state_write_key in runtime_options.state_writes {
+            let Some(state_input) = Self::build_runtime_story_state_input(
+                canonical_task,
+                input,
+                normalized_output,
+                request_id,
+                records,
+                state_write_key,
+                runtime_options.active_skill_ids,
+            ) else {
+                continue;
+            };
+            StoryStateService::upsert_state_in_transaction(&tx, &project_id, state_input, &now)?;
+        }
+
+        tx.commit().map_err(project_db_open_error)?;
+        Ok(())
+    }
+
+    fn should_persist_runtime_state_writes(
+        canonical_task: &str,
+        input: &RunAiTaskPipelineInput,
+        state_write_policy: &str,
+    ) -> bool {
+        match state_write_policy.trim().to_ascii_lowercase().as_str() {
+            "manual_only" => {
+                Self::is_promotion_action(input.ui_action.as_deref())
+                    || input
+                        .automation_tier
+                        .as_deref()
+                        .map(str::trim)
+                        .is_some_and(|tier| tier.eq_ignore_ascii_case("confirm"))
+            }
+            "chapter_confirmed" => {
+                input
+                    .chapter_id
+                    .as_deref()
+                    .map(str::trim)
+                    .is_some_and(|chapter_id| !chapter_id.is_empty())
+                    || canonical_task.starts_with("chapter.")
+                    || Self::is_promotion_action(input.ui_action.as_deref())
+            }
+            _ => false,
+        }
+    }
+
+    fn build_runtime_story_state_input(
+        canonical_task: &str,
+        input: &RunAiTaskPipelineInput,
+        normalized_output: &str,
+        request_id: &str,
+        records: &[PersistedRecord],
+        state_write_key: &str,
+        active_skill_ids: &[String],
+    ) -> Option<StoryStateInput> {
+        let normalized_key = state_write_key.trim();
+        if normalized_key.is_empty() {
+            return None;
+        }
+
+        let (subject_type, state_kind) = normalized_key.split_once('.')?;
+        let subject_type = subject_type.trim().to_ascii_lowercase();
+        let state_kind = state_kind.trim().to_ascii_lowercase();
+        if subject_type.is_empty() || state_kind.is_empty() {
+            return None;
+        }
+
+        let subject_id =
+            Self::resolve_runtime_state_subject_id(&subject_type, input, records)?.to_string();
+        let scope = if input
+            .chapter_id
+            .as_deref()
+            .map(str::trim)
+            .is_some_and(|chapter_id| !chapter_id.is_empty())
+        {
+            "chapter".to_string()
+        } else {
+            "global".to_string()
+        };
+        let record_refs = records
+            .iter()
+            .map(|record| {
+                serde_json::json!({
+                    "entityType": record.entity_type,
+                    "entityId": record.entity_id,
+                    "action": record.action,
+                })
+            })
+            .collect::<Vec<_>>();
+
+        Some(StoryStateInput {
+            subject_type,
+            subject_id,
+            scope,
+            state_kind,
+            payload_json: serde_json::json!({
+                "stateWriteKey": normalized_key,
+                "taskType": canonical_task,
+                "requestId": request_id,
+                "uiAction": input.ui_action.as_deref().map(str::trim).filter(|value| !value.is_empty()),
+                "automationTier": input.automation_tier.as_deref().map(str::trim).filter(|value| !value.is_empty()),
+                "chapterId": input.chapter_id.as_deref().map(str::trim).filter(|value| !value.is_empty()),
+                "skillIds": active_skill_ids,
+                "recordRefs": record_refs,
+                "outputPreview": preview_text(normalized_output, 240),
+            }),
+            source_chapter_id: input.chapter_id.clone(),
+        })
+    }
+
+    fn resolve_runtime_state_subject_id<'a>(
+        subject_type: &str,
+        input: &'a RunAiTaskPipelineInput,
+        records: &'a [PersistedRecord],
+    ) -> Option<&'a str> {
+        match subject_type {
+            "chapter" => records
+                .iter()
+                .find(|record| record.entity_type == "chapter")
+                .map(|record| record.entity_id.as_str())
+                .or(input.chapter_id.as_deref()),
+            "character" => records
+                .iter()
+                .find(|record| record.entity_type == "character")
+                .map(|record| record.entity_id.as_str())
+                .or_else(|| input.chapter_id.as_deref().map(|_| "current_character")),
+            "scene" => Some("current_scene"),
+            "relationship" => records
+                .iter()
+                .find(|record| record.entity_type == "character_relationship_batch")
+                .map(|record| record.entity_id.as_str())
+                .or_else(|| input.chapter_id.as_deref().map(|_| "current_relationship")),
+            "window" => Some("current_window"),
+            _ => Some("current_state"),
+        }
     }
 
     fn record_entity_provenance_for_records(
@@ -1957,7 +2184,7 @@ mod tests {
 
     use rusqlite::params;
 
-    use super::TaskHandlers;
+    use super::{RuntimeStateWriteOptions, TaskHandlers};
     use crate::infra::database::open_database;
     use crate::services::ai_pipeline_service::RunAiTaskPipelineInput;
     use crate::services::chapter_service::{ChapterInput, ChapterService};
@@ -2634,6 +2861,88 @@ mod tests {
             .expect("list relationships should succeed");
         assert_eq!(relations.len(), 1);
         assert_eq!(relations[0].relationship_type, "守护与试探");
+
+        remove_temp_workspace(&workspace);
+    }
+
+    #[test]
+    fn persist_task_output_with_runtime_state_writes_records_story_state_entries() {
+        let workspace = create_temp_workspace();
+        let project_service = ProjectService;
+        let chapter_service = ChapterService;
+        let project = project_service
+            .create_project(CreateProjectInput {
+                name: "技能状态写入测试".to_string(),
+                author: None,
+                genre: "玄幻".to_string(),
+                target_words: None,
+                save_directory: workspace.to_string_lossy().to_string(),
+            })
+            .expect("project should be created");
+
+        let chapter = chapter_service
+            .create_chapter(
+                &project.project_root,
+                ChapterInput {
+                    title: "第一章".to_string(),
+                    summary: Some("旧摘要".to_string()),
+                    target_words: Some(1200),
+                    status: Some("drafting".to_string()),
+                },
+            )
+            .expect("chapter should be created");
+
+        let mut input = build_pipeline_input(
+            &project.project_root,
+            "chapter.plan",
+            Some(chapter.id.clone()),
+        );
+        input.automation_tier = Some("confirm".to_string());
+        let output = r#"
+        {
+          "chapterFunction": "推进主线并建立对立",
+          "successCriteria": "主角完成线索确认并触发下一冲突",
+          "scenes": [{"purpose":"正面冲突"}],
+          "totalWords": 3600
+        }
+        "#;
+
+        TaskHandlers
+            .persist_task_output_with_runtime_state(
+                "chapter.plan",
+                &project.project_root,
+                &input,
+                output,
+                "req-skill-state",
+                RuntimeStateWriteOptions {
+                    state_writes: &[
+                        "chapter.plan_status".to_string(),
+                        "scene.environment".to_string(),
+                    ],
+                    state_write_policy: "chapter_confirmed",
+                    active_skill_ids: &["capability.scene-environment".to_string()],
+                },
+            )
+            .expect("persist with runtime state writes should succeed");
+
+        let states = crate::services::story_state_service::StoryStateService
+            .list_chapter_states(&project.project_root, &chapter.id)
+            .expect("list story states");
+
+        assert!(states.iter().any(|row| {
+            row.subject_type == "chapter"
+                && row.subject_id == chapter.id
+                && row.state_kind == "plan_status"
+        }));
+        assert!(states.iter().any(|row| {
+            row.subject_type == "scene"
+                && row.state_kind == "environment"
+                && row
+                    .payload_json
+                    .get("stateWriteKey")
+                    .and_then(|value| value.as_str())
+                    == Some("scene.environment")
+        }));
 
         remove_temp_workspace(&workspace);
     }

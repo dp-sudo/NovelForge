@@ -59,13 +59,32 @@ impl StoryStateService {
         let mut conn = open_project_database(project_root)?;
         let project_id = get_project_id(&conn)?;
         let now = now_iso();
+        let tx = conn.transaction().map_err(story_state_save_error)?;
+        let row = Self::upsert_state_in_transaction(&tx, &project_id, input, &now)?;
+        tx.commit().map_err(story_state_save_error)?;
+        Ok(row)
+    }
+
+    pub(crate) fn upsert_state_in_transaction(
+        tx: &rusqlite::Transaction<'_>,
+        project_id: &str,
+        input: StoryStateInput,
+        now: &str,
+    ) -> Result<StoryStateRow, AppErrorDto> {
+        if !input.payload_json.is_object() {
+            return Err(AppErrorDto::new(
+                "INVALID_STORY_STATE_PAYLOAD",
+                "状态载荷必须是 JSON 对象",
+                true,
+            ));
+        }
+
         let state_id = Uuid::new_v4().to_string();
         let payload_json = serde_json::to_string(&input.payload_json).map_err(|err| {
             AppErrorDto::new("INVALID_STORY_STATE_PAYLOAD", "状态载荷序列化失败", true)
                 .with_detail(err.to_string())
         })?;
 
-        let tx = conn.transaction().map_err(story_state_save_error)?;
         tx.execute(
             "UPDATE story_state
              SET status = ?1, updated_at = ?2
@@ -106,7 +125,6 @@ impl StoryStateService {
             ],
         )
         .map_err(story_state_save_error)?;
-        tx.commit().map_err(story_state_save_error)?;
 
         Ok(StoryStateRow {
             id: state_id,
@@ -117,8 +135,8 @@ impl StoryStateService {
             payload_json: input.payload_json,
             source_chapter_id: input.source_chapter_id,
             status: ACTIVE_STATUS.to_string(),
-            created_at: now.clone(),
-            updated_at: now,
+            created_at: now.to_string(),
+            updated_at: now.to_string(),
         })
     }
 

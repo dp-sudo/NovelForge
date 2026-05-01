@@ -147,7 +147,9 @@ export interface SummaryFeedbackData {
   stateUpdateCount: number;
 }
 
-function summarizeStateDelta(context: ChapterContext): string[] {
+export function summarizeStateDeltaForFeedback(
+  context: Pick<ChapterContext, "stateSummary">,
+): string[] {
   return context.stateSummary
     .slice(0, 6)
     .map((item) => {
@@ -158,6 +160,28 @@ function summarizeStateDelta(context: ChapterContext): string[] {
           return `窗口进度更新：${chapterId}（${wordCount} 字）`;
         }
         return `窗口进度更新：${chapterId}`;
+      }
+      if (item.subjectType === "relationship" && item.stateKind === "relationship") {
+        const sourceLabel = typeof item.payload.sourceLabel === "string" ? item.payload.sourceLabel : item.subjectId;
+        const targetLabel = typeof item.payload.targetLabel === "string" ? item.payload.targetLabel : "未知对象";
+        const relationshipType = typeof item.payload.relationshipType === "string"
+          ? item.payload.relationshipType
+          : "互动";
+        return `关系状态更新：${sourceLabel} ↔ ${targetLabel}（${relationshipType}）`;
+      }
+      if (item.subjectType === "character" && item.stateKind === "involvement") {
+        const characterLabel = typeof item.payload.characterLabel === "string"
+          ? item.payload.characterLabel
+          : item.subjectId;
+        const involvementType = typeof item.payload.involvementType === "string"
+          ? item.payload.involvementType
+          : "一般戏份";
+        return `角色戏份更新：${characterLabel}（${involvementType}）`;
+      }
+      if (item.subjectType === "scene" && item.stateKind === "scene") {
+        const sceneLabel = typeof item.payload.sceneLabel === "string" ? item.payload.sceneLabel : item.subjectId;
+        const sceneType = typeof item.payload.sceneType === "string" ? item.payload.sceneType : "场景";
+        return `场景状态更新：${sceneLabel}（${sceneType}）`;
       }
       return `${item.subjectType}:${item.subjectId} -> ${item.stateKind}`;
     });
@@ -230,7 +254,7 @@ export async function getSummaryFeedback(
         .length;
 
     return {
-      keyVariableDelta: summarizeStateDelta(context),
+      keyVariableDelta: summarizeStateDeltaForFeedback(context),
       driftWarnings: collectDriftWarnings(chapters, plannedChapterCount),
       assetPromotionCount,
       stateUpdateCount: context.stateSummary.length,

@@ -163,7 +163,9 @@
     - 当仅有 `autoPersist: true` 时，前端按任务类型推断 `persistMode`，默认 `automationTier = "supervised"`。
   - 运行时行为：
     - `prompt` 前会编译 `ContinuityPack`，并注入技能选择结果。
+    - 技能选择不再只看 `taskType`；还会同时应用项目级 `alwaysOnPolicySkills/defaultCapabilityBundles`，以及技能元数据 `sceneTags/requiredContexts/automationTier`。
     - 若技能命中 `route_override`，仅覆盖本次请求的 provider/model，不修改项目配置。
+    - 若激活技能声明 `stateWrites`，后端会按项目级 `stateWritePolicy` 追加 `story_state` 记录。
 - AI 功能任务（前端薄封装，统一走 pipeline）：
   - `generateBlueprintSuggestion` -> `runModuleAiTask(taskType="blueprint.generate_step")`
   - `aiGenerateCharacter` -> `runModuleAiTask(taskType="character.create")`

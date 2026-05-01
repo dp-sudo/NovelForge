@@ -3,7 +3,7 @@
 ## 1. 文档信息
 - 版本：v0.9
 - 状态：S20（AI 生产系统闭环：策略权威源 + State Ledger + Continuity Pack + 技能运行期）
-- 最后更新：2026-04-30
+- 最后更新：2026-05-01
 
 ## 2. 运行时角色
 ### 2.1 Main（Tauri + Rust）
@@ -67,9 +67,13 @@
 
 #### 4.3.1 章节链路（Task 10 对齐）
 1. 编译 `Continuity Pack`（Constitution/Canon/Lexicon Policy/State/Promise/Window/Recent）。
-2. 装配技能栈（workflow/capability/policy/review）并解析可选 `route override`。
+2. 装配技能栈（workflow/capability/extractor/policy/review），运行时会同时应用：
+   - 项目级 `alwaysOnPolicySkills`
+   - 项目级 `defaultCapabilityBundles`
+   - 技能元数据 `sceneTags/requiredContexts/automationTier`
+   - 可选 `route override`
 3. 生成章节计划/草稿/改写等任务输出。
-4. 写后回写 `Canon + State`：正式资产入库并写 `entity_provenance`，章节保存后回写 `story_state`。
+4. 写后回写 `Canon + State`：正式资产入库并写 `entity_provenance`，章节保存后回写 `story_state`；若激活技能声明了 `stateWrites`，会按项目级 `stateWritePolicy` 追加运行时状态写入。
 
 ### 4.4 编辑器 9 按钮任务映射（canonical）
 - `chapter.continue`（续写章节）

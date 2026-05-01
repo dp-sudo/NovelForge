@@ -63,6 +63,7 @@ impl PromptResolver {
         continuity_pack: &ContinuityPack,
         canonical_task: &str,
         input: &RunAiTaskPipelineInput,
+        selected_skills: &SelectedSkills,
     ) -> Result<String, AppErrorDto> {
         let guard = skill_registry.read().map_err(|err| {
             AppErrorDto::new("SKILLS_LOCK_FAILED", "Skill registry lock failed", false)
@@ -80,8 +81,7 @@ impl PromptResolver {
             }
             None => return Err(Self::template_not_found_error(canonical_task)),
         };
-        let selected_skills = guard.select_skills_for_task(canonical_task)?;
-        let skill_context = self.collect_runtime_skill_context(&guard, &selected_skills)?;
+        let skill_context = self.collect_runtime_skill_context(&guard, selected_skills)?;
 
         let render_context = self.build_render_context(
             context,
@@ -784,7 +784,14 @@ mod tests {
         for task in CORE_TASK_ROUTE_TYPES {
             let input = sample_input(task);
             let rendered = resolver
-                .resolve_or_build_prompt(&registry, &context, &continuity_pack, task, &input)
+                .resolve_or_build_prompt(
+                    &registry,
+                    &context,
+                    &continuity_pack,
+                    task,
+                    &input,
+                    &SelectedSkills::default(),
+                )
                 .unwrap_or_else(|err| {
                     panic!("task {} render failed: {} {}", task, err.code, err.message)
                 });
@@ -831,6 +838,7 @@ mod tests {
                 &continuity_pack,
                 "character.create",
                 &input,
+                &SelectedSkills::default(),
             )
             .expect_err("should reject missing userDescription");
         assert_eq!(err.code, "MISSING_REQUIRED_INPUT");
@@ -851,6 +859,7 @@ mod tests {
                 &continuity_pack,
                 "unknown.task",
                 &input,
+                &SelectedSkills::default(),
             )
             .expect_err("unknown task must fail");
         assert_eq!(err.code, "PROMPT_TEMPLATE_NOT_FOUND");
@@ -876,7 +885,14 @@ mod tests {
         }
 
         let rendered = resolver
-            .resolve_or_build_prompt(&registry, &context, &continuity_pack, "custom", &input)
+            .resolve_or_build_prompt(
+                &registry,
+                &context,
+                &continuity_pack,
+                "custom",
+                &input,
+                &SelectedSkills::default(),
+            )
             .expect("custom should fallback instead of failing");
 
         assert!(rendered.contains("专业的创意写作助手"));
@@ -907,6 +923,7 @@ mod tests {
                 &continuity_pack,
                 "chapter.draft",
                 &input,
+                &SelectedSkills::default(),
             )
             .expect("render should include continuity sections");
 
@@ -945,6 +962,12 @@ mod tests {
         }
 
         let input = sample_input("chapter.draft");
+        let selected = {
+            let guard = registry.read().expect("lock registry");
+            guard
+                .select_skills_for_task("chapter.draft")
+                .expect("select runtime skills")
+        };
         let rendered = resolver
             .resolve_or_build_prompt(
                 &registry,
@@ -952,6 +975,7 @@ mod tests {
                 &continuity_pack,
                 "chapter.draft",
                 &input,
+                &selected,
             )
             .expect("render prompt with runtime skills");
 

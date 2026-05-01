@@ -14,7 +14,7 @@ use crate::infra::time::now_iso;
 use crate::services::chapter_service::ChapterService;
 use crate::services::import_service::{extract_asset_candidates, AssetExtractionCandidate};
 use crate::services::project_service::{get_project_id, WritingStyle};
-use crate::services::story_state_service::StoryStateService;
+use crate::services::story_state_service::{StoryStateInput, StoryStateService};
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1173,6 +1173,28 @@ impl ContextService {
                     &target_id,
                     "relationship_context",
                 )?;
+                let relation_state_now = now_iso();
+                StoryStateService::upsert_state_in_transaction(
+                    &tx,
+                    &project_id,
+                    StoryStateInput {
+                        subject_type: "relationship".to_string(),
+                        subject_id: relation_id.clone(),
+                        scope: "chapter".to_string(),
+                        state_kind: "relationship".to_string(),
+                        payload_json: serde_json::json!({
+                            "relationshipType": relationship_type,
+                            "sourceCharacterId": source_id,
+                            "sourceLabel": source_label,
+                            "targetCharacterId": target_id,
+                            "targetLabel": target_label,
+                            "evidence": evidence,
+                            "chapterId": chapter_id,
+                        }),
+                        source_chapter_id: Some(chapter_id.to_string()),
+                    },
+                    &relation_state_now,
+                )?;
                 ApplyStructuredDraftResult {
                     action,
                     draft_kind: "relationship".to_string(),
@@ -1198,6 +1220,26 @@ impl ContextService {
                     "character",
                     &character_id,
                     &relation_type,
+                )?;
+                let involvement_state_now = now_iso();
+                StoryStateService::upsert_state_in_transaction(
+                    &tx,
+                    &project_id,
+                    StoryStateInput {
+                        subject_type: "character".to_string(),
+                        subject_id: character_id.clone(),
+                        scope: "chapter".to_string(),
+                        state_kind: "involvement".to_string(),
+                        payload_json: serde_json::json!({
+                            "characterLabel": source_label,
+                            "involvementType": involvement_type,
+                            "relationType": relation_type,
+                            "evidence": evidence,
+                            "chapterId": chapter_id,
+                        }),
+                        source_chapter_id: Some(chapter_id.to_string()),
+                    },
+                    &involvement_state_now,
                 )?;
                 ApplyStructuredDraftResult {
                     action: if link_created { "created" } else { "reused" }.to_string(),
@@ -1247,6 +1289,27 @@ impl ContextService {
                     "world_rule",
                     &world_rule_id,
                     &relation_type,
+                )?;
+                let scene_state_now = now_iso();
+                StoryStateService::upsert_state_in_transaction(
+                    &tx,
+                    &project_id,
+                    StoryStateInput {
+                        subject_type: "scene".to_string(),
+                        subject_id: world_rule_id.clone(),
+                        scope: "chapter".to_string(),
+                        state_kind: "scene".to_string(),
+                        payload_json: serde_json::json!({
+                            "sceneLabel": source_label,
+                            "sceneType": scene_type,
+                            "linkedWorldRuleId": world_rule_id,
+                            "relationType": relation_type,
+                            "evidence": evidence,
+                            "chapterId": chapter_id,
+                        }),
+                        source_chapter_id: Some(chapter_id.to_string()),
+                    },
+                    &scene_state_now,
                 )?;
                 ApplyStructuredDraftResult {
                     action: if link_created { "created" } else { "reused" }.to_string(),
@@ -2692,6 +2755,7 @@ mod tests {
     use crate::infra::database::open_database;
     use crate::services::chapter_service::{ChapterInput, ChapterService};
     use crate::services::project_service::{CreateProjectInput, ProjectService, WritingStyle};
+    use crate::services::story_state_service::StoryStateService;
 
     fn create_temp_workspace() -> PathBuf {
         let workspace =
@@ -3093,6 +3157,311 @@ mod tests {
                 .unwrap_or_default()
                 > 0
         );
+
+        remove_temp_workspace(&workspace);
+    }
+
+    #[test]
+    fn apply_structured_relationship_writes_story_state_entry() {
+        let workspace = create_temp_workspace();
+        let project_service = ProjectService;
+        let chapter_service = ChapterService;
+        let context_service = ContextService;
+
+        let project = project_service
+            .create_project(CreateProjectInput {
+                name: "关系状态写入测试".to_string(),
+                author: None,
+                genre: "测试".to_string(),
+                target_words: None,
+                save_directory: workspace.to_string_lossy().to_string(),
+            })
+            .expect("project created");
+        let chapter = chapter_service
+            .create_chapter(
+                &project.project_root,
+                ChapterInput {
+                    title: "第一章".to_string(),
+                    summary: None,
+                    target_words: None,
+                    status: None,
+                },
+            )
+            .expect("chapter created");
+
+        let result = context_service
+            .apply_structured_draft(
+                &project.project_root,
+                &chapter.id,
+                ApplyStructuredDraftInput {
+                    draft_item_id: None,
+                    draft_kind: "relationship".to_string(),
+                    source_label: "林夜".to_string(),
+                    target_label: Some("李伯".to_string()),
+                    relationship_type: Some("同盟".to_string()),
+                    involvement_type: None,
+                    scene_type: None,
+                    evidence: Some("林夜与李伯并肩迎敌".to_string()),
+                },
+            )
+            .expect("apply relationship draft");
+
+        let states = StoryStateService
+            .list_chapter_states(&project.project_root, &chapter.id)
+            .expect("list chapter states");
+        let relation_state = states
+            .iter()
+            .find(|row| {
+                row.subject_type == "relationship"
+                    && row.subject_id == result.primary_target_id
+                    && row.state_kind == "relationship"
+            })
+            .expect("relationship state exists");
+        assert_eq!(
+            relation_state
+                .payload_json
+                .get("relationshipType")
+                .and_then(|value| value.as_str()),
+            Some("同盟")
+        );
+        assert_eq!(
+            relation_state
+                .payload_json
+                .get("sourceLabel")
+                .and_then(|value| value.as_str()),
+            Some("林夜")
+        );
+
+        remove_temp_workspace(&workspace);
+    }
+
+    #[test]
+    fn apply_structured_involvement_writes_story_state_entry() {
+        let workspace = create_temp_workspace();
+        let project_service = ProjectService;
+        let chapter_service = ChapterService;
+        let context_service = ContextService;
+
+        let project = project_service
+            .create_project(CreateProjectInput {
+                name: "戏份状态写入测试".to_string(),
+                author: None,
+                genre: "测试".to_string(),
+                target_words: None,
+                save_directory: workspace.to_string_lossy().to_string(),
+            })
+            .expect("project created");
+        let chapter = chapter_service
+            .create_chapter(
+                &project.project_root,
+                ChapterInput {
+                    title: "第一章".to_string(),
+                    summary: None,
+                    target_words: None,
+                    status: None,
+                },
+            )
+            .expect("chapter created");
+
+        let result = context_service
+            .apply_structured_draft(
+                &project.project_root,
+                &chapter.id,
+                ApplyStructuredDraftInput {
+                    draft_item_id: None,
+                    draft_kind: "involvement".to_string(),
+                    source_label: "林夜".to_string(),
+                    target_label: None,
+                    relationship_type: None,
+                    involvement_type: Some("高参与".to_string()),
+                    scene_type: None,
+                    evidence: Some("林夜主导了整段冲突".to_string()),
+                },
+            )
+            .expect("apply involvement draft");
+
+        let states = StoryStateService
+            .list_chapter_states(&project.project_root, &chapter.id)
+            .expect("list chapter states");
+        let involvement_state = states
+            .iter()
+            .find(|row| {
+                row.subject_type == "character"
+                    && row.subject_id == result.primary_target_id
+                    && row.state_kind == "involvement"
+            })
+            .expect("involvement state exists");
+        assert_eq!(
+            involvement_state
+                .payload_json
+                .get("involvementType")
+                .and_then(|value| value.as_str()),
+            Some("高参与")
+        );
+
+        remove_temp_workspace(&workspace);
+    }
+
+    #[test]
+    fn apply_structured_scene_writes_story_state_entry() {
+        let workspace = create_temp_workspace();
+        let project_service = ProjectService;
+        let chapter_service = ChapterService;
+        let context_service = ContextService;
+
+        let project = project_service
+            .create_project(CreateProjectInput {
+                name: "场景状态写入测试".to_string(),
+                author: None,
+                genre: "测试".to_string(),
+                target_words: None,
+                save_directory: workspace.to_string_lossy().to_string(),
+            })
+            .expect("project created");
+        let chapter = chapter_service
+            .create_chapter(
+                &project.project_root,
+                ChapterInput {
+                    title: "第一章".to_string(),
+                    summary: None,
+                    target_words: None,
+                    status: None,
+                },
+            )
+            .expect("chapter created");
+
+        let result = context_service
+            .apply_structured_draft(
+                &project.project_root,
+                &chapter.id,
+                ApplyStructuredDraftInput {
+                    draft_item_id: None,
+                    draft_kind: "scene".to_string(),
+                    source_label: "青石镇".to_string(),
+                    target_label: None,
+                    relationship_type: None,
+                    involvement_type: None,
+                    scene_type: Some("地点场景".to_string()),
+                    evidence: Some("青石镇夜色沉沉，街巷戒严".to_string()),
+                },
+            )
+            .expect("apply scene draft");
+
+        let states = StoryStateService
+            .list_chapter_states(&project.project_root, &chapter.id)
+            .expect("list chapter states");
+        let scene_state = states
+            .iter()
+            .find(|row| {
+                row.subject_type == "scene"
+                    && row.subject_id == result.primary_target_id
+                    && row.state_kind == "scene"
+            })
+            .expect("scene state exists");
+        assert_eq!(
+            scene_state
+                .payload_json
+                .get("sceneLabel")
+                .and_then(|value| value.as_str()),
+            Some("青石镇")
+        );
+
+        remove_temp_workspace(&workspace);
+    }
+
+    #[test]
+    fn editor_context_state_summary_includes_structured_draft_states() {
+        let workspace = create_temp_workspace();
+        let project_service = ProjectService;
+        let chapter_service = ChapterService;
+        let context_service = ContextService;
+
+        let project = project_service
+            .create_project(CreateProjectInput {
+                name: "状态摘要回读测试".to_string(),
+                author: None,
+                genre: "测试".to_string(),
+                target_words: None,
+                save_directory: workspace.to_string_lossy().to_string(),
+            })
+            .expect("project created");
+        let chapter = chapter_service
+            .create_chapter(
+                &project.project_root,
+                ChapterInput {
+                    title: "第一章".to_string(),
+                    summary: None,
+                    target_words: None,
+                    status: None,
+                },
+            )
+            .expect("chapter created");
+
+        context_service
+            .apply_structured_draft(
+                &project.project_root,
+                &chapter.id,
+                ApplyStructuredDraftInput {
+                    draft_item_id: None,
+                    draft_kind: "relationship".to_string(),
+                    source_label: "林夜".to_string(),
+                    target_label: Some("李伯".to_string()),
+                    relationship_type: Some("同盟".to_string()),
+                    involvement_type: None,
+                    scene_type: None,
+                    evidence: Some("林夜与李伯并肩迎敌".to_string()),
+                },
+            )
+            .expect("apply relationship draft");
+        context_service
+            .apply_structured_draft(
+                &project.project_root,
+                &chapter.id,
+                ApplyStructuredDraftInput {
+                    draft_item_id: None,
+                    draft_kind: "involvement".to_string(),
+                    source_label: "林夜".to_string(),
+                    target_label: None,
+                    relationship_type: None,
+                    involvement_type: Some("高参与".to_string()),
+                    scene_type: None,
+                    evidence: Some("林夜主导了整段冲突".to_string()),
+                },
+            )
+            .expect("apply involvement draft");
+        context_service
+            .apply_structured_draft(
+                &project.project_root,
+                &chapter.id,
+                ApplyStructuredDraftInput {
+                    draft_item_id: None,
+                    draft_kind: "scene".to_string(),
+                    source_label: "青石镇".to_string(),
+                    target_label: None,
+                    relationship_type: None,
+                    involvement_type: None,
+                    scene_type: Some("地点场景".to_string()),
+                    evidence: Some("青石镇夜色沉沉，街巷戒严".to_string()),
+                },
+            )
+            .expect("apply scene draft");
+
+        let panel = context_service
+            .collect_editor_context(&project.project_root, &chapter.id)
+            .expect("collect editor context");
+
+        assert!(panel
+            .state_summary
+            .iter()
+            .any(|item| item.subject_type == "relationship" && item.state_kind == "relationship"));
+        assert!(panel
+            .state_summary
+            .iter()
+            .any(|item| item.subject_type == "character" && item.state_kind == "involvement"));
+        assert!(panel
+            .state_summary
+            .iter()
+            .any(|item| item.subject_type == "scene" && item.state_kind == "scene"));
 
         remove_temp_workspace(&workspace);
     }

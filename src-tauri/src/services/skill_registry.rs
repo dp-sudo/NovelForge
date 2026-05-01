@@ -75,9 +75,46 @@ pub struct RouteOverride {
 pub struct SelectedSkills {
     pub workflow_skills: Vec<SkillManifest>,
     pub capability_skills: Vec<SkillManifest>,
+    pub extractor_skills: Vec<SkillManifest>,
     pub policy_skills: Vec<SkillManifest>,
     pub review_skills: Vec<SkillManifest>,
     pub route_override: Option<RouteOverride>,
+}
+
+impl SelectedSkills {
+    pub fn all_skills(&self) -> impl Iterator<Item = &SkillManifest> {
+        self.workflow_skills
+            .iter()
+            .chain(self.capability_skills.iter())
+            .chain(self.extractor_skills.iter())
+            .chain(self.policy_skills.iter())
+            .chain(self.review_skills.iter())
+    }
+
+    pub fn all_state_writes(&self) -> Vec<String> {
+        let mut state_writes = Vec::new();
+        for skill in self.all_skills() {
+            for item in &skill.state_writes {
+                if !state_writes.iter().any(|existing| existing == item) {
+                    state_writes.push(item.clone());
+                }
+            }
+        }
+        state_writes
+    }
+
+    pub fn all_skill_ids(&self) -> Vec<String> {
+        self.all_skills().map(|skill| skill.id.clone()).collect()
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct SkillSelectionContext {
+    pub explicit_skill_ids: Vec<String>,
+    pub active_bundle_ids: Vec<String>,
+    pub scene_tags: Vec<String>,
+    pub available_contexts: Vec<String>,
+    pub automation_tier: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -270,6 +307,14 @@ impl SkillRegistry {
     }
 
     pub fn select_skills_for_task(&self, task_type: &str) -> Result<SelectedSkills, AppErrorDto> {
+        self.select_skills_for_task_with_context(task_type, &SkillSelectionContext::default())
+    }
+
+    pub fn select_skills_for_task_with_context(
+        &self,
+        task_type: &str,
+        selection: &SkillSelectionContext,
+    ) -> Result<SelectedSkills, AppErrorDto> {
         let canonical_task = task_routing::canonical_task_type(task_type).into_owned();
         let guard = self.manifests.read().map_err(|e| {
             AppErrorDto::new("SKILLS_LOCK_FAILED", "技能注册表锁定失败", false)
@@ -277,7 +322,19 @@ impl SkillRegistry {
         })?;
 
         let mut selected = SelectedSkills::default();
+        let explicit_skill_ids = normalize_string_set(&selection.explicit_skill_ids);
+        let active_bundle_ids = normalize_string_set(&selection.active_bundle_ids);
+        let scene_tags = normalize_string_set(&selection.scene_tags);
+        let available_contexts = normalize_string_set(&selection.available_contexts);
+        let runtime_tier = normalize_optional_string(
+            selection
+                .automation_tier
+                .clone()
+                .unwrap_or_default(),
+        );
+
         for skill in guard.iter() {
+            let explicit = explicit_skill_ids.contains(&skill.id.trim().to_ascii_lowercase());
             let matched_by_trigger = skill
                 .trigger_conditions
                 .iter()
@@ -287,14 +344,29 @@ impl SkillRegistry {
                 .as_ref()
                 .map(|route| route_matches_task(route, &canonical_task))
                 .unwrap_or(false);
-            let should_activate = skill.always_on || matched_by_trigger || matched_by_route;
-            if !should_activate {
+            let matched_by_bundle = skill.bundle_ids.iter().any(|bundle_id| {
+                let normalized = bundle_id.trim();
+                !normalized.is_empty() && active_bundle_ids.contains(normalized)
+            });
+            let activation_source =
+                explicit || skill.always_on || matched_by_trigger || matched_by_route || matched_by_bundle;
+            if !activation_source {
+                continue;
+            }
+            if !skill_matches_scene(skill, &scene_tags) {
+                continue;
+            }
+            if !skill_has_required_contexts(skill, &available_contexts) {
+                continue;
+            }
+            if !skill_matches_automation_tier(skill, runtime_tier.as_deref()) {
                 continue;
             }
 
             match skill.skill_class.as_deref().unwrap_or("") {
                 "workflow" => selected.workflow_skills.push(skill.clone()),
                 "capability" => selected.capability_skills.push(skill.clone()),
+                "extractor" => selected.extractor_skills.push(skill.clone()),
                 "policy" => selected.policy_skills.push(skill.clone()),
                 "review" => selected.review_skills.push(skill.clone()),
                 _ => {}
@@ -680,6 +752,61 @@ fn task_pattern_matches(pattern: &str, canonical_task: &str) -> bool {
     canonical_pattern == canonical_task
 }
 
+fn normalize_string_set(items: &[String]) -> std::collections::HashSet<String> {
+    items.iter()
+        .map(|item| item.trim().to_ascii_lowercase())
+        .filter(|item| !item.is_empty())
+        .collect()
+}
+
+fn skill_matches_scene(
+    skill: &SkillManifest,
+    runtime_scene_tags: &std::collections::HashSet<String>,
+) -> bool {
+    if skill.scene_tags.is_empty() {
+        return true;
+    }
+    if runtime_scene_tags.is_empty() {
+        return false;
+    }
+    skill.scene_tags.iter().any(|tag| {
+        let normalized = tag.trim().to_ascii_lowercase();
+        !normalized.is_empty() && runtime_scene_tags.contains(&normalized)
+    })
+}
+
+fn skill_has_required_contexts(
+    skill: &SkillManifest,
+    available_contexts: &std::collections::HashSet<String>,
+) -> bool {
+    skill.required_contexts.iter().all(|context_key| {
+        let normalized = context_key.trim().to_ascii_lowercase();
+        normalized.is_empty() || available_contexts.contains(&normalized)
+    })
+}
+
+fn skill_matches_automation_tier(skill: &SkillManifest, runtime_tier: Option<&str>) -> bool {
+    let Some(required_tier) = skill.automation_tier.as_deref() else {
+        return true;
+    };
+    let Some(required_rank) = automation_tier_rank(required_tier) else {
+        return true;
+    };
+    let Some(runtime_rank) = runtime_tier.and_then(automation_tier_rank) else {
+        return false;
+    };
+    runtime_rank >= required_rank
+}
+
+fn automation_tier_rank(value: &str) -> Option<u8> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "auto" => Some(1),
+        "supervised" => Some(2),
+        "confirm" => Some(3),
+        _ => None,
+    }
+}
+
 // ── File format helpers ──
 
 /// Split a .md string into (frontmatter_yaml, body_markdown).
@@ -981,6 +1108,68 @@ mod tests {
         assert_eq!(route_override.provider, "provider-override");
         assert_eq!(route_override.model, "model-override");
         assert_eq!(route_override.reason, "high precision scene");
+    }
+
+    #[test]
+    fn select_skills_for_task_with_context_applies_bundle_scene_context_and_tier() {
+        let registry = create_test_registry("selection-context");
+
+        let mut policy = build_manifest("policy.term-lock", "policy");
+        policy.always_on = true;
+        registry
+            .create_skill(&policy, "policy body")
+            .expect("create policy");
+
+        let mut bundled = build_manifest("capability.emotion-flow", "capability");
+        bundled.bundle_ids = vec!["emotion-pack".to_string()];
+        bundled.scene_tags = vec!["dialogue".to_string()];
+        bundled.required_contexts = vec!["state".to_string(), "canon".to_string()];
+        bundled.automation_tier = Some("supervised".to_string());
+        registry
+            .create_skill(&bundled, "bundled capability body")
+            .expect("create bundled capability");
+
+        let mut confirm_only = build_manifest("review.combat-check", "review");
+        confirm_only.bundle_ids = vec!["combat-pack".to_string()];
+        confirm_only.scene_tags = vec!["battle".to_string()];
+        confirm_only.automation_tier = Some("confirm".to_string());
+        registry
+            .create_skill(&confirm_only, "confirm review body")
+            .expect("create confirm review");
+
+        let selected = registry
+            .select_skills_for_task_with_context(
+                "chapter.draft",
+                &SkillSelectionContext {
+                    active_bundle_ids: vec!["emotion-pack".to_string(), "combat-pack".to_string()],
+                    scene_tags: vec!["dialogue".to_string()],
+                    available_contexts: vec!["canon".to_string(), "state".to_string()],
+                    automation_tier: Some("supervised".to_string()),
+                    ..Default::default()
+                },
+            )
+            .expect("select with runtime context");
+
+        assert_eq!(selected.policy_skills.len(), 1);
+        assert_eq!(selected.capability_skills.len(), 1);
+        assert_eq!(selected.capability_skills[0].id, "capability.emotion-flow");
+        assert!(selected.review_skills.is_empty());
+
+        let selected_confirm = registry
+            .select_skills_for_task_with_context(
+                "chapter.draft",
+                &SkillSelectionContext {
+                    active_bundle_ids: vec!["combat-pack".to_string()],
+                    scene_tags: vec!["battle".to_string()],
+                    available_contexts: vec!["canon".to_string(), "state".to_string()],
+                    automation_tier: Some("confirm".to_string()),
+                    ..Default::default()
+                },
+            )
+            .expect("select confirm context");
+
+        assert_eq!(selected_confirm.review_skills.len(), 1);
+        assert_eq!(selected_confirm.review_skills[0].id, "review.combat-check");
     }
 }
 

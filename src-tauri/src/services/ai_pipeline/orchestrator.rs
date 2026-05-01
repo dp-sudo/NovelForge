@@ -7,14 +7,14 @@ use crate::errors::AppErrorDto;
 use crate::services::ai_pipeline::audit_store::PipelineAuditStore;
 use crate::services::ai_pipeline::continuity_pack::ContinuityPackCompiler;
 use crate::services::ai_pipeline::prompt_resolver::PromptResolver;
-use crate::services::ai_pipeline::task_handlers::TaskHandlers;
+use crate::services::ai_pipeline::task_handlers::{RuntimeStateWriteOptions, TaskHandlers};
 use crate::services::ai_pipeline_service::{
     AiPipelineEvent, AiPipelineService, PersistedRecord, RunAiTaskPipelineInput,
 };
 use crate::services::ai_service::{AiService, TaskRouteResolution};
 use crate::services::context_service::ContextService;
-use crate::services::project_service::ProjectService;
-use crate::services::skill_registry::SkillRegistry;
+use crate::services::project_service::{AiStrategyProfile, ProjectService};
+use crate::services::skill_registry::{SkillRegistry, SkillSelectionContext};
 
 pub const PHASE_VALIDATE: &str = "validate";
 pub const PHASE_CONTEXT: &str = "context";
@@ -129,6 +129,8 @@ impl<'a> PipelineOrchestrator<'a> {
                 phase: PHASE_CONTEXT,
                 error: err,
             })?;
+        let strategy_profile = self.load_ai_strategy_profile();
+        let selection_context = self.build_skill_selection_context(&strategy_profile, &context);
 
         self.audit_store.touch_pipeline_phase(
             &self.input.project_root,
@@ -155,17 +157,19 @@ impl<'a> PipelineOrchestrator<'a> {
                     .with_detail(err.to_string()),
             })?;
             let selected = guard
-                .select_skills_for_task(self.canonical_task)
+                .select_skills_for_task_with_context(self.canonical_task, &selection_context)
                 .map_err(|err| StageError {
                     phase: PHASE_ROUTE,
                     error: err,
                 })?;
-            let resolved =
-                AiService::inspect_task_route_with_skill_registry(self.canonical_task, &guard)
-                    .map_err(|err| StageError {
-                        phase: PHASE_ROUTE,
-                        error: err,
-                    })?;
+            let resolved = AiService::inspect_task_route_with_override(
+                self.canonical_task,
+                selected.route_override.as_ref(),
+            )
+            .map_err(|err| StageError {
+                phase: PHASE_ROUTE,
+                error: err,
+            })?;
             (resolved, selected)
         };
         let route_override_meta = selected_skills.route_override.as_ref().map(|route| {
@@ -192,9 +196,12 @@ impl<'a> PipelineOrchestrator<'a> {
                     "selectedSkills": {
                         "workflow": selected_skills.workflow_skills.len(),
                         "capability": selected_skills.capability_skills.len(),
+                        "extractor": selected_skills.extractor_skills.len(),
                         "policy": selected_skills.policy_skills.len(),
                         "review": selected_skills.review_skills.len(),
                     },
+                    "activeBundles": selection_context.active_bundle_ids,
+                    "sceneTags": selection_context.scene_tags,
                     "routeOverride": route_override_meta,
                 })),
             },
@@ -206,7 +213,7 @@ impl<'a> PipelineOrchestrator<'a> {
                 error: err,
             })?;
 
-        let continuity_depth = self.resolve_continuity_pack_depth();
+        let continuity_depth = strategy_profile.continuity_pack_depth.clone();
         let continuity_pack = ContinuityPackCompiler.compile(
             &self.input.project_root,
             self.canonical_task,
@@ -244,6 +251,7 @@ impl<'a> PipelineOrchestrator<'a> {
                 &continuity_pack,
                 self.canonical_task,
                 self.input,
+                &selected_skills,
             )
             .map_err(|err| StageError {
                 phase: PHASE_PROMPT,
@@ -278,7 +286,7 @@ impl<'a> PipelineOrchestrator<'a> {
             },
         );
         let req = UnifiedGenerateRequest {
-            model: "default".to_string(),
+            model: route.model_id.clone(),
             messages: vec![Message {
                 role: "user".to_string(),
                 content: vec![ContentBlock {
@@ -290,12 +298,13 @@ impl<'a> PipelineOrchestrator<'a> {
             }],
             system_prompt: Some(prompt),
             stream: true,
+            provider_id: Some(route.provider_id.clone()),
             task_type: Some(self.canonical_task.to_string()),
             ..Default::default()
         };
         let mut rx = self
             .ai_service
-            .stream_generate_for_pipeline(req, Some(self.skill_registry))
+            .stream_generate_for_pipeline(req, None)
             .await
             .map_err(|err| StageError {
                 phase: PHASE_GENERATE,
@@ -403,13 +412,20 @@ impl<'a> PipelineOrchestrator<'a> {
                     error: err,
                 });
             }
+            let runtime_state_writes = selected_skills.all_state_writes();
+            let runtime_skill_ids = selected_skills.all_skill_ids();
             self.task_handlers
-                .persist_task_output(
+                .persist_task_output_with_runtime_state(
                     self.canonical_task,
                     &self.input.project_root,
                     self.input,
                     &normalized,
                     self.request_id,
+                    RuntimeStateWriteOptions {
+                        state_writes: &runtime_state_writes,
+                        state_write_policy: &strategy_profile.state_write_policy,
+                        active_skill_ids: &runtime_skill_ids,
+                    },
                 )
                 .map_err(|err| StageError {
                     phase: PHASE_PERSIST,
@@ -576,18 +592,108 @@ impl<'a> PipelineOrchestrator<'a> {
         Ok(normalized)
     }
 
-    fn resolve_continuity_pack_depth(&self) -> String {
+    fn load_ai_strategy_profile(&self) -> AiStrategyProfile {
         match ProjectService.get_ai_strategy_profile(&self.input.project_root) {
-            Ok(profile) => profile.continuity_pack_depth,
+            Ok(profile) => profile,
             Err(err) => {
                 log::warn!(
-                    "[CONTINUITY_PACK] failed to load ai strategy profile for {}: {} {}",
+                    "[AI_STRATEGY] failed to load ai strategy profile for {}: {} {}",
                     self.input.project_root,
                     err.code,
                     err.message
                 );
-                "standard".to_string()
+                AiStrategyProfile::default()
             }
         }
+    }
+
+    fn build_skill_selection_context(
+        &self,
+        profile: &AiStrategyProfile,
+        context: &crate::services::context_service::CollectedContext,
+    ) -> SkillSelectionContext {
+        SkillSelectionContext {
+            explicit_skill_ids: profile.always_on_policy_skills.clone(),
+            active_bundle_ids: profile.default_capability_bundles.clone(),
+            scene_tags: self.infer_scene_tags(context),
+            available_contexts: self.collect_available_contexts(context),
+            automation_tier: Some(self.resolve_automation_tier(profile)),
+        }
+    }
+
+    fn resolve_automation_tier(&self, profile: &AiStrategyProfile) -> String {
+        self.input
+            .automation_tier
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or(profile.automation_default.as_str())
+            .to_string()
+    }
+
+    fn collect_available_contexts(
+        &self,
+        context: &crate::services::context_service::CollectedContext,
+    ) -> Vec<String> {
+        let mut keys = Vec::new();
+        keys.push("constitution".to_string());
+        if !context.global_context.blueprint_summary.is_empty()
+            || !context.related_context.characters.is_empty()
+            || !context.related_context.world_rules.is_empty()
+            || !context.related_context.plot_nodes.is_empty()
+            || !context.related_context.relationship_edges.is_empty()
+        {
+            keys.push("canon".to_string());
+        }
+        if context.related_context.chapter.is_some() {
+            keys.push("chapter".to_string());
+        }
+        keys.push("state".to_string());
+        if context.related_context.previous_chapter_summary.is_some() {
+            keys.push("recent_continuity".to_string());
+        }
+        keys
+    }
+
+    fn infer_scene_tags(
+        &self,
+        _context: &crate::services::context_service::CollectedContext,
+    ) -> Vec<String> {
+        let mut tags = Vec::new();
+        let combined = format!(
+            "{}\n{}\n{}",
+            self.input.user_instruction,
+            self.input.selected_text.as_deref().unwrap_or(""),
+            self.input.chapter_content.as_deref().unwrap_or("")
+        );
+        let lowered = combined.to_ascii_lowercase();
+        if lowered.contains("战斗")
+            || lowered.contains("厮杀")
+            || lowered.contains("决战")
+            || lowered.contains("打斗")
+            || lowered.contains("交手")
+        {
+            tags.push("battle".to_string());
+        }
+        if lowered.contains("对话")
+            || lowered.contains("争吵")
+            || lowered.contains("告白")
+            || lowered.contains("情绪")
+            || lowered.contains("心理")
+        {
+            tags.push("dialogue".to_string());
+            tags.push("emotion".to_string());
+        }
+        if lowered.contains("场景")
+            || lowered.contains("环境")
+            || lowered.contains("风景")
+            || lowered.contains("背景")
+            || lowered.contains("世界观")
+        {
+            tags.push("environment".to_string());
+        }
+        tags.sort();
+        tags.dedup();
+        tags
     }
 }
