@@ -1,8 +1,8 @@
 # NovelForge Windows 桌面端技术架构文档
 
 ## 1. 文档信息
-- 版本：v0.8
-- 状态：S20（AI 生产系统闭环：策略权威源 + State Ledger + Continuity Pack + 技能运行期 + 滚动蓝图）
+- 版本：v0.9
+- 状态：S21（全面文档维护：迁移文件同步 + 命令注册验证 + 服务组成确认）
 - 最后更新：2026-05-01
 - 代码基线：`src/` + `src-tauri/src/`
 
@@ -32,6 +32,9 @@
 - 页面、交互、状态存储。
 - 通过 `src/api/*` 调用 Tauri command。
 - 编辑器 AI 主链路使用 `pipelineApi`（`runTaskPipeline` + `streamTaskPipeline`）。
+- 编辑器执行层已拆分为：
+  - `usePipelineStream`（流式驱动、错误映射、取消语义）。
+  - `EditorContextPanel`（上下文标签、候选采纳、结构化草案确认）。
 - 编辑器右侧上下文面板支持：
   - `assetCandidates` 候选采纳。
   - `relationshipDrafts` / `involvementDrafts` / `sceneDrafts` 人工确认入库。
@@ -52,17 +55,18 @@
   - 技能管理：`get_skill`, `get_skill_content`, `create_skill`, `update_skill`, `delete_skill`, `import_skill_file`, `reset_builtin_skill`, `refresh_skills`。
 
 ### 4.4 Service 层（`src-tauri/src/services/*`）
-- `AppState` 现有服务：
+- `AppState` 托管服务：
   - `AiPipelineService`, `AiService`
-  - `BackupService`, `ImportService`
+  - `BackupService`, `ImportService`, `ExportService`
   - `ProjectService`, `ChapterService`, `VolumeService`
   - `BlueprintService`, `CharacterService`, `RelationshipService`
   - `WorldService`, `GlossaryService`, `PlotService`, `NarrativeService`
   - `ContextService`, `ConsistencyService`, `DashboardService`, `IntegrityService`
   - `SearchService`, `VectorService`
-  - `StoryStateService`
   - `SettingsService`, `ModelRegistryService`, `GitService`, `LicenseService`
-  - `SkillRegistry`
+  - `SkillRegistry`（Arc<RwLock<SkillRegistry>>）
+- 独立服务（按需实例化）：
+  - `StoryStateService`（状态账本管理，在 `ChapterService`、`ContextService`、`AiPipelineService` 中直接实例化使用）
 
 ### 4.5 Infra 层（`src-tauri/src/infra/*`）
 - `migrator.rs` + `migrations/*`：项目库/应用库迁移管理。
@@ -102,6 +106,7 @@
   - `project/0004_ai_strategy_profile.sql`（项目级 AI 策略配置列）
   - `project/0005_entity_provenance.sql`（正式资产来源轨迹）
   - `project/0006_story_state.sql`（状态账本）
+  - `project/0007_blueprint_certainty_zones.sql`（蓝图确定性分区显式字段 `certainty_zones_json`）
 - 兼容补列：
   - `database.rs::ensure_compatible_schema()` 在打开/初始化时补齐 `projects.writing_style`、`projects.ai_strategy_profile` 等历史缺列。
 
@@ -129,6 +134,9 @@
 - 命令入口：
   - `run_ai_task_pipeline`（新协议）
   - `cancel_ai_task_pipeline`
+- 前端策略入口：
+  - 新调用显式传 `persistMode/automationTier`。
+  - `autoPersist` 仅作 legacy bridge 推导；触发时记录 `PIPELINE.LEGACY_POLICY_BRIDGE` 诊断事件。
 - 事件协议：
   - 主事件：`ai:pipeline:event`
   - 事件类型：`start | progress | delta | done | error`
@@ -170,6 +178,7 @@
 
 ## 8. 当前过渡态与风险
 - compatibility-only 命令（`load_provider_config`、`save_provider_config`、`register_ai_provider`、`test_ai_connection`）仅用于历史调用兼容，计划在 `2026-07-31` 后移除。
+- compatibility-only 命令调用会同时记录 deprecated 统计与 `compatibility_bridge.used` 行为日志，便于收敛与下线审计。
 - Pipeline 对模型可用性、API Key、路由配置依赖强，未配置时会在 `route/generate` 阶段显式失败。
 - 结构化抽取为启发式规则，存在误报；当前策略是“先草案、再人工确认入库”。
 - 向量索引与草案池都会随项目规模增长，需持续关注 DB 体积与索引策略。

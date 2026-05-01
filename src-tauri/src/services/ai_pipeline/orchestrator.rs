@@ -861,7 +861,11 @@ fn infer_scene_bundle_ids(scene_tags: &[String]) -> Vec<String> {
         match tag.trim().to_ascii_lowercase().as_str() {
             "dialogue" => bundles.push("bundle.character-expression".to_string()),
             "emotion" => bundles.push("bundle.emotion-progression".to_string()),
-            "environment" | "battle" => bundles.push("bundle.scene-environment".to_string()),
+            "environment" => bundles.push("bundle.scene-environment".to_string()),
+            "battle" => {
+                bundles.push("bundle.scene-environment".to_string());
+                bundles.push("bundle.rule-fulfillment".to_string());
+            }
             _ => {}
         }
     }
@@ -965,6 +969,7 @@ mod tests {
         assert!(bundles.contains(&"bundle.character-expression".to_string()));
         assert!(bundles.contains(&"bundle.emotion-progression".to_string()));
         assert!(bundles.contains(&"bundle.scene-environment".to_string()));
+        assert!(bundles.contains(&"bundle.rule-fulfillment".to_string()));
     }
 
     #[test]

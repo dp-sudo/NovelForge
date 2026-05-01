@@ -37,6 +37,8 @@ test("确定性分区契约：BlueprintService 校验跨分区重叠并返回专
 
 test("确定性分区契约：Editor 页面对冻结区冲突提供阻断建议", async () => {
   const editor = await readRepoFile("src/pages/Editor/EditorPage.tsx");
-  assert.match(editor, /PIPELINE_FREEZE_CONFLICT/);
-  assert.match(editor, /蓝图 > 章节路线 > 确定性分区/);
+  const streamHook = await readRepoFile("src/pages/Editor/hooks/usePipelineStream.ts");
+  assert.match(editor, /usePipelineStream/);
+  assert.match(streamHook, /PIPELINE_FREEZE_CONFLICT/);
+  assert.match(streamHook, /蓝图 > 章节路线 > 确定性分区/);
 });

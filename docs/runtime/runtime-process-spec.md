@@ -1,8 +1,8 @@
 # NovelForge 运行流程文档（Main / Renderer / API / Service）
 
 ## 1. 文档信息
-- 版本：v0.9
-- 状态：S20（AI 生产系统闭环：策略权威源 + State Ledger + Continuity Pack + 技能运行期）
+- 版本：v1.0
+- 状态：S21（全面文档维护：流程验证 + 命令契约确认）
 - 最后更新：2026-05-01
 
 ## 2. 运行时角色
@@ -27,6 +27,7 @@
 ### 2.4 兼容层
 - 问题3修复：legacy AI 命令 `generate_ai_preview`、`stream_ai_generate`、`stream_ai_chapter_task` 已从当前代码命令面移除。
 - 问题4修复：仅保留少量 compatibility-only 命令（如 `load_provider_config`、`save_provider_config`、`register_ai_provider`、`test_ai_connection`），用于历史调用兼容。
+- compatibility-only 命令在后端会记录两类审计：deprecated usage 计数 + `compatibility_bridge.used` 行为日志。
 
 ## 3. 启动流程
 1. `main.rs` 调用 `app_lib::run()`。
@@ -52,6 +53,7 @@
 1. 点击 9 个固定按钮之一或输入自定义指令。
 2. `EditorPage` 先做前置校验（章节/选区/指令/正文要求）。
 3. 调用 `run_ai_task_pipeline` 得到 `requestId`（输入支持 `autoPersist` + `persistMode` + `automationTier` + 可选 `skillSelection` 请求级覆盖）。
+   - 新调用约束：优先显式传 `persistMode/automationTier`；`autoPersist` 仅保留兼容推导路径，命中时前端记录 `PIPELINE.LEGACY_POLICY_BRIDGE` 诊断事件。
 4. 通过 `streamTaskPipeline` 监听 `ai:pipeline:event`。
 5. 事件按阶段推进：
    - `validate`
@@ -110,6 +112,9 @@
   - `save_task_route` 做 canonical、字段 trim、重试次数边界控制（1..8）。
 
 ### 4.7 设置、备份与发布能力
+- Settings 前端已拆分：
+  - `ModelRoutingPanel`（任务路由配置）。
+  - `DataOpsPanel`（备份恢复、完整性、语义诊断、Git 快照）。
 - 编辑器设置：`load_editor_settings/save_editor_settings`（app DB）。
 - 写作风格：`get_writing_style/save_writing_style`（项目库 `projects.writing_style`）。
 - 项目级 AI 策略：`get_ai_strategy_profile/save_ai_strategy_profile`（项目库 `projects.ai_strategy_profile`）。
