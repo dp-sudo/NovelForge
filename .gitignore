@@ -137,6 +137,7 @@ database/*.sqlite-wal
 # -----------------------------------------------------------------------------
 .omc/
 .claude/
+.worktrees/
 
 # OMC state files
 .omc/**

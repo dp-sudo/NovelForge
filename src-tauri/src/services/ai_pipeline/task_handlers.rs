@@ -8,6 +8,9 @@ use uuid::Uuid;
 use crate::errors::AppErrorDto;
 use crate::infra::database::open_database;
 use crate::infra::time::now_iso;
+use crate::services::ai_pipeline::runtime_state_writer::{
+    build_runtime_story_state_input, should_persist_runtime_state_writes,
+};
 use crate::services::ai_pipeline_service::{PersistedRecord, RunAiTaskPipelineInput};
 use crate::services::glossary_service::CreateGlossaryTermInput;
 use crate::services::narrative_service::CreateObligationInput;
@@ -22,7 +25,7 @@ use crate::services::{
     glossary_service::GlossaryService,
     narrative_service::NarrativeService,
     plot_service::{CreatePlotNodeInput, PlotService},
-    story_state_service::{StoryStateInput, StoryStateService},
+    story_state_service::StoryStateService,
     world_service::{CreateWorldRuleInput, WorldService},
 };
 
@@ -113,22 +116,6 @@ fn open_pipeline_project_context(project_root: &str) -> Result<(Connection, Stri
     let conn = open_pipeline_database(project_root)?;
     let project_id = get_project_id(&conn)?;
     Ok((conn, project_id))
-}
-
-fn preview_text(raw: &str, limit: usize) -> String {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return String::new();
-    }
-    let mut preview = String::new();
-    for (index, ch) in trimmed.chars().enumerate() {
-        if index >= limit {
-            preview.push_str("...");
-            break;
-        }
-        preview.push(ch);
-    }
-    preview
 }
 
 impl TaskHandlers {
@@ -341,7 +328,7 @@ impl TaskHandlers {
         runtime_options: RuntimeStateWriteOptions<'_>,
     ) -> Result<(), AppErrorDto> {
         if runtime_options.state_writes.is_empty()
-            || !Self::should_persist_runtime_state_writes(
+            || !should_persist_runtime_state_writes(
                 canonical_task,
                 input,
                 runtime_options.persist_mode,
@@ -357,7 +344,7 @@ impl TaskHandlers {
         let tx = conn.transaction().map_err(project_db_open_error)?;
 
         for state_write_key in runtime_options.state_writes {
-            let Some(state_input) = Self::build_runtime_story_state_input(
+            let Some(state_input) = build_runtime_story_state_input(
                 canonical_task,
                 input,
                 normalized_output,
@@ -375,138 +362,6 @@ impl TaskHandlers {
 
         tx.commit().map_err(project_db_open_error)?;
         Ok(())
-    }
-
-    fn should_persist_runtime_state_writes(
-        canonical_task: &str,
-        input: &RunAiTaskPipelineInput,
-        persist_mode: &str,
-        state_write_policy: &str,
-    ) -> bool {
-        match persist_mode.trim().to_ascii_lowercase().as_str() {
-            "none" => return false,
-            "derived_review" if !Self::is_review_task(canonical_task) => return false,
-            _ => {}
-        }
-        match state_write_policy.trim().to_ascii_lowercase().as_str() {
-            "manual_only" => {
-                Self::is_promotion_action(input.ui_action.as_deref())
-                    || input
-                        .automation_tier
-                        .as_deref()
-                        .map(str::trim)
-                        .is_some_and(|tier| tier.eq_ignore_ascii_case("confirm"))
-            }
-            "chapter_confirmed" => {
-                input
-                    .chapter_id
-                    .as_deref()
-                    .map(str::trim)
-                    .is_some_and(|chapter_id| !chapter_id.is_empty())
-                    || canonical_task.starts_with("chapter.")
-                    || Self::is_promotion_action(input.ui_action.as_deref())
-            }
-            _ => false,
-        }
-    }
-
-    fn is_review_task(canonical_task: &str) -> bool {
-        canonical_task == "consistency.scan" || canonical_task.ends_with(".review")
-    }
-
-    fn build_runtime_story_state_input(
-        canonical_task: &str,
-        input: &RunAiTaskPipelineInput,
-        normalized_output: &str,
-        request_id: &str,
-        persist_mode: &str,
-        records: &[PersistedRecord],
-        state_write_key: &str,
-        active_skill_ids: &[String],
-        affects_layers: &[String],
-    ) -> Option<StoryStateInput> {
-        let normalized_key = state_write_key.trim();
-        if normalized_key.is_empty() {
-            return None;
-        }
-
-        let (subject_type, state_kind) = normalized_key.split_once('.')?;
-        let subject_type = subject_type.trim().to_ascii_lowercase();
-        let state_kind = state_kind.trim().to_ascii_lowercase();
-        if subject_type.is_empty() || state_kind.is_empty() {
-            return None;
-        }
-
-        let subject_id =
-            Self::resolve_runtime_state_subject_id(&subject_type, input, records)?.to_string();
-        let scope = if input
-            .chapter_id
-            .as_deref()
-            .map(str::trim)
-            .is_some_and(|chapter_id| !chapter_id.is_empty())
-        {
-            "chapter".to_string()
-        } else {
-            "global".to_string()
-        };
-        let record_refs = records
-            .iter()
-            .map(|record| {
-                serde_json::json!({
-                    "entityType": record.entity_type,
-                    "entityId": record.entity_id,
-                    "action": record.action,
-                })
-            })
-            .collect::<Vec<_>>();
-
-        Some(StoryStateInput {
-            subject_type,
-            subject_id,
-            scope,
-            state_kind,
-            payload_json: serde_json::json!({
-                "stateWriteKey": normalized_key,
-                "taskType": canonical_task,
-                "requestId": request_id,
-                "uiAction": input.ui_action.as_deref().map(str::trim).filter(|value| !value.is_empty()),
-                "persistMode": persist_mode.trim(),
-                "automationTier": input.automation_tier.as_deref().map(str::trim).filter(|value| !value.is_empty()),
-                "chapterId": input.chapter_id.as_deref().map(str::trim).filter(|value| !value.is_empty()),
-                "skillIds": active_skill_ids,
-                "affectsLayers": affects_layers,
-                "recordRefs": record_refs,
-                "outputPreview": preview_text(normalized_output, 240),
-            }),
-            source_chapter_id: input.chapter_id.clone(),
-        })
-    }
-
-    fn resolve_runtime_state_subject_id<'a>(
-        subject_type: &str,
-        input: &'a RunAiTaskPipelineInput,
-        records: &'a [PersistedRecord],
-    ) -> Option<&'a str> {
-        match subject_type {
-            "chapter" => records
-                .iter()
-                .find(|record| record.entity_type == "chapter")
-                .map(|record| record.entity_id.as_str())
-                .or(input.chapter_id.as_deref()),
-            "character" => records
-                .iter()
-                .find(|record| record.entity_type == "character")
-                .map(|record| record.entity_id.as_str())
-                .or_else(|| input.chapter_id.as_deref().map(|_| "current_character")),
-            "scene" => Some("current_scene"),
-            "relationship" => records
-                .iter()
-                .find(|record| record.entity_type == "character_relationship_batch")
-                .map(|record| record.entity_id.as_str())
-                .or_else(|| input.chapter_id.as_deref().map(|_| "current_relationship")),
-            "window" => Some("current_window"),
-            _ => Some("current_state"),
-        }
     }
 
     fn record_entity_provenance_for_records(
@@ -2215,6 +2070,7 @@ mod tests {
 
     use super::{RuntimeStateWriteOptions, TaskHandlers};
     use crate::infra::database::open_database;
+    use crate::services::ai_pipeline::runtime_state_writer::should_persist_runtime_state_writes;
     use crate::services::ai_pipeline_service::RunAiTaskPipelineInput;
     use crate::services::chapter_service::{ChapterInput, ChapterService};
     use crate::services::character_service::CharacterService;
@@ -2279,19 +2135,19 @@ mod tests {
         chapter_input.automation_tier = Some("confirm".to_string());
         chapter_input.ui_action = Some("book.pipeline.promote.manual".to_string());
 
-        assert!(!TaskHandlers::should_persist_runtime_state_writes(
+        assert!(!should_persist_runtime_state_writes(
             "chapter.plan",
             &chapter_input,
             "none",
             "chapter_confirmed",
         ));
-        assert!(!TaskHandlers::should_persist_runtime_state_writes(
+        assert!(!should_persist_runtime_state_writes(
             "chapter.plan",
             &chapter_input,
             "derived_review",
             "chapter_confirmed",
         ));
-        assert!(TaskHandlers::should_persist_runtime_state_writes(
+        assert!(should_persist_runtime_state_writes(
             "chapter.plan",
             &chapter_input,
             "formal",
@@ -2303,7 +2159,7 @@ mod tests {
             "timeline.review",
             Some("chapter-1".to_string()),
         );
-        assert!(TaskHandlers::should_persist_runtime_state_writes(
+        assert!(should_persist_runtime_state_writes(
             "timeline.review",
             &review_input,
             "derived_review",

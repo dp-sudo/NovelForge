@@ -6,6 +6,11 @@ use crate::adapters::llm_types::{ContentBlock, Message, UnifiedGenerateRequest};
 use crate::errors::AppErrorDto;
 use crate::services::ai_pipeline::audit_store::PipelineAuditStore;
 use crate::services::ai_pipeline::continuity_pack::ContinuityPackCompiler;
+use crate::services::ai_pipeline::freeze_guard::{detect_freeze_conflict, freeze_conflict_error};
+use crate::services::ai_pipeline::persist_policy::{
+    infer_legacy_persist_mode, is_derived_review_task, parse_persist_mode,
+    should_persist_task_output, PersistMode,
+};
 use crate::services::ai_pipeline::prompt_resolver::PromptResolver;
 use crate::services::ai_pipeline::task_handlers::{RuntimeStateWriteOptions, TaskHandlers};
 use crate::services::ai_pipeline_service::{
@@ -27,6 +32,7 @@ pub const PHASE_GENERATE: &str = "generate";
 pub const PHASE_POSTPROCESS: &str = "postprocess";
 pub const PHASE_PERSIST: &str = "persist";
 pub const PHASE_DONE: &str = "done";
+const FREEZE_CONFLICT_CODE: &str = "PIPELINE_FREEZE_CONFLICT";
 
 #[derive(Debug)]
 pub struct StageError {
@@ -55,29 +61,7 @@ pub struct PipelineOrchestrator<'a> {
     pub input: &'a RunAiTaskPipelineInput,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PersistMode {
-    None,
-    Formal,
-    DerivedReview,
-}
-
-impl PersistMode {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::None => "none",
-            Self::Formal => "formal",
-            Self::DerivedReview => "derived_review",
-        }
-    }
-}
-
 type CertaintyZones = BlueprintCertaintyZones;
-
-#[derive(Debug, Clone)]
-struct FreezeConflict {
-    matched_zone: String,
-}
 
 impl<'a> PipelineOrchestrator<'a> {
     pub async fn run(&self) -> Result<PipelineSuccess, StageError> {
@@ -168,7 +152,7 @@ impl<'a> PipelineOrchestrator<'a> {
                     phase: PHASE_CONTEXT.to_string(),
                     event_type: "progress".to_string(),
                     delta: None,
-                    error_code: None,
+                    error_code: Some(FREEZE_CONFLICT_CODE.to_string()),
                     message: Some("freeze-zone conflict detected".to_string()),
                     recoverable: Some(true),
                     meta: Some(json!({
@@ -934,97 +918,11 @@ fn extract_certainty_zones(
     CertaintyZones::default()
 }
 
-fn detect_freeze_conflict(
-    user_instruction: &str,
-    zones: &CertaintyZones,
-) -> Option<FreezeConflict> {
-    let normalized_instruction = user_instruction.trim();
-    if normalized_instruction.is_empty() || zones.frozen.is_empty() {
-        return None;
-    }
-    let lowered = normalized_instruction.to_ascii_lowercase();
-    let mut has_mutation_intent = false;
-    for keyword in ["修改", "更改", "重写", "推翻", "删除", "改动", "替换"] {
-        if lowered.contains(keyword) {
-            has_mutation_intent = true;
-            break;
-        }
-    }
-    if !has_mutation_intent {
-        return None;
-    }
-    for frozen_item in &zones.frozen {
-        let candidate = frozen_item.trim();
-        if candidate.chars().count() < 2 {
-            continue;
-        }
-        if lowered.contains(&candidate.to_ascii_lowercase()) {
-            return Some(FreezeConflict {
-                matched_zone: candidate.to_string(),
-            });
-        }
-    }
-    None
-}
-
-fn freeze_conflict_error(conflict: &FreezeConflict) -> AppErrorDto {
-    AppErrorDto::new(
-        "PIPELINE_FREEZE_CONFLICT",
-        &format!(
-            "检测到冻结区冲突：请求涉及改写冻结项「{}」，已阻断执行",
-            conflict.matched_zone
-        ),
-        true,
-    )
-    .with_suggested_action("请在蓝图 > 章节路线 > 确定性分区调整冻结区，或修改指令避免改写冻结事实")
-}
-
-fn parse_persist_mode(raw: &str) -> Option<PersistMode> {
-    match raw.trim().to_ascii_lowercase().as_str() {
-        "none" => Some(PersistMode::None),
-        "formal" => Some(PersistMode::Formal),
-        "derived_review" => Some(PersistMode::DerivedReview),
-        _ => None,
-    }
-}
-
-fn infer_legacy_persist_mode(canonical_task: &str) -> PersistMode {
-    if canonical_task.eq_ignore_ascii_case("consistency.scan")
-        || canonical_task.to_ascii_lowercase().contains("review")
-    {
-        PersistMode::DerivedReview
-    } else {
-        PersistMode::Formal
-    }
-}
-
-fn should_persist_task_output(canonical_task: &str, mode: PersistMode) -> bool {
-    match mode {
-        PersistMode::None => false,
-        PersistMode::Formal => true,
-        PersistMode::DerivedReview => is_derived_review_task(canonical_task),
-    }
-}
-
-fn is_derived_review_task(canonical_task: &str) -> bool {
-    matches!(
-        canonical_task,
-        "consistency.scan"
-            | "timeline.review"
-            | "relationship.review"
-            | "dashboard.review"
-            | "export.review"
-    ) || canonical_task.ends_with(".review")
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
-        detect_freeze_conflict, extract_certainty_zones, freeze_conflict_error,
-        infer_legacy_persist_mode,
-        infer_scene_bundle_ids, is_derived_review_task, merge_unique_values, parse_persist_mode,
-        resolve_generation_workflow_stack, should_persist_task_output, CertaintyZones,
-        FreezeConflict, PersistMode,
+        extract_certainty_zones, infer_scene_bundle_ids, merge_unique_values,
+        resolve_generation_workflow_stack, CertaintyZones,
     };
     use crate::services::context_service::{
         BlueprintStepSummary, CollectedContext, GlobalContext, RelatedContext,
@@ -1054,67 +952,6 @@ mod tests {
                 "emotion".to_string()
             ]
         );
-    }
-
-    #[test]
-    fn parse_persist_mode_accepts_contract_values() {
-        assert_eq!(parse_persist_mode("none"), Some(PersistMode::None));
-        assert_eq!(parse_persist_mode("formal"), Some(PersistMode::Formal));
-        assert_eq!(
-            parse_persist_mode("derived_review"),
-            Some(PersistMode::DerivedReview)
-        );
-        assert_eq!(
-            parse_persist_mode(" derived_review "),
-            Some(PersistMode::DerivedReview)
-        );
-    }
-
-    #[test]
-    fn parse_persist_mode_rejects_unknown_values() {
-        assert_eq!(parse_persist_mode(""), None);
-        assert_eq!(parse_persist_mode("legacy"), None);
-        assert_eq!(parse_persist_mode("formal_review"), None);
-    }
-
-    #[test]
-    fn legacy_persist_mode_infers_review_tasks() {
-        assert_eq!(
-            infer_legacy_persist_mode("relationship.review"),
-            PersistMode::DerivedReview
-        );
-        assert_eq!(
-            infer_legacy_persist_mode("consistency.scan"),
-            PersistMode::DerivedReview
-        );
-        assert_eq!(
-            infer_legacy_persist_mode("chapter.plan"),
-            PersistMode::Formal
-        );
-    }
-
-    #[test]
-    fn derived_review_mode_only_persists_review_like_tasks() {
-        assert!(is_derived_review_task("timeline.review"));
-        assert!(is_derived_review_task("dashboard.review"));
-        assert!(!is_derived_review_task("chapter.draft"));
-
-        assert!(should_persist_task_output(
-            "timeline.review",
-            PersistMode::DerivedReview
-        ));
-        assert!(!should_persist_task_output(
-            "chapter.plan",
-            PersistMode::DerivedReview
-        ));
-        assert!(!should_persist_task_output(
-            "chapter.plan",
-            PersistMode::None
-        ));
-        assert!(should_persist_task_output(
-            "chapter.plan",
-            PersistMode::Formal
-        ));
     }
 
     #[test]
@@ -1165,26 +1002,6 @@ mod tests {
         assert_eq!(zones.frozen, vec!["终局真相".to_string()]);
         assert_eq!(zones.promised, vec!["主角将直面宗门审判".to_string()]);
         assert_eq!(zones.exploratory, vec!["支线人物立场可变化".to_string()]);
-    }
-
-    #[test]
-    fn detect_freeze_conflict_flags_mutation_on_frozen_items() {
-        let zones = CertaintyZones {
-            frozen: vec!["终局真相".to_string()],
-            promised: vec![],
-            exploratory: vec![],
-        };
-        assert!(detect_freeze_conflict("请重写终局真相的揭示方式", &zones).is_some());
-        assert!(detect_freeze_conflict("补充一个新支线", &zones).is_none());
-    }
-
-    #[test]
-    fn freeze_conflict_error_uses_blocking_code() {
-        let err = freeze_conflict_error(&FreezeConflict {
-            matched_zone: "终局真相".to_string(),
-        });
-        assert_eq!(err.code, "PIPELINE_FREEZE_CONFLICT");
-        assert!(err.message.contains("终局真相"));
     }
 
     #[test]
