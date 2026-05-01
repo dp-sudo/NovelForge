@@ -97,7 +97,8 @@ const PIPELINE_SUGGESTION_BY_ERROR_CODE: Record<string, string> = {
   PIPELINE_START_TIMEOUT: "任务启动超时，可能是开发热重载或后端回调中断，重试前先确认页面未重载。",
   PIPELINE_FIRST_EVENT_TIMEOUT: "任务已启动但未收到事件，可能存在事件监听竞态或开发热重载，请重试。",
   PIPELINE_EVENT_TIMEOUT: "模型响应超时，请检查网络/API 密钥或切换模型后重试。",
-  PIPELINE_CANCELLED: "任务已取消，可重新发起。"
+  PIPELINE_CANCELLED: "任务已取消，可重新发起。",
+  PIPELINE_FREEZE_CONFLICT: "请到 蓝图 > 章节路线 > 确定性分区 调整冻结区，或修改指令避免改写冻结事实。"
 };
 
 const PIPELINE_SUGGESTION_BY_PHASE: Record<string, string> = {

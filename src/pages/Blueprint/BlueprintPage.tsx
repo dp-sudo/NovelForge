@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { Card } from "../../components/cards/Card.js";
 import { Badge } from "../../components/ui/Badge.js";
 import { Button } from "../../components/ui/Button.js";
@@ -106,6 +106,62 @@ function stringifyCertaintyZoneText(items: string[]): string {
 
 function hasCertaintyZones(zones: BlueprintCertaintyZones): boolean {
   return zones.frozen.length > 0 || zones.promised.length > 0 || zones.exploratory.length > 0;
+}
+
+function validateCertaintyZones(zones: BlueprintCertaintyZones): string[] {
+  const ownership = new Map<string, string>();
+  const overlaps = new Set<string>();
+  const register = (zoneLabel: string, entries: string[]) => {
+    for (const entry of entries) {
+      const normalized = normalizeCertaintyItem(entry).toLowerCase();
+      if (!normalized) continue;
+      const existing = ownership.get(normalized);
+      if (!existing) {
+        ownership.set(normalized, zoneLabel);
+        continue;
+      }
+      if (existing !== zoneLabel) {
+        overlaps.add(`${entry}（${existing} / ${zoneLabel}）`);
+      }
+    }
+  };
+
+  register("冻结区", zones.frozen);
+  register("承诺区", zones.promised);
+  register("探索区", zones.exploratory);
+
+  return Array.from(overlaps).slice(0, 8);
+}
+
+function parseErrorCode(message: string): string | undefined {
+  const match = message.match(/^\[([A-Z0-9_]+)\]/);
+  return match?.[1];
+}
+
+function normalizeUiError(error: unknown): { errorCode?: string; message: string } {
+  if (error && typeof error === "object") {
+    const candidate = error as { code?: unknown; message?: unknown };
+    if (typeof candidate.code === "string" && typeof candidate.message === "string") {
+      return { errorCode: candidate.code, message: candidate.message };
+    }
+  }
+  if (error instanceof Error) {
+    return { errorCode: parseErrorCode(error.message), message: error.message };
+  }
+  return { message: "执行失败，请稍后重试。" };
+}
+
+function formatPipelineBlockingTip(errorCode?: string, message?: string): string {
+  const normalizedMessage = (message ?? "").trim();
+  if (errorCode === "PIPELINE_FREEZE_CONFLICT") {
+    const base = normalizedMessage || "检测到冻结区冲突，已阻断本次执行。";
+    return `${base} 请到“蓝图 > 章节路线 > 确定性分区”调整冻结区，或修改指令避免改写冻结事实。`;
+  }
+  if (errorCode === "BLUEPRINT_CERTAINTY_ZONES_OVERLAP") {
+    const base = normalizedMessage || "确定性分区冲突：同一条目不能同时出现在多个分区。";
+    return `${base} 请将冲突条目只保留在一个分区后再保存。`;
+  }
+  return normalizedMessage || "编排执行失败";
 }
 
 function parseCertaintyZonesFromLegacyContent(content: string): BlueprintCertaintyZones {
@@ -504,11 +560,17 @@ export function BlueprintPage() {
   const [summaryFeedback, setSummaryFeedback] = useState<SummaryFeedbackData | null>(null);
   const [loopLoading, setLoopLoading] = useState(false);
   const [loopError, setLoopError] = useState<string | null>(null);
+  const [certaintyValidationNotice, setCertaintyValidationNotice] = useState<string | null>(null);
   const projectRoot = useProjectStore((s) => s.currentProjectPath);
   const activeEditorChapterId = useEditorStore((s) => s.activeChapterId);
 
   const cur = STEPS[activeIdx];
   const status: StepStatus = (steps[activeIdx]?.status as StepStatus) ?? "not_started";
+  const certaintyZoneErrors = useMemo(
+    () => (cur.key === "step-08-chapters" ? validateCertaintyZones(certaintyZones) : []),
+    [cur.key, certaintyZones],
+  );
+  const hasCertaintyZoneConflict = certaintyZoneErrors.length > 0;
 
   const load = useCallback(async () => {
     if (!projectRoot) { setSteps([]); return; }
@@ -574,6 +636,7 @@ export function BlueprintPage() {
       setCertaintyZones({ ...EMPTY_CERTAINTY_ZONES });
     }
     setAiResult(null);
+    setCertaintyValidationNotice(null);
   }, [steps, activeIdx, cur.key]);
 
   function hasContent(): boolean {
@@ -644,8 +707,18 @@ export function BlueprintPage() {
     });
   }, [cur.key]);
 
+  useEffect(() => {
+    if (!hasCertaintyZoneConflict) {
+      setCertaintyValidationNotice(null);
+    }
+  }, [hasCertaintyZoneConflict]);
+
   async function handlePromoteCurrentStep() {
     if (!projectRoot || promotionRunning) return;
+    if (cur.key === "step-08-chapters" && hasCertaintyZoneConflict) {
+      setCertaintyValidationNotice("确定性分区存在冲突，已阻断晋升；请先修复冲突条目。");
+      return;
+    }
     const targets = getPromotionTargets();
     if (targets.length === 0) {
       setBookPipelineStatus("当前步骤暂无可晋升资产");
@@ -692,7 +765,9 @@ export function BlueprintPage() {
       setBookPipelineStatus(`已完成晋升：${stage.label}`);
       await Promise.all([load(), loadPromotionChapters(), loadLoopData()]);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "晋升执行失败";
+      const rawMessage = error instanceof Error ? error.message : "晋升执行失败";
+      const errorCode = parseErrorCode(rawMessage);
+      const message = formatPipelineBlockingTip(errorCode, rawMessage);
       setBookPipelineLogs((prev) => [...prev, `晋升失败：${stage.label} - ${message}`]);
       setBookPipelineStatus(message);
     } finally {
@@ -702,6 +777,10 @@ export function BlueprintPage() {
 
   async function handleSave() {
     if (!projectRoot) return;
+    if (cur.key === "step-08-chapters" && hasCertaintyZoneConflict) {
+      setCertaintyValidationNotice("确定性分区存在冲突，已阻断保存；请先修复冲突条目。");
+      return;
+    }
     setSaving(true);
     try {
       const json = JSON.stringify(formData);
@@ -713,23 +792,39 @@ export function BlueprintPage() {
         cur.key === "step-08-chapters" ? certaintyZones : undefined,
       );
       await Promise.all([load(), loadLoopData()]);
+    } catch (error) {
+      const normalized = normalizeUiError(error);
+      setCertaintyValidationNotice(
+        formatPipelineBlockingTip(normalized.errorCode, normalized.message),
+      );
     } finally { setSaving(false); }
   }
 
   async function handleComplete() {
     if (!projectRoot) return;
-    if (hasContent()) {
-      const json = JSON.stringify(formData);
-      await saveBlueprintStep(
-        cur.key,
-        json,
-        false,
-        projectRoot,
-        cur.key === "step-08-chapters" ? certaintyZones : undefined,
+    if (cur.key === "step-08-chapters" && hasCertaintyZoneConflict) {
+      setCertaintyValidationNotice("确定性分区存在冲突，已阻断“标记完成”；请先修复冲突条目。");
+      return;
+    }
+    try {
+      if (hasContent()) {
+        const json = JSON.stringify(formData);
+        await saveBlueprintStep(
+          cur.key,
+          json,
+          false,
+          projectRoot,
+          cur.key === "step-08-chapters" ? certaintyZones : undefined,
+        );
+      }
+      await markBlueprintCompleted(cur.key, projectRoot);
+      await Promise.all([load(), loadLoopData()]);
+    } catch (error) {
+      const normalized = normalizeUiError(error);
+      setCertaintyValidationNotice(
+        formatPipelineBlockingTip(normalized.errorCode, normalized.message),
       );
     }
-    await markBlueprintCompleted(cur.key, projectRoot);
-    await Promise.all([load(), loadLoopData()]);
   }
 
   async function handleReset() {
@@ -768,8 +863,10 @@ export function BlueprintPage() {
       });
       setAiResult(suggestion.trim() ? suggestion : "AI 返回为空内容，请重试或切换模型后再试。");
       await Promise.all([load(), loadLoopData()]);
-    } catch {
-      setAiResult("AI 建议生成失败。请检查 AI 供应商配置。");
+    } catch (error) {
+      const rawMessage = error instanceof Error ? error.message : "AI 建议生成失败。请检查 AI 供应商配置。";
+      const errorCode = parseErrorCode(rawMessage);
+      setAiResult(formatPipelineBlockingTip(errorCode, rawMessage));
     } finally { setAiLoading(false); }
   }
 
@@ -810,8 +907,9 @@ export function BlueprintPage() {
           continue;
         }
         if (event.type === "stage-error") {
-          setBookPipelineLogs((prev) => [...prev, `失败：${event.stageLabel} - ${event.message}`]);
-          setBookPipelineStatus(event.message);
+          const message = formatPipelineBlockingTip(event.errorCode, event.message);
+          setBookPipelineLogs((prev) => [...prev, `失败：${event.stageLabel} - ${message}`]);
+          setBookPipelineStatus(message);
           return;
         }
       }
@@ -873,8 +971,21 @@ export function BlueprintPage() {
               </div>
               <div className="flex gap-2">
                 <Button variant="ghost" size="sm" onClick={handleReset}>重置</Button>
-                <Button variant="secondary" size="sm" loading={saving} onClick={() => void handleSave()}>保存</Button>
-                <Button variant="primary" size="sm" onClick={() => void handleComplete()}>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  loading={saving}
+                  onClick={() => void handleSave()}
+                  disabled={cur.key === "step-08-chapters" && hasCertaintyZoneConflict}
+                >
+                  保存
+                </Button>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={() => void handleComplete()}
+                  disabled={cur.key === "step-08-chapters" && hasCertaintyZoneConflict}
+                >
                   {status === "completed" ? "已完成 ✓" : "标记完成"}
                 </Button>
                 {status === "completed" && getPromotionTargets().length > 0 && (
@@ -883,6 +994,7 @@ export function BlueprintPage() {
                     size="sm"
                     loading={promotionRunning}
                     onClick={() => void handlePromoteCurrentStep()}
+                    disabled={cur.key === "step-08-chapters" && hasCertaintyZoneConflict}
                   >
                     确认并晋升
                   </Button>
@@ -928,7 +1040,22 @@ export function BlueprintPage() {
 
             <StepForm stepKey={cur.key} data={formData} onChange={handleFormChange} />
             {cur.key === "step-08-chapters" && (
-              <CertaintyZonesEditor zones={certaintyZones} onChange={setCertaintyZones} />
+              <>
+                <CertaintyZonesEditor zones={certaintyZones} onChange={setCertaintyZones} />
+                {hasCertaintyZoneConflict && (
+                  <div className="mt-3 rounded-lg border border-error/40 bg-error/10 px-3 py-2">
+                    <p className="text-xs font-medium text-error">分区冲突（已阻断保存/完成/晋升）</p>
+                    <ul className="mt-1 space-y-1 text-xs text-error">
+                      {certaintyZoneErrors.map((error, index) => (
+                        <li key={`${error}-${index}`}>- {error}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {certaintyValidationNotice && (
+                  <p className="mt-2 text-xs text-warning">{certaintyValidationNotice}</p>
+                )}
+              </>
             )}
 
             {hasContent() && (

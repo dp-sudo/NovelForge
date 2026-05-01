@@ -72,6 +72,10 @@ fn normalize_zone_line(raw: &str) -> String {
         .to_string()
 }
 
+fn normalize_zone_key(raw: &str) -> String {
+    normalize_zone_line(raw).to_ascii_lowercase()
+}
+
 fn normalize_zone_entries(entries: Vec<String>) -> Vec<String> {
     let mut normalized = Vec::new();
     for entry in entries {
@@ -104,6 +108,64 @@ fn normalize_certainty_zones(zones: BlueprintCertaintyZones) -> Option<Blueprint
     } else {
         None
     }
+}
+
+fn validate_certainty_zone_conflicts(
+    step_key: &str,
+    zones: &Option<BlueprintCertaintyZones>,
+) -> Result<(), AppErrorDto> {
+    if step_key != "step-08-chapters" {
+        return Ok(());
+    }
+    let Some(zones) = zones else {
+        return Ok(());
+    };
+
+    let mut ownership = std::collections::BTreeMap::<String, String>::new();
+    let mut overlaps = Vec::<String>::new();
+    let register = |zone_label: &str,
+                    entries: &[String],
+                    ownership: &mut std::collections::BTreeMap<String, String>,
+                    overlaps: &mut Vec<String>| {
+        for entry in entries {
+            let normalized = normalize_zone_key(entry);
+            if normalized.is_empty() {
+                continue;
+            }
+            if let Some(existing_zone) = ownership.get(&normalized) {
+                if existing_zone != zone_label {
+                    overlaps.push(format!("{}（{} / {}）", entry, existing_zone, zone_label));
+                }
+                continue;
+            }
+            ownership.insert(normalized, zone_label.to_string());
+        }
+    };
+
+    register("冻结区", &zones.frozen, &mut ownership, &mut overlaps);
+    register("承诺区", &zones.promised, &mut ownership, &mut overlaps);
+    register("探索区", &zones.exploratory, &mut ownership, &mut overlaps);
+
+    if overlaps.is_empty() {
+        return Ok(());
+    }
+    overlaps.sort();
+    overlaps.dedup();
+    let detail = overlaps
+        .iter()
+        .take(8)
+        .cloned()
+        .collect::<Vec<_>>()
+        .join("；");
+    Err(
+        AppErrorDto::new(
+            "BLUEPRINT_CERTAINTY_ZONES_OVERLAP",
+            "确定性分区冲突：同一条目不能同时出现在多个分区",
+            true,
+        )
+        .with_detail(detail)
+        .with_suggested_action("请将冲突条目只保留在一个分区（冻结区/承诺区/探索区）后再保存"),
+    )
 }
 
 fn json_value_to_zone_items(value: &Value) -> Vec<String> {
@@ -302,6 +364,7 @@ impl BlueprintService {
         } else {
             None
         };
+        validate_certainty_zone_conflicts(&input.step_key, &normalized_certainty_zones)?;
         let certainty_zones_json = stringify_certainty_zones(&normalized_certainty_zones);
 
         if let Some((id, _)) = existing {
@@ -631,6 +694,41 @@ mod tests {
         assert_eq!(certainty.frozen, vec!["终局真相".to_string()]);
         assert_eq!(certainty.promised, vec!["主角将直面宗门审判".to_string()]);
         assert_eq!(certainty.exploratory, vec!["支线人物立场可变化".to_string()]);
+
+        remove_temp_workspace(&ws);
+    }
+
+    #[test]
+    fn save_step_rejects_overlapping_certainty_zone_entries() {
+        let ws = create_temp_workspace();
+        let ps = ProjectService;
+        let bs = BlueprintService;
+        let project = ps
+            .create_project(CreateProjectInput {
+                name: "蓝图确定性冲突测试".into(),
+                author: None,
+                genre: "测试".into(),
+                target_words: None,
+                save_directory: ws.to_string_lossy().into(),
+            })
+            .expect("project created");
+
+        let err = bs
+            .save_step(
+                &project.project_root,
+                SaveBlueprintStepInput {
+                    step_key: "step-08-chapters".into(),
+                    content: "{\"volumeStructure\":\"第一卷\"}".into(),
+                    ai_generated: None,
+                    certainty_zones: Some(BlueprintCertaintyZones {
+                        frozen: vec!["终局真相".into()],
+                        promised: vec!["终局真相".into()],
+                        exploratory: vec![],
+                    }),
+                },
+            )
+            .expect_err("overlap should be rejected");
+        assert_eq!(err.code, "BLUEPRINT_CERTAINTY_ZONES_OVERLAP");
 
         remove_temp_workspace(&ws);
     }

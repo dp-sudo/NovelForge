@@ -69,6 +69,7 @@
   - `reset_blueprint_step(projectRoot, stepKey) -> void`
   - `BlueprintStep` 新增 `certaintyZones?: { frozen: string[]; promised: string[]; exploratory: string[] }`（当前用于 `step-08-chapters`）。
   - `save_blueprint_step.input` 新增可选 `certaintyZones`，作为确定性分区显式 DTO（优先于旧文本分区解析）。
+  - 分区校验规则：同一条目不可跨分区重叠；冲突时返回 `BLUEPRINT_CERTAINTY_ZONES_OVERLAP`。
 - Character + Relationship：
   - `list_characters`, `create_character`, `update_character`, `delete_character`
   - `list_character_relationships`, `create_character_relationship`, `delete_character_relationship`
@@ -170,6 +171,7 @@
     - 若技能声明 `affectsLayers`，`orchestrator` 会按聚合后的 layer focus 对 `ContinuityPack` 进行裁剪（保留 constitution/lexicon 护栏层）。
     - 若技能命中 `route_override`，仅覆盖本次请求的 provider/model，不修改项目配置。
     - 若激活技能声明 `stateWrites`，后端会按项目级 `stateWritePolicy` 追加 `story_state` 记录，并写入 `skillIds/affectsLayers` 运行态元数据。
+    - 若检测到用户指令改写冻结区条目，后端返回 `PIPELINE_FREEZE_CONFLICT` 并阻断执行。
 - AI 功能任务（前端薄封装，统一走 pipeline）：
   - `generateBlueprintSuggestion` -> `runModuleAiTask(taskType="blueprint.generate_step")`
   - `aiGenerateCharacter` -> `runModuleAiTask(taskType="character.create")`

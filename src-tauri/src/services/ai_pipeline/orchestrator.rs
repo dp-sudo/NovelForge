@@ -160,11 +160,36 @@ impl<'a> PipelineOrchestrator<'a> {
         let certainty_zones = extract_certainty_zones(&context);
         let freeze_conflict =
             detect_freeze_conflict(self.input.user_instruction.as_str(), &certainty_zones);
+        if let Some(conflict) = freeze_conflict.as_ref() {
+            self.pipeline_service.emit_event(
+                self.app_handle,
+                AiPipelineEvent {
+                    request_id: self.request_id.to_string(),
+                    phase: PHASE_CONTEXT.to_string(),
+                    event_type: "progress".to_string(),
+                    delta: None,
+                    error_code: None,
+                    message: Some("freeze-zone conflict detected".to_string()),
+                    recoverable: Some(true),
+                    meta: Some(json!({
+                        "freezeConflict": conflict.matched_zone,
+                        "certaintyZones": {
+                            "frozen": certainty_zones.frozen,
+                            "promised": certainty_zones.promised,
+                            "exploratory": certainty_zones.exploratory,
+                        },
+                    })),
+                },
+            );
+            return Err(StageError {
+                phase: PHASE_CONTEXT,
+                error: freeze_conflict_error(conflict),
+            });
+        }
         let selection_context = self.build_skill_selection_context(
             &strategy_profile,
             &context,
             &certainty_zones,
-            freeze_conflict.as_ref(),
         );
 
         self.audit_store.touch_pipeline_phase(
@@ -425,7 +450,7 @@ impl<'a> PipelineOrchestrator<'a> {
             self.request_id,
             PHASE_PERSIST,
         );
-        let persist_mode = self.resolve_persist_mode(freeze_conflict.is_some());
+        let persist_mode = self.resolve_persist_mode();
         let should_persist_output = should_persist_task_output(self.canonical_task, persist_mode);
         self.pipeline_service.emit_event(
             self.app_handle,
@@ -447,7 +472,6 @@ impl<'a> PipelineOrchestrator<'a> {
                         "promised": certainty_zones.promised,
                         "exploratory": certainty_zones.exploratory,
                     },
-                    "freezeConflict": freeze_conflict.as_ref().map(|conflict| conflict.matched_zone.as_str()),
                 })),
             },
         );
@@ -677,7 +701,6 @@ impl<'a> PipelineOrchestrator<'a> {
         profile: &AiStrategyProfile,
         context: &crate::services::context_service::CollectedContext,
         certainty_zones: &CertaintyZones,
-        freeze_conflict: Option<&FreezeConflict>,
     ) -> SkillSelectionContext {
         let runtime = self.input.skill_selection.as_ref();
         let runtime_explicit_skill_ids = runtime
@@ -700,24 +723,12 @@ impl<'a> PipelineOrchestrator<'a> {
         } else {
             self.infer_scene_tags(context)
         };
-        let inferred_scene_tags = if freeze_conflict.is_some() {
-            merge_unique_values(&inferred_scene_tags, &["freeze_conflict".to_string()])
-        } else {
-            inferred_scene_tags
-        };
         let scene_bundle_ids = infer_scene_bundle_ids(&inferred_scene_tags);
         let generation_workflow_stack =
             resolve_generation_workflow_stack(profile, self.canonical_task);
         let baseline_explicit_skill_ids =
             merge_unique_values(&generation_workflow_stack, &profile.always_on_policy_skills);
-        let explicit_skill_ids = if freeze_conflict.is_some() {
-            merge_unique_values(
-                &baseline_explicit_skill_ids,
-                &["consistency.scan".to_string()],
-            )
-        } else {
-            baseline_explicit_skill_ids
-        };
+        let explicit_skill_ids = baseline_explicit_skill_ids;
         let mut available_contexts = self.collect_available_contexts(context);
         if certainty_zones.has_any() {
             available_contexts.push("certainty_zones".to_string());
@@ -754,7 +765,7 @@ impl<'a> PipelineOrchestrator<'a> {
         profile.automation_default.to_string()
     }
 
-    fn resolve_persist_mode(&self, freeze_conflict: bool) -> PersistMode {
+    fn resolve_persist_mode(&self) -> PersistMode {
         let explicit = self
             .input
             .persist_mode
@@ -773,11 +784,7 @@ impl<'a> PipelineOrchestrator<'a> {
             None if self.input.auto_persist => infer_legacy_persist_mode(self.canonical_task),
             None => PersistMode::None,
         };
-        if freeze_conflict && mode == PersistMode::Formal {
-            PersistMode::DerivedReview
-        } else {
-            mode
-        }
+        mode
     }
 
     fn collect_available_contexts(
@@ -960,6 +967,18 @@ fn detect_freeze_conflict(
     None
 }
 
+fn freeze_conflict_error(conflict: &FreezeConflict) -> AppErrorDto {
+    AppErrorDto::new(
+        "PIPELINE_FREEZE_CONFLICT",
+        &format!(
+            "检测到冻结区冲突：请求涉及改写冻结项「{}」，已阻断执行",
+            conflict.matched_zone
+        ),
+        true,
+    )
+    .with_suggested_action("请在蓝图 > 章节路线 > 确定性分区调整冻结区，或修改指令避免改写冻结事实")
+}
+
 fn parse_persist_mode(raw: &str) -> Option<PersistMode> {
     match raw.trim().to_ascii_lowercase().as_str() {
         "none" => Some(PersistMode::None),
@@ -1001,9 +1020,11 @@ fn is_derived_review_task(canonical_task: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        detect_freeze_conflict, extract_certainty_zones, infer_legacy_persist_mode,
+        detect_freeze_conflict, extract_certainty_zones, freeze_conflict_error,
+        infer_legacy_persist_mode,
         infer_scene_bundle_ids, is_derived_review_task, merge_unique_values, parse_persist_mode,
-        resolve_generation_workflow_stack, should_persist_task_output, CertaintyZones, PersistMode,
+        resolve_generation_workflow_stack, should_persist_task_output, CertaintyZones,
+        FreezeConflict, PersistMode,
     };
     use crate::services::context_service::{
         BlueprintStepSummary, CollectedContext, GlobalContext, RelatedContext,
@@ -1155,6 +1176,15 @@ mod tests {
         };
         assert!(detect_freeze_conflict("请重写终局真相的揭示方式", &zones).is_some());
         assert!(detect_freeze_conflict("补充一个新支线", &zones).is_none());
+    }
+
+    #[test]
+    fn freeze_conflict_error_uses_blocking_code() {
+        let err = freeze_conflict_error(&FreezeConflict {
+            matched_zone: "终局真相".to_string(),
+        });
+        assert_eq!(err.code, "PIPELINE_FREEZE_CONFLICT");
+        assert!(err.message.contains("终局真相"));
     }
 
     #[test]

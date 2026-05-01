@@ -63,6 +63,7 @@
    - `persist`
    - `done`
 6. 若报错，前端按 `errorCode + phase` 映射建议动作并展示。
+   - 命中冻结区改写冲突时，后端返回 `PIPELINE_FREEZE_CONFLICT` 并阻断执行（不再仅做持久化降级）。
 7. 用户可触发 `cancel_ai_task_pipeline` 取消进行中的任务。
 
 #### 4.3.1 章节链路（Task 10 对齐）
