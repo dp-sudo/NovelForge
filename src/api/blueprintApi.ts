@@ -1,7 +1,7 @@
 import { invokeCommand } from "./tauriClient.js";
 import { runModuleAiTask } from "./moduleAiApi.js";
 import type { BlueprintStepKey, BlueprintStepStatus } from "../domain/constants.js";
-import { parseBlueprintContent } from "../domain/types.js";
+import { parseBlueprintContent, type BlueprintCertaintyZones } from "../domain/types.js";
 import { listChapters } from "./chapterApi.js";
 import { getProjectAiStrategy } from "./settingsApi.js";
 
@@ -14,6 +14,7 @@ export interface BlueprintStepRow {
   contentPath: string;
   status: BlueprintStepStatus;
   aiGenerated: boolean;
+  certaintyZones?: BlueprintCertaintyZones;
   completedAt?: string;
   createdAt: string;
   updatedAt: string;
@@ -27,9 +28,13 @@ export async function saveBlueprintStep(
   stepKey: BlueprintStepKey,
   content: string,
   aiGenerated = false,
-  projectRoot: string
+  projectRoot: string,
+  certaintyZones?: BlueprintCertaintyZones
 ): Promise<void> {
-  await invokeCommand<void>("save_blueprint_step", { projectRoot, input: { stepKey, content, aiGenerated } });
+  await invokeCommand<void>("save_blueprint_step", {
+    projectRoot,
+    input: { stepKey, content, aiGenerated, certaintyZones },
+  });
 }
 
 export async function markBlueprintCompleted(stepKey: BlueprintStepKey, projectRoot: string): Promise<void> {

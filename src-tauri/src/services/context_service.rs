@@ -11,6 +11,7 @@ use crate::errors::AppErrorDto;
 use crate::infra::database::open_database;
 use crate::infra::path_utils::resolve_project_relative_path;
 use crate::infra::time::now_iso;
+use crate::services::blueprint_service::{parse_certainty_zones_json, BlueprintCertaintyZones};
 use crate::services::chapter_service::ChapterService;
 use crate::services::import_service::{extract_asset_candidates, AssetExtractionCandidate};
 use crate::services::project_service::{get_project_id, WritingStyle};
@@ -34,6 +35,7 @@ pub struct BlueprintStepSummary {
     pub step_key: String,
     pub title: String,
     pub content: Option<String>,
+    pub certainty_zones: Option<BlueprintCertaintyZones>,
     pub status: String,
 }
 
@@ -2224,15 +2226,17 @@ impl ContextService {
         // Blueprint steps
         let blueprint_summary: Vec<BlueprintStepSummary> = conn
             .prepare(
-                "SELECT step_key, title, content, status FROM blueprint_steps WHERE project_id = ?1 ORDER BY step_key",
+                "SELECT step_key, title, content, COALESCE(certainty_zones_json,''), status FROM blueprint_steps WHERE project_id = ?1 ORDER BY step_key",
             )
             .map_err(|_| context_query_failed("查询蓝图失败"))?
             .query_map(params![project_id], |row| {
+                let certainty_raw: String = row.get(3)?;
                 Ok(BlueprintStepSummary {
                     step_key: row.get(0)?,
                     title: row.get(1)?,
                     content: row.get::<_, Option<String>>(2)?,
-                    status: row.get(3)?,
+                    certainty_zones: parse_certainty_zones_json(&certainty_raw),
+                    status: row.get(4)?,
                 })
             })
             .map_err(|_| context_query_failed("查询蓝图失败"))?

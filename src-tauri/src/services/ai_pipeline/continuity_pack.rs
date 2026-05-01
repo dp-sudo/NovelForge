@@ -262,6 +262,7 @@ mod tests {
                     step_key: "step-03-premise".to_string(),
                     title: "故事母题".to_string(),
                     content: Some("少年误入禁地".to_string()),
+                    certainty_zones: None,
                     status: "completed".to_string(),
                 }],
             },

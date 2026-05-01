@@ -56,6 +56,10 @@ fn project_migrations() -> Vec<Migration> {
             version: "0006_story_state",
             sql: include_str!("../../migrations/project/0006_story_state.sql"),
         },
+        Migration {
+            version: "0007_blueprint_certainty_zones",
+            sql: include_str!("../../migrations/project/0007_blueprint_certainty_zones.sql"),
+        },
     ]
 }
 

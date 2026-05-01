@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS blueprint_steps (
   content_path TEXT,
   status TEXT NOT NULL DEFAULT 'not_started',
   ai_generated INTEGER NOT NULL DEFAULT 0,
+  certainty_zones_json TEXT NOT NULL DEFAULT '',
   completed_at TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,

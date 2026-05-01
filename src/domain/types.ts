@@ -42,9 +42,16 @@ export interface BlueprintStep {
   contentPath: string;
   status: BlueprintStepStatus;
   aiGenerated: boolean;
+  certaintyZones?: BlueprintCertaintyZones;
   completedAt?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface BlueprintCertaintyZones {
+  frozen: string[];
+  promised: string[];
+  exploratory: string[];
 }
 
 export interface CharacterInput {

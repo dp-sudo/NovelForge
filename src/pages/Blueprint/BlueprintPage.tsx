@@ -26,7 +26,11 @@ import { runModuleAiTask } from "../../api/moduleAiApi.js";
 import { getSummaryFeedback, type SummaryFeedbackData } from "../../api/contextApi.js";
 import { useProjectStore } from "../../stores/projectStore.js";
 import { useEditorStore } from "../../stores/editorStore.js";
-import { parseBlueprintContent, serializeBlueprintContent } from "../../domain/types.js";
+import {
+  parseBlueprintContent,
+  serializeBlueprintContent,
+  type BlueprintCertaintyZones,
+} from "../../domain/types.js";
 import type { BlueprintStepKey } from "../../domain/constants.js";
 
 interface StepDef {
@@ -73,6 +77,103 @@ const RHYTHM_OPTIONS = [
 ];
 
 type StepStatus = "not_started" | "in_progress" | "completed";
+
+const EMPTY_CERTAINTY_ZONES: BlueprintCertaintyZones = {
+  frozen: [],
+  promised: [],
+  exploratory: [],
+};
+
+function normalizeCertaintyItem(raw: string): string {
+  return raw
+    .trim()
+    .replace(/^[-*]\s*/, "")
+    .replace(/^\d+\.\s*/, "")
+    .trim();
+}
+
+function parseCertaintyZoneText(raw: string): string[] {
+  const lines = raw
+    .split(/\r?\n|[;；]/)
+    .map((line) => normalizeCertaintyItem(line))
+    .filter((line) => line.length > 0);
+  return Array.from(new Set(lines)).slice(0, 24);
+}
+
+function stringifyCertaintyZoneText(items: string[]): string {
+  return items.join("\n");
+}
+
+function hasCertaintyZones(zones: BlueprintCertaintyZones): boolean {
+  return zones.frozen.length > 0 || zones.promised.length > 0 || zones.exploratory.length > 0;
+}
+
+function parseCertaintyZonesFromLegacyContent(content: string): BlueprintCertaintyZones {
+  if (!content.trim()) return { ...EMPTY_CERTAINTY_ZONES };
+  try {
+    const parsed = JSON.parse(content) as {
+      certaintyZones?: Partial<BlueprintCertaintyZones>;
+      certainty_zones?: Partial<BlueprintCertaintyZones>;
+      frozen?: string[] | string;
+      promised?: string[] | string;
+      exploratory?: string[] | string;
+    };
+    const candidate = parsed.certaintyZones ?? parsed.certainty_zones ?? parsed;
+    const list = (value: unknown): string[] => {
+      if (typeof value === "string") return parseCertaintyZoneText(value);
+      if (Array.isArray(value)) {
+        return Array.from(
+          new Set(
+            value
+              .filter((item): item is string => typeof item === "string")
+              .map((item) => normalizeCertaintyItem(item))
+              .filter((item) => item.length > 0),
+          ),
+        ).slice(0, 24);
+      }
+      return [];
+    };
+    const zones = {
+      frozen: list(candidate.frozen),
+      promised: list(candidate.promised),
+      exploratory: list(candidate.exploratory),
+    };
+    if (hasCertaintyZones(zones)) return zones;
+  } catch {
+    // fall through
+  }
+
+  enum Zone {
+    Frozen = "frozen",
+    Promised = "promised",
+    Exploratory = "exploratory",
+  }
+  const zones: BlueprintCertaintyZones = { ...EMPTY_CERTAINTY_ZONES };
+  let current: Zone | null = null;
+  for (const rawLine of content.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    if (line.includes("冻结区")) {
+      current = Zone.Frozen;
+      continue;
+    }
+    if (line.includes("承诺区")) {
+      current = Zone.Promised;
+      continue;
+    }
+    if (line.includes("探索区")) {
+      current = Zone.Exploratory;
+      continue;
+    }
+    if (!current) continue;
+    const normalized = normalizeCertaintyItem(line);
+    if (!normalized) continue;
+    if (!zones[current].includes(normalized) && zones[current].length < 24) {
+      zones[current].push(normalized);
+    }
+  }
+  return zones;
+}
 
 // ── Form field helpers ──
 
@@ -290,6 +391,49 @@ function ChaptersForm({ data, onChange }: { data: Record<string, string>; onChan
   );
 }
 
+function CertaintyZonesEditor({
+  zones,
+  onChange,
+}: {
+  zones: BlueprintCertaintyZones;
+  onChange: (zones: BlueprintCertaintyZones) => void;
+}) {
+  const update = (key: keyof BlueprintCertaintyZones) => (value: string) =>
+    onChange({ ...zones, [key]: parseCertaintyZoneText(value) });
+
+  return (
+    <div className="mt-4 rounded-xl border border-surface-700 bg-surface-800/60 p-4">
+      <h3 className="text-sm font-semibold text-surface-200">确定性分区</h3>
+      <p className="mt-1 text-xs text-surface-400">
+        冻结区禁止改写，承诺区要求后续兑现，探索区允许继续探索和重构。
+      </p>
+      <div className="mt-3 grid grid-cols-1 gap-3 xl:grid-cols-3">
+        <Textarea
+          label="冻结区"
+          value={stringifyCertaintyZoneText(zones.frozen)}
+          onChange={(event) => update("frozen")(event.target.value)}
+          placeholder="每行一条，例如：终局真相不可改写"
+          helperText="命中冲突时将触发降级或审阅策略。"
+        />
+        <Textarea
+          label="承诺区"
+          value={stringifyCertaintyZoneText(zones.promised)}
+          onChange={(event) => update("promised")(event.target.value)}
+          placeholder="每行一条，例如：主角将直面宗门审判"
+          helperText="后续章节生成应优先兑现这些承诺。"
+        />
+        <Textarea
+          label="探索区"
+          value={stringifyCertaintyZoneText(zones.exploratory)}
+          onChange={(event) => update("exploratory")(event.target.value)}
+          placeholder="每行一条，例如：支线人物立场可变化"
+          helperText="用于保留可变空间，避免过早锁死。"
+        />
+      </div>
+    </div>
+  );
+}
+
 // ── Form dispatcher ──
 
 function StepForm({ stepKey, data, onChange }: { stepKey: BlueprintStepKey; data: Record<string, string>; onChange: (d: Record<string, string>) => void }) {
@@ -333,11 +477,17 @@ const PROMOTION_TARGETS_BY_STEP: Partial<Record<BlueprintStepKey, Array<{ label:
 // ── Main component ──
 
 export function BlueprintPage() {
-  const [steps, setSteps] = useState<Array<{ status: string; content: string; aiGenerated: boolean }>>([]);
+  const [steps, setSteps] = useState<Array<{
+    status: string;
+    content: string;
+    aiGenerated: boolean;
+    certaintyZones?: BlueprintCertaintyZones;
+  }>>([]);
   const [activeIdx, setActiveIdx] = useState(0);
   const [formData, setFormData] = useState<Record<string, string>>(() =>
     parseBlueprintContent(STEPS[0].key, "")
   );
+  const [certaintyZones, setCertaintyZones] = useState<BlueprintCertaintyZones>({ ...EMPTY_CERTAINTY_ZONES });
   const [saving, setSaving] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiResult, setAiResult] = useState<string | null>(null);
@@ -409,11 +559,28 @@ export function BlueprintPage() {
   useEffect(() => {
     const content = steps[activeIdx]?.content ?? "";
     setFormData(parseBlueprintContent(cur.key, content));
+    if (cur.key === "step-08-chapters") {
+      const dtoZones = steps[activeIdx]?.certaintyZones;
+      if (dtoZones && hasCertaintyZones(dtoZones)) {
+        setCertaintyZones({
+          frozen: [...dtoZones.frozen],
+          promised: [...dtoZones.promised],
+          exploratory: [...dtoZones.exploratory],
+        });
+      } else {
+        setCertaintyZones(parseCertaintyZonesFromLegacyContent(content));
+      }
+    } else {
+      setCertaintyZones({ ...EMPTY_CERTAINTY_ZONES });
+    }
     setAiResult(null);
   }, [steps, activeIdx, cur.key]);
 
   function hasContent(): boolean {
-    return Object.values(formData).some((v) => v.trim().length > 0);
+    if (Object.values(formData).some((v) => v.trim().length > 0)) {
+      return true;
+    }
+    return cur.key === "step-08-chapters" ? hasCertaintyZones(certaintyZones) : false;
   }
 
   function statusDot(s: StepStatus) {
@@ -425,7 +592,12 @@ export function BlueprintPage() {
   }
 
   function wordCount(): number {
-    return Object.values(formData).reduce((sum, v) => sum + v.replace(/\s/g, "").length, 0);
+    let sum = Object.values(formData).reduce((acc, value) => acc + value.replace(/\s/g, "").length, 0);
+    if (cur.key === "step-08-chapters") {
+      sum += [...certaintyZones.frozen, ...certaintyZones.promised, ...certaintyZones.exploratory]
+        .reduce((acc, value) => acc + value.replace(/\s/g, "").length, 0);
+    }
+    return sum;
   }
 
   function getPromotionTargets() {
@@ -533,7 +705,13 @@ export function BlueprintPage() {
     setSaving(true);
     try {
       const json = JSON.stringify(formData);
-      await saveBlueprintStep(cur.key, json, false, projectRoot);
+      await saveBlueprintStep(
+        cur.key,
+        json,
+        false,
+        projectRoot,
+        cur.key === "step-08-chapters" ? certaintyZones : undefined,
+      );
       await Promise.all([load(), loadLoopData()]);
     } finally { setSaving(false); }
   }
@@ -542,7 +720,13 @@ export function BlueprintPage() {
     if (!projectRoot) return;
     if (hasContent()) {
       const json = JSON.stringify(formData);
-      await saveBlueprintStep(cur.key, json, false, projectRoot);
+      await saveBlueprintStep(
+        cur.key,
+        json,
+        false,
+        projectRoot,
+        cur.key === "step-08-chapters" ? certaintyZones : undefined,
+      );
     }
     await markBlueprintCompleted(cur.key, projectRoot);
     await Promise.all([load(), loadLoopData()]);
@@ -552,6 +736,7 @@ export function BlueprintPage() {
     if (!projectRoot) return;
     await resetBlueprintStep(cur.key, projectRoot);
     setFormData(parseBlueprintContent(cur.key, ""));
+    setCertaintyZones({ ...EMPTY_CERTAINTY_ZONES });
     setAiResult(null);
     await Promise.all([load(), loadLoopData()]);
   }
@@ -561,10 +746,20 @@ export function BlueprintPage() {
     setAiLoading(true);
     setAiResult(null);
     try {
-      const textSummary = Object.entries(formData)
+      const baseSummary = Object.entries(formData)
         .filter(([, v]) => v.trim())
         .map(([k, v]) => `${(FIELD_LABELS[cur.key]?.[k] ?? k)}：${v}`)
         .join("\n");
+      const certaintySummary = cur.key === "step-08-chapters" && hasCertaintyZones(certaintyZones)
+        ? [
+            certaintyZones.frozen.length > 0 ? `冻结区：${certaintyZones.frozen.join("；")}` : "",
+            certaintyZones.promised.length > 0 ? `承诺区：${certaintyZones.promised.join("；")}` : "",
+            certaintyZones.exploratory.length > 0 ? `探索区：${certaintyZones.exploratory.join("；")}` : "",
+          ]
+            .filter((line) => line.length > 0)
+            .join("\n")
+        : "";
+      const textSummary = [baseSummary, certaintySummary].filter((line) => line.length > 0).join("\n");
       const suggestion = await generateBlueprintSuggestion({
         projectRoot,
         stepKey: cur.key,
@@ -581,6 +776,9 @@ export function BlueprintPage() {
   function handleApplyAiResult() {
     if (!aiResult) return;
     setFormData(parseBlueprintContent(cur.key, aiResult));
+    if (cur.key === "step-08-chapters") {
+      setCertaintyZones(parseCertaintyZonesFromLegacyContent(aiResult));
+    }
     setAiResult(null);
   }
 
@@ -729,6 +927,9 @@ export function BlueprintPage() {
             )}
 
             <StepForm stepKey={cur.key} data={formData} onChange={handleFormChange} />
+            {cur.key === "step-08-chapters" && (
+              <CertaintyZonesEditor zones={certaintyZones} onChange={setCertaintyZones} />
+            )}
 
             {hasContent() && (
               <div className="mt-3 text-xs text-surface-400">

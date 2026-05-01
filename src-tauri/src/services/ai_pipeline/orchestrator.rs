@@ -12,6 +12,9 @@ use crate::services::ai_pipeline_service::{
     AiPipelineEvent, AiPipelineService, PersistedRecord, RunAiTaskPipelineInput,
 };
 use crate::services::ai_service::{AiService, TaskRouteResolution};
+use crate::services::blueprint_service::{
+    extract_certainty_zones_from_content, BlueprintCertaintyZones,
+};
 use crate::services::context_service::ContextService;
 use crate::services::project_service::{AiStrategyProfile, ProjectService};
 use crate::services::skill_registry::{SkillRegistry, SkillSelectionContext};
@@ -69,18 +72,7 @@ impl PersistMode {
     }
 }
 
-#[derive(Debug, Clone, Default)]
-struct CertaintyZones {
-    frozen: Vec<String>,
-    promised: Vec<String>,
-    exploratory: Vec<String>,
-}
-
-impl CertaintyZones {
-    fn has_any(&self) -> bool {
-        !self.frozen.is_empty() || !self.promised.is_empty() || !self.exploratory.is_empty()
-    }
-}
+type CertaintyZones = BlueprintCertaintyZones;
 
 #[derive(Debug, Clone)]
 struct FreezeConflict {
@@ -914,57 +906,25 @@ fn resolve_generation_workflow_stack(
 fn extract_certainty_zones(
     context: &crate::services::context_service::CollectedContext,
 ) -> CertaintyZones {
-    #[derive(Clone, Copy)]
-    enum Zone {
-        Frozen,
-        Promised,
-        Exploratory,
-    }
-    let mut zones = CertaintyZones::default();
-    let mut current_zone: Option<Zone> = None;
-
     for step in &context.global_context.blueprint_summary {
-        let content = step.content.as_deref().unwrap_or("");
-        for raw_line in content.lines() {
-            let line = raw_line.trim();
-            if line.is_empty() {
-                continue;
+        if step.step_key != "step-08-chapters" {
+            continue;
+        }
+        if let Some(zones) = step.certainty_zones.as_ref() {
+            if zones.has_any() {
+                return zones.clone();
             }
-            if line.contains("冻结区") {
-                current_zone = Some(Zone::Frozen);
-                continue;
-            }
-            if line.contains("承诺区") {
-                current_zone = Some(Zone::Promised);
-                continue;
-            }
-            if line.contains("探索区") {
-                current_zone = Some(Zone::Exploratory);
-                continue;
-            }
-            let normalized = line
-                .trim_start_matches('-')
-                .trim_start_matches('*')
-                .trim_start_matches(|c: char| c.is_ascii_digit() || c == '.')
-                .trim()
-                .to_string();
-            if normalized.is_empty() {
-                continue;
-            }
-            match current_zone {
-                Some(Zone::Frozen) if zones.frozen.len() < 24 => zones.frozen.push(normalized),
-                Some(Zone::Promised) if zones.promised.len() < 24 => {
-                    zones.promised.push(normalized)
+        }
+        if let Some(content) = step.content.as_deref() {
+            if let Some(zones) = extract_certainty_zones_from_content(content) {
+                if zones.has_any() {
+                    return zones;
                 }
-                Some(Zone::Exploratory) if zones.exploratory.len() < 24 => {
-                    zones.exploratory.push(normalized)
-                }
-                _ => {}
             }
         }
     }
 
-    zones
+    CertaintyZones::default()
 }
 
 fn detect_freeze_conflict(
@@ -1163,6 +1123,7 @@ mod tests {
                     step_key: "step-08-chapters".to_string(),
                     title: "章节规划".to_string(),
                     status: "completed".to_string(),
+                    certainty_zones: None,
                     content: Some(
                         "冻结区\n- 终局真相\n承诺区\n- 主角将直面宗门审判\n探索区\n- 支线人物立场可变化"
                             .to_string(),
@@ -1194,6 +1155,46 @@ mod tests {
         };
         assert!(detect_freeze_conflict("请重写终局真相的揭示方式", &zones).is_some());
         assert!(detect_freeze_conflict("补充一个新支线", &zones).is_none());
+    }
+
+    #[test]
+    fn extract_certainty_zones_prefers_explicit_dto_over_legacy_content() {
+        let context = CollectedContext {
+            global_context: GlobalContext {
+                project_name: "test".to_string(),
+                genre: "玄幻".to_string(),
+                narrative_pov: None,
+                writing_style: None,
+                locked_terms: Vec::new(),
+                banned_terms: Vec::new(),
+                blueprint_summary: vec![BlueprintStepSummary {
+                    step_key: "step-08-chapters".to_string(),
+                    title: "章节规划".to_string(),
+                    status: "completed".to_string(),
+                    certainty_zones: Some(CertaintyZones {
+                        frozen: vec!["DTO-终局".to_string()],
+                        promised: vec!["DTO-承诺".to_string()],
+                        exploratory: vec!["DTO-探索".to_string()],
+                    }),
+                    content: Some(
+                        "冻结区\n- 文本终局\n承诺区\n- 文本承诺\n探索区\n- 文本探索".to_string(),
+                    ),
+                }],
+            },
+            related_context: RelatedContext {
+                chapter: None,
+                characters: Vec::new(),
+                world_rules: Vec::new(),
+                plot_nodes: Vec::new(),
+                relationship_edges: Vec::new(),
+                previous_chapter_summary: None,
+            },
+        };
+
+        let zones = extract_certainty_zones(&context);
+        assert_eq!(zones.frozen, vec!["DTO-终局".to_string()]);
+        assert_eq!(zones.promised, vec!["DTO-承诺".to_string()]);
+        assert_eq!(zones.exploratory, vec!["DTO-探索".to_string()]);
     }
 
     #[test]

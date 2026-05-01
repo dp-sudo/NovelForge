@@ -7,6 +7,38 @@ import type { BlueprintStep } from "../../../src/domain/types.js";
 import { nowIso } from "../infra/time.js";
 import { withDatabase } from "./service-context.js";
 
+function parseCertaintyZones(raw: unknown): BlueprintStep["certaintyZones"] {
+  if (typeof raw !== "string" || raw.trim().length === 0) {
+    return undefined;
+  }
+  try {
+    const parsed = JSON.parse(raw) as {
+      frozen?: unknown;
+      promised?: unknown;
+      exploratory?: unknown;
+    };
+    const toList = (value: unknown): string[] =>
+      Array.isArray(value)
+        ? value
+            .filter((item): item is string => typeof item === "string")
+            .map((item) => item.trim())
+            .filter((item) => item.length > 0)
+        : [];
+    const certaintyZones = {
+      frozen: toList(parsed.frozen),
+      promised: toList(parsed.promised),
+      exploratory: toList(parsed.exploratory),
+    };
+    const hasAny =
+      certaintyZones.frozen.length > 0 ||
+      certaintyZones.promised.length > 0 ||
+      certaintyZones.exploratory.length > 0;
+    return hasAny ? certaintyZones : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function stepTitle(stepKey: BlueprintStepKey): string {
   switch (stepKey) {
     case "step-01-anchor":
@@ -36,6 +68,7 @@ export class BlueprintService {
         .prepare(
           `
           SELECT id, project_id, step_key, title, content, content_path, status, ai_generated, completed_at, created_at, updated_at
+               , certainty_zones_json
           FROM blueprint_steps
           WHERE project_id = ?
           ORDER BY step_key
@@ -68,6 +101,7 @@ export class BlueprintService {
           contentPath: row.content_path as string,
           status: row.status as BlueprintStep["status"],
           aiGenerated: Number(row.ai_generated) === 1,
+          certaintyZones: parseCertaintyZones(row.certainty_zones_json),
           completedAt: (row.completed_at as string | null) ?? undefined,
           createdAt: row.created_at as string,
           updatedAt: row.updated_at as string
