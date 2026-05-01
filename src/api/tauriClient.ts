@@ -78,11 +78,44 @@ function formatRequestLabel(requestId: string | undefined): string {
   return requestId ? ` requestId=${requestId}` : "";
 }
 
+const SENSITIVE_LOG_KEY_RE = /(api[_-]?key|token|secret|password|authorization|license[_-]?key)/i;
+const LARGE_TEXT_LOG_KEY_RE = /(content|chapter[_-]?content|selected[_-]?text|user[_-]?instruction|prompt)/i;
+
+function sanitizeLogValue(value: unknown, key?: string, seen: WeakSet<object> = new WeakSet<object>()): unknown {
+  if (typeof value === "string") {
+    if (key && SENSITIVE_LOG_KEY_RE.test(key)) {
+      return "[REDACTED]";
+    }
+    if (key && LARGE_TEXT_LOG_KEY_RE.test(key)) {
+      return `[${value.length} chars]`;
+    }
+    return value;
+  }
+
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+
+  if (seen.has(value)) {
+    return "[Circular]";
+  }
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeLogValue(item, key, seen));
+  }
+
+  const safe: Record<string, unknown> = {};
+  for (const [childKey, childValue] of Object.entries(value as Record<string, unknown>)) {
+    safe[childKey] = sanitizeLogValue(childValue, childKey, seen);
+  }
+  return safe;
+}
+
 function logApiCall(callId: number, command: string, requestId: string | undefined, input: InvokeInput): void {
-  const safe = input
-    ? { ...input, apiKey: input.apiKey ? "[REDACTED]" : undefined, content: input.content ? `[${String(input.content).length} chars]` : undefined }
-    : {};
-  console.log(`[${nowISO()}] [API] >> #${callId} ${command}${formatRequestLabel(requestId)}`, Object.keys(safe).length ? safe : "");
+  const safe = input ? sanitizeLogValue(input) : {};
+  const payload = safe && typeof safe === "object" && !Array.isArray(safe) ? (safe as Record<string, unknown>) : {};
+  console.log(`[${nowISO()}] [API] >> #${callId} ${command}${formatRequestLabel(requestId)}`, Object.keys(payload).length ? payload : "");
 }
 
 function logApiResult(callId: number, command: string, requestId: string | undefined, elapsedMs: number): void {

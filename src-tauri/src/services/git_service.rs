@@ -44,26 +44,20 @@ pub struct GitService;
 
 impl GitService {
     pub fn init_repository(&self, project_root: &str) -> Result<GitRepositoryStatus, AppErrorDto> {
-        let root = Path::new(project_root);
-        if !root.exists() {
-            return Err(AppErrorDto::new(
-                "PROJECT_PATH_NOT_FOUND",
-                "项目路径不存在",
-                true,
-            )
-            .with_detail(project_root.to_string()));
-        }
+        let normalized_root = normalize_project_root(project_root)?;
+        let root = Path::new(&normalized_root);
 
         if !root.join(".git").exists() {
-            run_git(project_root, &["init"])?;
+            run_git(&normalized_root, &["init"])?;
         }
-        self.ensure_local_identity(project_root)?;
-        self.ensure_gitignore(project_root)?;
-        self.read_status(project_root)
+        self.ensure_local_identity(&normalized_root)?;
+        self.ensure_gitignore(&normalized_root)?;
+        self.read_status(&normalized_root)
     }
 
     pub fn read_status(&self, project_root: &str) -> Result<GitRepositoryStatus, AppErrorDto> {
-        let root = Path::new(project_root);
+        let normalized_root = normalize_project_root(project_root)?;
+        let root = Path::new(&normalized_root);
         let initialized = root.join(".git").exists();
         if !initialized {
             return Ok(GitRepositoryStatus {
@@ -73,7 +67,7 @@ impl GitService {
             });
         }
 
-        let branch = run_git(project_root, &["branch", "--show-current"])
+        let branch = run_git(&normalized_root, &["branch", "--show-current"])
             .unwrap_or_default()
             .trim()
             .to_string();
@@ -82,7 +76,7 @@ impl GitService {
         } else {
             branch
         };
-        let has_changes = !run_git(project_root, &["status", "--porcelain"])?
+        let has_changes = !run_git(&normalized_root, &["status", "--porcelain"])?
             .trim()
             .is_empty();
 
@@ -98,12 +92,13 @@ impl GitService {
         project_root: &str,
         message: Option<String>,
     ) -> Result<GitSnapshotResult, AppErrorDto> {
-        self.init_repository(project_root)?;
-        run_git(project_root, &["add", "-A"])?;
+        let normalized_root = normalize_project_root(project_root)?;
+        self.init_repository(&normalized_root)?;
+        run_git(&normalized_root, &["add", "-A"])?;
 
-        let status = run_git(project_root, &["status", "--porcelain"])?;
+        let status = run_git(&normalized_root, &["status", "--porcelain"])?;
         if status.trim().is_empty() {
-            let latest = self.read_latest_commit(project_root).ok();
+            let latest = self.read_latest_commit(&normalized_root).ok();
             return Ok(GitSnapshotResult {
                 no_changes: true,
                 commit: latest,
@@ -114,11 +109,11 @@ impl GitService {
             .map(|msg| msg.trim().to_string())
             .filter(|msg| !msg.is_empty())
             .unwrap_or_else(|| format!("NovelForge snapshot {}", now_iso()));
-        run_git(project_root, &["commit", "-m", commit_message.as_str()])?;
+        run_git(&normalized_root, &["commit", "-m", commit_message.as_str()])?;
 
         Ok(GitSnapshotResult {
             no_changes: false,
-            commit: Some(self.read_latest_commit(project_root)?),
+            commit: Some(self.read_latest_commit(&normalized_root)?),
         })
     }
 
@@ -127,12 +122,13 @@ impl GitService {
         project_root: &str,
         limit: usize,
     ) -> Result<Vec<GitCommitRecord>, AppErrorDto> {
+        let normalized_root = normalize_project_root(project_root)?;
         let cap = limit.clamp(1, 100);
-        if !Path::new(project_root).join(".git").exists() {
+        if !Path::new(&normalized_root).join(".git").exists() {
             return Ok(Vec::new());
         }
         let output = run_git(
-            project_root,
+            &normalized_root,
             &[
                 "log",
                 "--pretty=format:%H%x09%s%x09%cI",
@@ -252,6 +248,33 @@ fn parse_log_line(line: &str) -> Option<GitCommitRecord> {
     })
 }
 
+fn normalize_project_root(project_root: &str) -> Result<String, AppErrorDto> {
+    let normalized = project_root.trim();
+    if normalized.is_empty() {
+        return Err(
+            AppErrorDto::new("PROJECT_INVALID_PATH", "项目目录不能为空", true)
+                .with_suggested_action("请输入有效的项目目录路径"),
+        );
+    }
+
+    let root = Path::new(normalized);
+    if !root.is_absolute() {
+        return Err(
+            AppErrorDto::new("PROJECT_INVALID_PATH", "项目目录必须是绝对路径", true)
+                .with_suggested_action("请输入有效的 Windows 绝对路径"),
+        );
+    }
+    if !root.exists() || !root.is_dir() {
+        return Err(
+            AppErrorDto::new("PROJECT_INVALID_PATH", "项目目录不存在或不可用", true)
+                .with_detail(normalized.to_string())
+                .with_suggested_action("请检查目录路径并重试"),
+        );
+    }
+
+    Ok(normalized.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -314,6 +337,24 @@ mod tests {
         assert!(!history.is_empty());
 
         let _ = fs::remove_dir_all(workspace);
+    }
+
+    #[test]
+    fn read_status_rejects_blank_project_root() {
+        let service = GitService;
+        let err = service
+            .read_status("   ")
+            .expect_err("blank path should be rejected");
+        assert_eq!(err.code, "PROJECT_INVALID_PATH");
+    }
+
+    #[test]
+    fn read_status_rejects_relative_project_root() {
+        let service = GitService;
+        let err = service
+            .read_status("relative\\project")
+            .expect_err("relative path should be rejected");
+        assert_eq!(err.code, "PROJECT_INVALID_PATH");
     }
 }
 

@@ -40,7 +40,7 @@ test("Continuity Pack 契约：Orchestrator 在 Prompt 前编译并传入 Resolv
   const orchestrator = await readRepoFile("src-tauri/src/services/ai_pipeline/orchestrator.rs");
   assert.match(orchestrator, /ContinuityPackCompiler/);
   assert.match(orchestrator, /resolve_continuity_pack_depth/);
-  assert.match(orchestrator, /continuity_pack = ContinuityPackCompiler::default\(\)\.compile/);
+  assert.match(orchestrator, /continuity_pack = ContinuityPackCompiler(?:::default\(\))?\.compile/);
   assert.match(orchestrator, /phase: PHASE_PROMPT/);
   assert.match(orchestrator, /&continuity_pack/);
 });

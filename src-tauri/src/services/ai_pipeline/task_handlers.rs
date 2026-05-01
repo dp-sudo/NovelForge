@@ -26,6 +26,70 @@ use crate::services::{
 #[derive(Clone, Default)]
 pub struct TaskHandlers;
 
+fn normalize_project_root(project_root: &str) -> Result<&str, AppErrorDto> {
+    let normalized_root = project_root.trim();
+    if normalized_root.is_empty() {
+        return Err(
+            AppErrorDto::new("PROJECT_INVALID_PATH", "项目目录不能为空", true)
+                .with_suggested_action("请输入有效的项目目录路径"),
+        );
+    }
+    Ok(normalized_root)
+}
+
+fn project_db_open_error(err: impl ToString) -> AppErrorDto {
+    AppErrorDto::new("DB_OPEN_FAILED", "无法打开项目数据库", false).with_detail(err.to_string())
+}
+
+fn pipeline_db_open_error(err: impl ToString) -> AppErrorDto {
+    AppErrorDto::new("PIPELINE_DB_OPEN_FAILED", "数据库打开失败", false).with_detail(err.to_string())
+}
+
+fn pipeline_persist_error(message: &str, err: impl ToString) -> AppErrorDto {
+    AppErrorDto::new("PIPELINE_PERSIST_FAILED", message, true).with_detail(err.to_string())
+}
+
+fn pipeline_parse_error(message: &str) -> AppErrorDto {
+    AppErrorDto::new("PIPELINE_PERSIST_PARSE_FAILED", message, true)
+}
+
+fn pipeline_parse_error_with_detail(message: &str, detail: impl ToString) -> AppErrorDto {
+    pipeline_parse_error(message).with_detail(detail.to_string())
+}
+
+fn pipeline_provenance_write_error(err: impl ToString) -> AppErrorDto {
+    AppErrorDto::new("PIPELINE_PROVENANCE_WRITE_FAILED", "写入来源轨迹失败", true)
+        .with_detail(err.to_string())
+}
+
+fn pipeline_db_query_error(message: &str, err: impl ToString) -> AppErrorDto {
+    AppErrorDto::new("PIPELINE_DB_QUERY_FAILED", message, true).with_detail(err.to_string())
+}
+
+fn pipeline_timeline_write_error(err: impl ToString) -> AppErrorDto {
+    pipeline_persist_error("写入时间线失败", err)
+}
+
+fn pipeline_required_field_error(code: &'static str, message: &'static str) -> AppErrorDto {
+    AppErrorDto::new(code, message, true)
+}
+
+fn open_project_database(project_root: &str) -> Result<Connection, AppErrorDto> {
+    let normalized_root = normalize_project_root(project_root)?;
+    open_database(Path::new(normalized_root)).map_err(project_db_open_error)
+}
+
+fn open_pipeline_database(project_root: &str) -> Result<Connection, AppErrorDto> {
+    let normalized_root = normalize_project_root(project_root)?;
+    open_database(Path::new(normalized_root)).map_err(pipeline_db_open_error)
+}
+
+fn open_pipeline_project_context(project_root: &str) -> Result<(Connection, String), AppErrorDto> {
+    let conn = open_pipeline_database(project_root)?;
+    let project_id = get_project_id(&conn)?;
+    Ok((conn, project_id))
+}
+
 impl TaskHandlers {
     pub fn persist_task_output(
         &self,
@@ -81,10 +145,9 @@ impl TaskHandlers {
                     .map(str::trim)
                     .filter(|value| !value.is_empty())
                     .ok_or_else(|| {
-                        AppErrorDto::new(
+                        pipeline_required_field_error(
                             "PIPELINE_BLUEPRINT_STEP_REQUIRED",
                             "蓝图持久化缺少 stepKey",
-                            true,
                         )
                     })?;
                 let saved = BlueprintService.save_step(
@@ -111,10 +174,9 @@ impl TaskHandlers {
                     .map(str::trim)
                     .filter(|value| !value.is_empty())
                     .ok_or_else(|| {
-                        AppErrorDto::new(
+                        pipeline_required_field_error(
                             "PIPELINE_CHAPTER_ID_REQUIRED",
                             "一致性持久化缺少 chapterId",
-                            true,
                         )
                     })?;
                 let batch_size = self.persist_ai_consistency_issues(
@@ -208,10 +270,7 @@ impl TaskHandlers {
         };
         let source_ref = Self::resolve_provenance_source_ref(canonical_task, input);
 
-        let conn = open_database(Path::new(project_root)).map_err(|err| {
-            AppErrorDto::new("DB_OPEN_FAILED", "无法打开项目数据库", false)
-                .with_detail(err.to_string())
-        })?;
+        let conn = open_project_database(project_root)?;
         let project_id = get_project_id(&conn)?;
         for record in records {
             if !Self::should_record_provenance(canonical_task, record) {
@@ -325,10 +384,7 @@ impl TaskHandlers {
                 now_iso(),
             ],
         )
-        .map_err(|err| {
-            AppErrorDto::new("PIPELINE_PROVENANCE_WRITE_FAILED", "写入来源轨迹失败", true)
-                .with_detail(err.to_string())
-        })?;
+        .map_err(pipeline_provenance_write_error)?;
         Ok(())
     }
 
@@ -806,10 +862,9 @@ impl TaskHandlers {
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .ok_or_else(|| {
-                AppErrorDto::new(
+                pipeline_required_field_error(
                     "PIPELINE_CHAPTER_ID_REQUIRED",
                     "章节规划持久化缺少 chapterId",
-                    true,
                 )
             })?;
 
@@ -863,11 +918,7 @@ impl TaskHandlers {
         let status = Self::pick_optional_string(&root, &["status", "chapterStatus", "章节状态"])
             .unwrap_or_else(|| "planned".to_string());
 
-        let conn = open_database(Path::new(project_root)).map_err(|err| {
-            AppErrorDto::new("PIPELINE_DB_OPEN_FAILED", "数据库打开失败", false)
-                .with_detail(err.to_string())
-        })?;
-        let project_id = get_project_id(&conn)?;
+        let (conn, project_id) = open_pipeline_project_context(project_root)?;
         let updated_at = now_iso();
 
         let changed = conn
@@ -890,8 +941,7 @@ impl TaskHandlers {
                 ],
             )
             .map_err(|err| {
-                AppErrorDto::new("PIPELINE_PERSIST_FAILED", "写入章节规划失败", true)
-                    .with_detail(err.to_string())
+                pipeline_persist_error("写入章节规划失败", err)
             })?;
 
         if changed == 0 {
@@ -911,11 +961,7 @@ impl TaskHandlers {
     ) -> Result<usize, AppErrorDto> {
         let value = Self::extract_output_value(normalized_output)?;
         let root = value.as_object().cloned().ok_or_else(|| {
-            AppErrorDto::new(
-                "PIPELINE_PERSIST_PARSE_FAILED",
-                "时间线审阅结果不是 JSON 对象",
-                true,
-            )
+            pipeline_parse_error("时间线审阅结果不是 JSON 对象")
         })?;
 
         let entries = root
@@ -931,11 +977,7 @@ impl TaskHandlers {
             return Ok(0);
         }
 
-        let conn = open_database(Path::new(project_root)).map_err(|err| {
-            AppErrorDto::new("PIPELINE_DB_OPEN_FAILED", "数据库打开失败", false)
-                .with_detail(err.to_string())
-        })?;
-        let project_id = get_project_id(&conn)?;
+        let (conn, project_id) = open_pipeline_project_context(project_root)?;
         let updated_at = now_iso();
         let mut updated_count = 0usize;
 
@@ -979,10 +1021,7 @@ impl TaskHandlers {
                         project_id
                     ],
                 )
-                .map_err(|err| {
-                    AppErrorDto::new("PIPELINE_PERSIST_FAILED", "写入时间线失败", true)
-                        .with_detail(err.to_string())
-                })?
+                .map_err(pipeline_timeline_write_error)?
             } else if let Some(chapter_index) = chapter_index {
                 conn.execute(
                     "
@@ -1004,16 +1043,13 @@ impl TaskHandlers {
                         project_id
                     ],
                 )
-                .map_err(|err| {
-                    AppErrorDto::new("PIPELINE_PERSIST_FAILED", "写入时间线失败", true)
-                        .with_detail(err.to_string())
-                })?
+                .map_err(pipeline_timeline_write_error)?
             } else {
                 0
             };
 
             if changed > 0 {
-                updated_count += changed as usize;
+                updated_count += changed;
             }
         }
 
@@ -1026,11 +1062,7 @@ impl TaskHandlers {
     ) -> Result<usize, AppErrorDto> {
         let value = Self::extract_output_value(normalized_output)?;
         let root = value.as_object().cloned().ok_or_else(|| {
-            AppErrorDto::new(
-                "PIPELINE_PERSIST_PARSE_FAILED",
-                "关系审阅结果不是 JSON 对象",
-                true,
-            )
+            pipeline_parse_error("关系审阅结果不是 JSON 对象")
         })?;
 
         let mut edges = root
@@ -1179,11 +1211,7 @@ impl TaskHandlers {
         chapter_id: &str,
         normalized_output: &str,
     ) -> Result<usize, AppErrorDto> {
-        let conn = open_database(Path::new(project_root)).map_err(|err| {
-            AppErrorDto::new("PIPELINE_DB_OPEN_FAILED", "数据库打开失败", false)
-                .with_detail(err.to_string())
-        })?;
-        let project_id = get_project_id(&conn)?;
+        let (conn, project_id) = open_pipeline_project_context(project_root)?;
         let value = Self::extract_output_value(normalized_output)?;
         let issues = value
             .get("issues")
@@ -1242,8 +1270,7 @@ impl TaskHandlers {
                 ],
             )
             .map_err(|err| {
-                AppErrorDto::new("PIPELINE_PERSIST_FAILED", "写入一致性问题失败", true)
-                    .with_detail(err.to_string())
+                pipeline_persist_error("写入一致性问题失败", err)
             })?;
             inserted += 1;
         }
@@ -1287,15 +1314,13 @@ impl TaskHandlers {
             }
         }
 
-        Err(AppErrorDto::new(
-            "PIPELINE_PERSIST_PARSE_FAILED",
+        Err(pipeline_parse_error_with_detail(
             "AI 返回结果无法解析为 JSON",
-            true,
-        )
-        .with_detail(format!(
-            "normalized_output_preview={}",
-            Self::preview_output_for_error(normalized_output, 320)
-        )))
+            format!(
+                "normalized_output_preview={}",
+                Self::preview_output_for_error(normalized_output, 320)
+            ),
+        ))
     }
 
     fn extract_value_from_code_fences(raw: &str) -> Option<Value> {
@@ -1387,15 +1412,13 @@ impl TaskHandlers {
     ) -> Result<serde_json::Map<String, Value>, AppErrorDto> {
         let value = Self::extract_output_value(normalized_output)?;
         let root_obj = value.as_object().cloned().ok_or_else(|| {
-            AppErrorDto::new(
-                "PIPELINE_PERSIST_PARSE_FAILED",
+            pipeline_parse_error_with_detail(
                 "AI 返回 JSON 结构不是对象",
-                true,
+                format!(
+                    "normalized_output_preview={}",
+                    Self::preview_output_for_error(normalized_output, 320)
+                ),
             )
-            .with_detail(format!(
-                "normalized_output_preview={}",
-                Self::preview_output_for_error(normalized_output, 320)
-            ))
         })?;
 
         if let Some(key) = nested_key {
@@ -1917,20 +1940,13 @@ impl TaskHandlers {
     }
 
     fn next_plot_sort_order(project_root: &str) -> Result<i64, AppErrorDto> {
-        let conn = open_database(Path::new(project_root)).map_err(|err| {
-            AppErrorDto::new("PIPELINE_DB_OPEN_FAILED", "数据库打开失败", false)
-                .with_detail(err.to_string())
-        })?;
-        let project_id = get_project_id(&conn)?;
+        let (conn, project_id) = open_pipeline_project_context(project_root)?;
         conn.query_row(
             "SELECT COALESCE(MAX(sort_order), 0) + 1 FROM plot_nodes WHERE project_id = ?1",
             params![project_id],
             |row| row.get::<_, i64>(0),
         )
-        .map_err(|err| {
-            AppErrorDto::new("PIPELINE_DB_QUERY_FAILED", "读取剧情节点顺序失败", true)
-                .with_detail(err.to_string())
-        })
+        .map_err(|err| pipeline_db_query_error("读取剧情节点顺序失败", err))
     }
 }
 
@@ -1980,6 +1996,20 @@ mod tests {
             persist_mode: None,
             automation_tier: None,
         }
+    }
+
+    #[test]
+    fn normalize_project_root_accepts_trimmed_value() {
+        let normalized = super::normalize_project_root("  C:\\tmp\\novelforge  ")
+            .expect("trimmed project root should be accepted");
+        assert_eq!(normalized, "C:\\tmp\\novelforge");
+    }
+
+    #[test]
+    fn normalize_project_root_rejects_blank_value() {
+        let err = super::normalize_project_root("   ")
+            .expect_err("blank project root should be rejected");
+        assert_eq!(err.code, "PROJECT_INVALID_PATH");
     }
 
     #[test]

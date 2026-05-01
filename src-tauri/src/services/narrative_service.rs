@@ -67,9 +67,7 @@ fn insert_manual_provenance(
 
 impl NarrativeService {
     pub fn list(&self, project_root: &str) -> Result<Vec<NarrativeObligation>, AppErrorDto> {
-        let conn = open_database(Path::new(project_root)).map_err(|e| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
-        })?;
+        let conn = open_project_database(project_root)?;
         let project_id = get_project_id(&conn)?;
         let mut stmt = conn
             .prepare(
@@ -78,10 +76,7 @@ impl NarrativeService {
                  payoff_status, severity, related_entities, created_at, updated_at \
                  FROM narrative_obligations WHERE project_id = ?1 ORDER BY created_at DESC",
             )
-            .map_err(|e| {
-                AppErrorDto::new("QUERY_FAILED", "查询叙事义务失败", true)
-                    .with_detail(e.to_string())
-            })?;
+            .map_err(query_obligation_error)?;
         let obligations = stmt
             .query_map(params![project_id], |row| {
                 Ok(NarrativeObligation {
@@ -99,15 +94,9 @@ impl NarrativeService {
                     updated_at: row.get(11)?,
                 })
             })
-            .map_err(|e| {
-                AppErrorDto::new("QUERY_FAILED", "查询叙事义务失败", true)
-                    .with_detail(e.to_string())
-            })?
+            .map_err(query_obligation_error)?
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| {
-                AppErrorDto::new("QUERY_FAILED", "查询叙事义务失败", true)
-                    .with_detail(e.to_string())
-            })?;
+            .map_err(query_obligation_error)?;
         Ok(obligations)
     }
 
@@ -116,9 +105,7 @@ impl NarrativeService {
         project_root: &str,
         input: CreateObligationInput,
     ) -> Result<String, AppErrorDto> {
-        let conn = open_database(Path::new(project_root)).map_err(|e| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
-        })?;
+        let conn = open_project_database(project_root)?;
         let project_id = get_project_id(&conn)?;
         let id = Uuid::new_v4().to_string();
         let now = now_iso();
@@ -144,9 +131,7 @@ impl NarrativeService {
                 now
             ],
         )
-        .map_err(|e| {
-            AppErrorDto::new("INSERT_FAILED", "创建叙事义务失败", true).with_detail(e.to_string())
-        })?;
+        .map_err(insert_obligation_error)?;
         insert_manual_provenance(&conn, &project_id, "narrative_obligation", &id)?;
         Ok(id)
     }
@@ -157,34 +142,59 @@ impl NarrativeService {
         id: &str,
         status: &str,
     ) -> Result<(), AppErrorDto> {
-        let conn = open_database(Path::new(project_root)).map_err(|e| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
-        })?;
+        let conn = open_project_database(project_root)?;
         let now = now_iso();
         conn.execute(
             "UPDATE narrative_obligations SET payoff_status = ?1, updated_at = ?2 WHERE id = ?3",
             params![status, now, id],
         )
-        .map_err(|e| {
-            AppErrorDto::new("UPDATE_FAILED", "更新叙事义务状态失败", true)
-                .with_detail(e.to_string())
-        })?;
+        .map_err(update_obligation_status_error)?;
         Ok(())
     }
 
     pub fn delete(&self, project_root: &str, id: &str) -> Result<(), AppErrorDto> {
-        let conn = open_database(Path::new(project_root)).map_err(|e| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
-        })?;
+        let conn = open_project_database(project_root)?;
         conn.execute(
             "DELETE FROM narrative_obligations WHERE id = ?1",
             params![id],
         )
-        .map_err(|e| {
-            AppErrorDto::new("DELETE_FAILED", "删除叙事义务失败", true).with_detail(e.to_string())
-        })?;
+        .map_err(delete_obligation_error)?;
         Ok(())
     }
+}
+
+fn normalize_project_root(project_root: &str) -> Result<&str, AppErrorDto> {
+    let normalized_root = project_root.trim();
+    if normalized_root.is_empty() {
+        return Err(
+            AppErrorDto::new("PROJECT_INVALID_PATH", "项目目录不能为空", true)
+                .with_suggested_action("请输入有效的项目目录路径"),
+        );
+    }
+    Ok(normalized_root)
+}
+
+fn open_project_database(project_root: &str) -> Result<Connection, AppErrorDto> {
+    let normalized_root = normalize_project_root(project_root)?;
+    open_database(Path::new(normalized_root)).map_err(|e| {
+        AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
+    })
+}
+
+fn query_obligation_error(err: impl ToString) -> AppErrorDto {
+    AppErrorDto::new("QUERY_FAILED", "查询叙事义务失败", true).with_detail(err.to_string())
+}
+
+fn insert_obligation_error(err: impl ToString) -> AppErrorDto {
+    AppErrorDto::new("INSERT_FAILED", "创建叙事义务失败", true).with_detail(err.to_string())
+}
+
+fn update_obligation_status_error(err: impl ToString) -> AppErrorDto {
+    AppErrorDto::new("UPDATE_FAILED", "更新叙事义务状态失败", true).with_detail(err.to_string())
+}
+
+fn delete_obligation_error(err: impl ToString) -> AppErrorDto {
+    AppErrorDto::new("DELETE_FAILED", "删除叙事义务失败", true).with_detail(err.to_string())
 }
 
 #[cfg(test)]
@@ -341,5 +351,46 @@ mod tests {
         assert_eq!(ob.severity, "medium");
 
         remove_temp_workspace(&ws);
+    }
+
+    #[test]
+    fn narrative_methods_accept_trimmed_project_root() {
+        let ws = create_temp_workspace();
+        let project_root = create_test_project(&ws);
+        let wrapped_root = format!("  {}  ", project_root);
+        let ns = NarrativeService;
+
+        let id = ns
+            .create(
+                &wrapped_root,
+                CreateObligationInput {
+                    obligation_type: "setup".into(),
+                    description: "测试内容".into(),
+                    planted_chapter_id: None,
+                    expected_payoff_chapter_id: None,
+                    actual_payoff_chapter_id: None,
+                    payoff_status: None,
+                    severity: None,
+                    related_entities: None,
+                },
+            )
+            .expect("create obligation with trimmed root");
+        assert!(!id.is_empty());
+
+        let list = ns
+            .list(&wrapped_root)
+            .expect("list obligations with trimmed root");
+        assert_eq!(list.len(), 1);
+
+        remove_temp_workspace(&ws);
+    }
+
+    #[test]
+    fn narrative_methods_reject_blank_project_root() {
+        let ns = NarrativeService;
+        let err = ns
+            .list("   ")
+            .expect_err("blank root should be rejected");
+        assert_eq!(err.code, "PROJECT_INVALID_PATH");
     }
 }

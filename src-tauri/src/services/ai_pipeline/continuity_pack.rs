@@ -176,7 +176,7 @@ fn display_language_style(raw: &str) -> String {
         "balanced" => "适中".to_string(),
         "ornate" => "华丽".to_string(),
         "colloquial" => "口语化".to_string(),
-        other if other.is_empty() => "适中".to_string(),
+        "" => "适中".to_string(),
         other => other.to_string(),
     }
 }

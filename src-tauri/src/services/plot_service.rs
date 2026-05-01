@@ -68,13 +68,11 @@ fn insert_manual_provenance(
 
 impl PlotService {
     pub fn list(&self, project_root: &str) -> Result<Vec<PlotNodeRecord>, AppErrorDto> {
-        let conn = open_database(Path::new(project_root)).map_err(|e| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
-        })?;
+        let conn = open_project_database(project_root)?;
         let project_id = get_project_id(&conn)?;
         let mut stmt = conn
             .prepare("SELECT id, project_id, title, node_type, sort_order, goal, conflict, emotional_curve, status, COALESCE(related_characters,'[]'), created_at, updated_at FROM plot_nodes WHERE project_id = ?1 ORDER BY sort_order")
-            .map_err(|e| AppErrorDto::new("QUERY_FAILED", "查询剧情节点失败", true).with_detail(e.to_string()))?;
+            .map_err(query_plot_nodes_error)?;
         let nodes = stmt
             .query_map(params![project_id], |row| {
                 Ok(PlotNodeRecord {
@@ -92,15 +90,9 @@ impl PlotService {
                     updated_at: row.get(11)?,
                 })
             })
-            .map_err(|e| {
-                AppErrorDto::new("QUERY_FAILED", "查询剧情节点失败", true)
-                    .with_detail(e.to_string())
-            })?
+            .map_err(query_plot_nodes_error)?
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| {
-                AppErrorDto::new("QUERY_FAILED", "查询剧情节点失败", true)
-                    .with_detail(e.to_string())
-            })?;
+            .map_err(query_plot_nodes_error)?;
         Ok(nodes)
     }
 
@@ -109,28 +101,28 @@ impl PlotService {
         project_root: &str,
         input: CreatePlotNodeInput,
     ) -> Result<String, AppErrorDto> {
-        let conn = open_database(Path::new(project_root)).map_err(|e| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
-        })?;
+        let conn = open_project_database(project_root)?;
         let project_id = get_project_id(&conn)?;
         let id = Uuid::new_v4().to_string();
         let now = now_iso();
-        let rc = serde_json::to_string(&input.related_characters.unwrap_or_default())
-            .unwrap_or_default();
+        let rc = serde_json::to_string(&input.related_characters.unwrap_or_default()).map_err(
+            |e| {
+                AppErrorDto::new("SERIALIZE_ERROR", "序列化关联角色失败", true)
+                    .with_detail(e.to_string())
+            },
+        )?;
         let status = input.status.unwrap_or_else(|| "planning".to_string());
         conn.execute(
             "INSERT INTO plot_nodes(id, project_id, title, node_type, sort_order, goal, conflict, emotional_curve, status, related_characters, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
             params![id, project_id, input.title, input.node_type, input.sort_order, input.goal, input.conflict, input.emotional_curve, status, rc, now, now],
         )
-        .map_err(|e| AppErrorDto::new("INSERT_FAILED", "创建剧情节点失败", true).with_detail(e.to_string()))?;
+        .map_err(insert_plot_node_error)?;
         insert_manual_provenance(&conn, &project_id, "plot_node", &id)?;
         Ok(id)
     }
 
     pub fn reorder(&self, project_root: &str, ordered_ids: Vec<String>) -> Result<(), AppErrorDto> {
-        let conn = open_database(Path::new(project_root)).map_err(|e| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
-        })?;
+        let conn = open_project_database(project_root)?;
         let now = now_iso();
         for (i, node_id) in ordered_ids.iter().enumerate() {
             let order = (i + 1) as i64;
@@ -138,12 +130,40 @@ impl PlotService {
                 "UPDATE plot_nodes SET sort_order = ?1, updated_at = ?2 WHERE id = ?3",
                 params![order, now, node_id],
             )
-            .map_err(|e| {
-                AppErrorDto::new("REORDER_FAILED", "重排序失败", true).with_detail(e.to_string())
-            })?;
+            .map_err(reorder_plot_nodes_error)?;
         }
         Ok(())
     }
+}
+
+fn normalize_project_root(project_root: &str) -> Result<&str, AppErrorDto> {
+    let normalized_root = project_root.trim();
+    if normalized_root.is_empty() {
+        return Err(
+            AppErrorDto::new("PROJECT_INVALID_PATH", "项目目录不能为空", true)
+                .with_suggested_action("请输入有效的项目目录路径"),
+        );
+    }
+    Ok(normalized_root)
+}
+
+fn open_project_database(project_root: &str) -> Result<Connection, AppErrorDto> {
+    let normalized_root = normalize_project_root(project_root)?;
+    open_database(Path::new(normalized_root)).map_err(|e| {
+        AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
+    })
+}
+
+fn query_plot_nodes_error(err: impl ToString) -> AppErrorDto {
+    AppErrorDto::new("QUERY_FAILED", "查询剧情节点失败", true).with_detail(err.to_string())
+}
+
+fn insert_plot_node_error(err: impl ToString) -> AppErrorDto {
+    AppErrorDto::new("INSERT_FAILED", "创建剧情节点失败", true).with_detail(err.to_string())
+}
+
+fn reorder_plot_nodes_error(err: impl ToString) -> AppErrorDto {
+    AppErrorDto::new("REORDER_FAILED", "重排序失败", true).with_detail(err.to_string())
 }
 
 #[cfg(test)]
@@ -214,5 +234,48 @@ mod tests {
 
         remove_temp_workspace(&ws);
     }
-}
 
+    #[test]
+    fn plot_methods_accept_trimmed_project_root() {
+        let ws = create_temp_workspace();
+        let ps = ProjectService;
+        let pl = PlotService;
+        let project = ps
+            .create_project(CreateProjectInput {
+                name: "剧情路径空白测试".into(),
+                author: None,
+                genre: "悬疑".into(),
+                target_words: None,
+                save_directory: ws.to_string_lossy().into(),
+            })
+            .expect("project created");
+        let wrapped_root = format!("  {}  ", project.project_root);
+
+        let id = pl
+            .create(
+                &wrapped_root,
+                CreatePlotNodeInput {
+                    title: "触发事件".into(),
+                    node_type: "开端".into(),
+                    sort_order: 1,
+                    ..Default::default()
+                },
+            )
+            .expect("create node with trimmed root");
+        assert!(!id.is_empty());
+
+        let nodes = pl
+            .list(&wrapped_root)
+            .expect("list nodes with trimmed root");
+        assert_eq!(nodes.len(), 1);
+
+        remove_temp_workspace(&ws);
+    }
+
+    #[test]
+    fn plot_methods_reject_blank_project_root() {
+        let pl = PlotService;
+        let err = pl.list("   ").expect_err("blank root should be rejected");
+        assert_eq!(err.code, "PROJECT_INVALID_PATH");
+    }
+}

@@ -406,11 +406,7 @@ impl ProjectService {
         project_root: &str,
         style: &WritingStyle,
     ) -> Result<(), AppErrorDto> {
-        let project_root_path = Path::new(project_root);
-        let conn = open_database(project_root_path).map_err(|err| {
-            AppErrorDto::new("DB_OPEN_FAILED", "无法打开项目数据库", false)
-                .with_detail(err.to_string())
-        })?;
+        let conn = open_project_database(project_root)?;
         let project_id = get_project_id(&conn)?;
         let style_json = serde_json::to_string(style).map_err(|err| {
             AppErrorDto::new("STYLE_SERIALIZE_FAILED", "无法序列化写作风格配置", true)
@@ -429,11 +425,7 @@ impl ProjectService {
     }
 
     pub fn get_writing_style(&self, project_root: &str) -> Result<WritingStyle, AppErrorDto> {
-        let project_root_path = Path::new(project_root);
-        let conn = open_database(project_root_path).map_err(|err| {
-            AppErrorDto::new("DB_OPEN_FAILED", "无法打开项目数据库", false)
-                .with_detail(err.to_string())
-        })?;
+        let conn = open_project_database(project_root)?;
         let project_id = get_project_id(&conn)?;
         let style_json: Option<String> = conn
             .query_row(
@@ -460,11 +452,7 @@ impl ProjectService {
         project_root: &str,
         profile: &AiStrategyProfile,
     ) -> Result<(), AppErrorDto> {
-        let project_root_path = Path::new(project_root);
-        let conn = open_database(project_root_path).map_err(|err| {
-            AppErrorDto::new("DB_OPEN_FAILED", "无法打开项目数据库", false)
-                .with_detail(err.to_string())
-        })?;
+        let conn = open_project_database(project_root)?;
         let project_id = get_project_id(&conn)?;
         let profile_json = serde_json::to_string(profile).map_err(|err| {
             AppErrorDto::new("STRATEGY_SERIALIZE_FAILED", "无法序列化 AI 策略配置", true)
@@ -486,11 +474,7 @@ impl ProjectService {
         &self,
         project_root: &str,
     ) -> Result<AiStrategyProfile, AppErrorDto> {
-        let project_root_path = Path::new(project_root);
-        let conn = open_database(project_root_path).map_err(|err| {
-            AppErrorDto::new("DB_OPEN_FAILED", "无法打开项目数据库", false)
-                .with_detail(err.to_string())
-        })?;
+        let conn = open_project_database(project_root)?;
         let project_id = get_project_id(&conn)?;
         let profile_json: Option<String> = conn
             .query_row(
@@ -577,6 +561,24 @@ fn write_project_json(
 fn read_project_json(project_root: &Path) -> Result<ProjectJson, Box<dyn std::error::Error>> {
     let raw = fs::read_to_string(project_json_path(project_root))?;
     Ok(serde_json::from_str::<ProjectJson>(&raw)?)
+}
+
+fn normalize_project_root(project_root: &str) -> Result<&str, AppErrorDto> {
+    let normalized_root = project_root.trim();
+    if normalized_root.is_empty() {
+        return Err(
+            AppErrorDto::new("PROJECT_INVALID_PATH", "项目目录不能为空", true)
+                .with_suggested_action("请输入有效的项目目录路径"),
+        );
+    }
+    Ok(normalized_root)
+}
+
+fn open_project_database(project_root: &str) -> Result<rusqlite::Connection, AppErrorDto> {
+    let normalized_root = normalize_project_root(project_root)?;
+    open_database(Path::new(normalized_root)).map_err(|err| {
+        AppErrorDto::new("DB_OPEN_FAILED", "无法打开项目数据库", false).with_detail(err.to_string())
+    })
 }
 
 pub fn get_project_id(conn: &rusqlite::Connection) -> Result<String, AppErrorDto> {
@@ -889,6 +891,70 @@ mod tests {
         let err = service
             .open_project("relative\\project")
             .expect_err("relative path should be rejected");
+        assert_eq!(err.code, "PROJECT_INVALID_PATH");
+    }
+
+    #[test]
+    fn writing_style_accepts_trimmed_project_root() {
+        let workspace = create_temp_workspace();
+        let service = ProjectService;
+        let create_result = service
+            .create_project(CreateProjectInput {
+                name: "路径空白测试".to_string(),
+                author: None,
+                genre: "测试".to_string(),
+                target_words: None,
+                save_directory: workspace.to_string_lossy().to_string(),
+            })
+            .expect("create project should succeed");
+
+        let wrapped_root = format!("  {}  ", create_result.project_root);
+        let loaded = service
+            .get_writing_style(&wrapped_root)
+            .expect("trimmed project root should be accepted");
+        assert_eq!(loaded, WritingStyle::default());
+
+        remove_temp_workspace(&workspace);
+    }
+
+    #[test]
+    fn writing_style_rejects_blank_project_root() {
+        let service = ProjectService;
+        let err = service
+            .get_writing_style("   ")
+            .expect_err("blank root should be rejected");
+        assert_eq!(err.code, "PROJECT_INVALID_PATH");
+    }
+
+    #[test]
+    fn ai_strategy_accepts_trimmed_project_root() {
+        let workspace = create_temp_workspace();
+        let service = ProjectService;
+        let create_result = service
+            .create_project(CreateProjectInput {
+                name: "策略路径空白测试".to_string(),
+                author: None,
+                genre: "测试".to_string(),
+                target_words: None,
+                save_directory: workspace.to_string_lossy().to_string(),
+            })
+            .expect("create project should succeed");
+
+        let wrapped_root = format!("  {}  ", create_result.project_root);
+        let loaded = service
+            .get_ai_strategy_profile(&wrapped_root)
+            .expect("trimmed project root should be accepted");
+        assert_eq!(loaded, AiStrategyProfile::default());
+
+        remove_temp_workspace(&workspace);
+    }
+
+    #[test]
+    fn ai_strategy_rejects_blank_project_root() {
+        let service = ProjectService;
+        let err = service
+            .get_ai_strategy_profile("   ")
+            .expect_err("blank root should be rejected");
         assert_eq!(err.code, "PROJECT_INVALID_PATH");
     }
 }

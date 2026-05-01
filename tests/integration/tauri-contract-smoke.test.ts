@@ -134,8 +134,9 @@ test("问题6契约验证：compatibility-only 命令从强制注册约束解绑
   assert.match(settingsCommands, /log_deprecated_command\(DEPRECATED_LOAD_PROVIDER_LOG,\s*"load_provider"/);
   assert.match(settingsCommands, /DEPRECATED_LOAD_PROVIDER_CONFIG_LOG,\s*"load_provider_config"/);
   assert.match(settingsCommands, /DEPRECATED_SAVE_PROVIDER_CONFIG_LOG,\s*"save_provider_config"/);
-  assert.match(aiCommands, /record_deprecated_command_usage\("register_ai_provider",/);
-  assert.match(aiCommands, /record_deprecated_command_usage\("test_ai_connection",/);
+  assert.match(aiCommands, /record_deprecated_command_usage\(command,\s*src\)/);
+  assert.match(aiCommands, /log_deprecated_command\(\s*DEPRECATED_REGISTER_AI_PROVIDER_LOG,\s*"register_ai_provider"/);
+  assert.match(aiCommands, /log_deprecated_command\(\s*DEPRECATED_TEST_AI_CONNECTION_LOG,\s*"test_ai_connection"/);
 });
 
 test("问题3文档同步：AI 主链路统一为 pipeline + 事件流", async () => {

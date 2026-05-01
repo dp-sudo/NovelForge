@@ -56,9 +56,7 @@ impl StoryStateService {
             ));
         }
 
-        let mut conn = open_database(Path::new(project_root)).map_err(|err| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(err.to_string())
-        })?;
+        let mut conn = open_project_database(project_root)?;
         let project_id = get_project_id(&conn)?;
         let now = now_iso();
         let state_id = Uuid::new_v4().to_string();
@@ -67,10 +65,7 @@ impl StoryStateService {
                 .with_detail(err.to_string())
         })?;
 
-        let tx = conn.transaction().map_err(|err| {
-            AppErrorDto::new("STORY_STATE_SAVE_FAILED", "写入状态账本失败", true)
-                .with_detail(err.to_string())
-        })?;
+        let tx = conn.transaction().map_err(story_state_save_error)?;
         tx.execute(
             "UPDATE story_state
              SET status = ?1, updated_at = ?2
@@ -91,10 +86,7 @@ impl StoryStateService {
                 ACTIVE_STATUS
             ],
         )
-        .map_err(|err| {
-            AppErrorDto::new("STORY_STATE_SAVE_FAILED", "写入状态账本失败", true)
-                .with_detail(err.to_string())
-        })?;
+        .map_err(story_state_save_error)?;
         tx.execute(
             "INSERT INTO story_state(
                 id, project_id, subject_type, subject_id, scope, state_kind, payload_json, source_chapter_id, status, created_at, updated_at
@@ -113,14 +105,8 @@ impl StoryStateService {
                 now
             ],
         )
-        .map_err(|err| {
-            AppErrorDto::new("STORY_STATE_SAVE_FAILED", "写入状态账本失败", true)
-                .with_detail(err.to_string())
-        })?;
-        tx.commit().map_err(|err| {
-            AppErrorDto::new("STORY_STATE_SAVE_FAILED", "写入状态账本失败", true)
-                .with_detail(err.to_string())
-        })?;
+        .map_err(story_state_save_error)?;
+        tx.commit().map_err(story_state_save_error)?;
 
         Ok(StoryStateRow {
             id: state_id,
@@ -142,9 +128,7 @@ impl StoryStateService {
         subject_type: Option<&str>,
         subject_id: Option<&str>,
     ) -> Result<Vec<StoryStateRow>, AppErrorDto> {
-        let conn = open_database(Path::new(project_root)).map_err(|err| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(err.to_string())
-        })?;
+        let conn = open_project_database(project_root)?;
         let project_id = get_project_id(&conn)?;
         let mut stmt = conn
             .prepare(
@@ -156,10 +140,7 @@ impl StoryStateService {
                    AND (?3 IS NULL OR subject_id = ?3)
                  ORDER BY updated_at DESC, created_at DESC",
             )
-            .map_err(|err| {
-                AppErrorDto::new("STORY_STATE_QUERY_FAILED", "查询状态账本失败", true)
-                    .with_detail(err.to_string())
-            })?;
+            .map_err(story_state_query_error)?;
 
         let rows = stmt
             .query_map(params![project_id, subject_type, subject_id], |row| {
@@ -178,14 +159,9 @@ impl StoryStateService {
                     updated_at: row.get(9)?,
                 })
             })
-            .map_err(|err| {
-                AppErrorDto::new("STORY_STATE_QUERY_FAILED", "查询状态账本失败", true)
-                    .with_detail(err.to_string())
-            })?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(|err| {
-            AppErrorDto::new("STORY_STATE_QUERY_FAILED", "查询状态账本失败", true)
-                .with_detail(err.to_string())
-        })
+            .map_err(story_state_query_error)?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(story_state_query_error)
     }
 
     pub fn list_chapter_states(
@@ -227,6 +203,34 @@ impl StoryStateService {
             },
         )
     }
+}
+
+fn normalize_project_root(project_root: &str) -> Result<&str, AppErrorDto> {
+    let normalized_root = project_root.trim();
+    if normalized_root.is_empty() {
+        return Err(
+            AppErrorDto::new("PROJECT_INVALID_PATH", "项目目录不能为空", true)
+                .with_suggested_action("请输入有效的项目目录路径"),
+        );
+    }
+    Ok(normalized_root)
+}
+
+fn open_project_database(project_root: &str) -> Result<rusqlite::Connection, AppErrorDto> {
+    let normalized_root = normalize_project_root(project_root)?;
+    open_database(Path::new(normalized_root)).map_err(|err| {
+        AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(err.to_string())
+    })
+}
+
+fn story_state_save_error(err: impl ToString) -> AppErrorDto {
+    AppErrorDto::new("STORY_STATE_SAVE_FAILED", "写入状态账本失败", true)
+        .with_detail(err.to_string())
+}
+
+fn story_state_query_error(err: impl ToString) -> AppErrorDto {
+    AppErrorDto::new("STORY_STATE_QUERY_FAILED", "查询状态账本失败", true)
+        .with_detail(err.to_string())
 }
 
 #[cfg(test)]
@@ -326,5 +330,50 @@ mod tests {
         assert_eq!(superseded_count, 1);
 
         remove_temp_workspace(&workspace);
+    }
+
+    #[test]
+    fn story_state_methods_accept_trimmed_project_root() {
+        let workspace = create_temp_workspace();
+        let project = ProjectService
+            .create_project(CreateProjectInput {
+                name: "state-ledger-trimmed-root".to_string(),
+                author: None,
+                genre: "测试".to_string(),
+                target_words: None,
+                save_directory: workspace.to_string_lossy().to_string(),
+            })
+            .expect("project created");
+        let svc = StoryStateService;
+        let wrapped_root = format!("  {}  ", project.project_root);
+
+        svc.upsert_state(
+            &wrapped_root,
+            StoryStateInput {
+                subject_type: "window".to_string(),
+                subject_id: "current_window".to_string(),
+                scope: "global".to_string(),
+                state_kind: "progress".to_string(),
+                payload_json: json!({ "chapterIndex": 1, "wordCount": 1200 }),
+                source_chapter_id: Some("chapter-1".to_string()),
+            },
+        )
+        .expect("save state with trimmed root");
+
+        let rows = svc
+            .list_latest_states(&wrapped_root, Some("window"), Some("current_window"))
+            .expect("list state with trimmed root");
+        assert_eq!(rows.len(), 1);
+
+        remove_temp_workspace(&workspace);
+    }
+
+    #[test]
+    fn story_state_methods_reject_blank_project_root() {
+        let svc = StoryStateService;
+        let err = svc
+            .list_latest_states("   ", None, None)
+            .expect_err("blank root should be rejected");
+        assert_eq!(err.code, "PROJECT_INVALID_PATH");
     }
 }

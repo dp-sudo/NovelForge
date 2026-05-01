@@ -3,7 +3,7 @@ use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::Path;
 
-use rusqlite::{params, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension, Params};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -305,6 +305,138 @@ type StructuredDraftPool = (
 #[derive(Default)]
 pub struct ContextService;
 
+fn normalize_project_root(project_root: &str) -> Result<&str, AppErrorDto> {
+    let normalized_root = project_root.trim();
+    if normalized_root.is_empty() {
+        return Err(
+            AppErrorDto::new("PROJECT_INVALID_PATH", "项目目录不能为空", true)
+                .with_suggested_action("请输入有效的项目目录路径"),
+        );
+    }
+    Ok(normalized_root)
+}
+
+fn context_db_open_error(err: impl ToString) -> AppErrorDto {
+    AppErrorDto::new("DB_OPEN_FAILED", "无法打开项目数据库", false).with_detail(err.to_string())
+}
+
+fn open_project_database(project_root: &str) -> Result<Connection, AppErrorDto> {
+    open_database(Path::new(project_root)).map_err(context_db_open_error)
+}
+
+fn promise_context_query_error(err: impl ToString) -> AppErrorDto {
+    AppErrorDto::new("DB_QUERY_FAILED", "查询叙事义务失败", true).with_detail(err.to_string())
+}
+
+fn recent_continuity_query_error(err: impl ToString) -> AppErrorDto {
+    AppErrorDto::new("DB_QUERY_FAILED", "查询近期章节失败", true).with_detail(err.to_string())
+}
+
+fn chapter_query_error(err: impl ToString) -> AppErrorDto {
+    AppErrorDto::new("DB_QUERY_FAILED", "查询章节失败", true).with_detail(err.to_string())
+}
+
+fn project_db_write_error(err: impl ToString) -> AppErrorDto {
+    AppErrorDto::new("DB_WRITE_FAILED", "无法写入项目数据库", true).with_detail(err.to_string())
+}
+
+fn context_query_error(message: &str, err: impl ToString) -> AppErrorDto {
+    AppErrorDto::new("DB_QUERY_FAILED", message, true).with_detail(err.to_string())
+}
+
+fn context_write_error(message: &str, err: impl ToString) -> AppErrorDto {
+    AppErrorDto::new("DB_WRITE_FAILED", message, true).with_detail(err.to_string())
+}
+
+fn context_query_failed(message: &str) -> AppErrorDto {
+    AppErrorDto::new("DB_QUERY_FAILED", message, true)
+}
+
+fn context_collect_error(message: &str, detail: impl Into<String>) -> AppErrorDto {
+    AppErrorDto::new("CONTEXT_COLLECT_FAILED", message, true).with_detail(detail.into())
+}
+
+fn chapter_not_found_error() -> AppErrorDto {
+    AppErrorDto::new("CHAPTER_NOT_FOUND", "章节不存在", true)
+}
+
+fn project_not_found_error(err: impl ToString) -> AppErrorDto {
+    AppErrorDto::new("PROJECT_NOT_FOUND", "项目不存在", false).with_detail(err.to_string())
+}
+
+fn chapter_context_query_error(err: impl ToString) -> AppErrorDto {
+    AppErrorDto::new("CHAPTER_QUERY_FAILED", "查询章节失败", true).with_detail(err.to_string())
+}
+
+fn chapter_exists(
+    conn: &Connection,
+    project_id: &str,
+    chapter_id: &str,
+) -> Result<bool, AppErrorDto> {
+    conn.query_row(
+        "SELECT 1 FROM chapters WHERE id = ?1 AND project_id = ?2 AND is_deleted = 0",
+        params![chapter_id, project_id],
+        |_row| Ok(()),
+    )
+    .optional()
+    .map_err(chapter_query_error)
+    .map(|value| value.is_some())
+}
+
+fn draft_invalid_error(message: &'static str) -> AppErrorDto {
+    AppErrorDto::new("DRAFT_INVALID", message, true)
+}
+
+fn candidate_target_invalid_error(message: &'static str) -> AppErrorDto {
+    AppErrorDto::new("CANDIDATE_TARGET_INVALID", message, true)
+}
+
+fn draft_pool_item_error(code: &'static str, message: &'static str) -> AppErrorDto {
+    AppErrorDto::new(code, message, true)
+}
+
+fn draft_pool_query_error(message: &str, err: impl ToString) -> AppErrorDto {
+    AppErrorDto::new("DB_QUERY_FAILED", message, true).with_detail(err.to_string())
+}
+
+fn draft_pool_query_pool_error(err: impl ToString) -> AppErrorDto {
+    draft_pool_query_error("查询草案池失败", err)
+}
+
+fn draft_pool_query_batch_error(err: impl ToString) -> AppErrorDto {
+    draft_pool_query_error("查询草案批次失败", err)
+}
+
+fn draft_pool_write_error(message: &str, err: impl ToString) -> AppErrorDto {
+    AppErrorDto::new("DB_WRITE_FAILED", message, true).with_detail(err.to_string())
+}
+
+fn draft_pool_parse_error(err: impl ToString) -> AppErrorDto {
+    AppErrorDto::new("DB_QUERY_FAILED", "解析草案池失败", true).with_detail(err.to_string())
+}
+
+fn collect_string_column<P: Params>(
+    conn: &Connection,
+    sql: &str,
+    params: P,
+    error_message: &str,
+    strict_rows: bool,
+) -> Result<Vec<String>, AppErrorDto> {
+    let mut stmt = conn
+        .prepare(sql)
+        .map_err(|_| context_query_failed(error_message))?;
+    let rows = stmt
+        .query_map(params, |row| row.get::<_, String>(0))
+        .map_err(|_| context_query_failed(error_message))?;
+
+    if strict_rows {
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|_| context_query_failed(error_message))
+    } else {
+        Ok(rows.filter_map(|row| row.ok()).collect())
+    }
+}
+
 impl ContextService {
     /// Collect editor context panel payload that is consumed by renderer directly.
     pub fn collect_editor_context(
@@ -312,17 +444,15 @@ impl ContextService {
         project_root: &str,
         chapter_id: &str,
     ) -> Result<EditorContextPanel, AppErrorDto> {
-        let project_root_path = Path::new(project_root);
-        let mut conn = open_database(project_root_path).map_err(|err| {
-            AppErrorDto::new("DB_OPEN_FAILED", "无法打开项目数据库", false)
-                .with_detail(err.to_string())
-        })?;
+        let normalized_root = normalize_project_root(project_root)?;
+        let project_root_path = Path::new(normalized_root);
+        let mut conn = open_project_database(normalized_root)?;
         let project_id = get_project_id(&conn)?;
         let related = self.collect_related_context(&conn, &project_id, chapter_id)?;
         let chapter = related
             .chapter
             .clone()
-            .ok_or_else(|| AppErrorDto::new("CHAPTER_NOT_FOUND", "章节不存在", true))?;
+            .ok_or_else(chapter_not_found_error)?;
         let glossary = self.collect_glossary_context(&conn, &project_id)?;
         let blueprint = self.collect_blueprint_context(&conn, &project_id)?;
         let chapter_content = match conn
@@ -332,20 +462,12 @@ impl ContextService {
                 |row| row.get::<_, String>(0),
             )
             .optional()
-            .map_err(|err| {
-                AppErrorDto::new("CONTEXT_COLLECT_FAILED", "无法读取章节路径", true)
-                    .with_detail(err.to_string())
-            })? {
+            .map_err(|err| context_collect_error("无法读取章节路径", err.to_string()))? {
             Some(content_path) => {
                 let chapter_file = resolve_project_relative_path(project_root_path, &content_path)
-                    .map_err(|detail| {
-                        AppErrorDto::new("CONTEXT_COLLECT_FAILED", "章节路径无效", true)
-                            .with_detail(detail)
-                    })?;
-                let content = fs::read_to_string(&chapter_file).map_err(|err| {
-                    AppErrorDto::new("CONTEXT_COLLECT_FAILED", "无法读取章节正文", true)
-                        .with_detail(err.to_string())
-                })?;
+                    .map_err(|detail| context_collect_error("章节路径无效", detail))?;
+                let content = fs::read_to_string(&chapter_file)
+                    .map_err(|err| context_collect_error("无法读取章节正文", err.to_string()))?;
                 strip_frontmatter(&content)
             }
             None => String::new(),
@@ -385,7 +507,7 @@ impl ContextService {
         let (relationship_drafts, involvement_drafts, scene_drafts) =
             self.load_structured_draft_pool(&conn, &project_id, chapter_id)?;
         let state_summary = StoryStateService
-            .list_chapter_states(project_root, chapter_id)?
+            .list_chapter_states(normalized_root, chapter_id)?
             .into_iter()
             .map(|row| StoryStateSummary {
                 subject_type: row.subject_type,
@@ -423,11 +545,8 @@ impl ContextService {
         &self,
         project_root: &str,
     ) -> Result<CollectedContext, AppErrorDto> {
-        let project_root_path = std::path::Path::new(project_root);
-        let conn = open_database(project_root_path).map_err(|err| {
-            AppErrorDto::new("DB_OPEN_FAILED", "无法打开项目数据库", false)
-                .with_detail(err.to_string())
-        })?;
+        let normalized_root = normalize_project_root(project_root)?;
+        let conn = open_project_database(normalized_root)?;
         let project_id = get_project_id(&conn)?;
         let global = self.collect_global_context(&conn, &project_id)?;
         Ok(CollectedContext {
@@ -449,11 +568,8 @@ impl ContextService {
         project_root: &str,
         chapter_id: &str,
     ) -> Result<CollectedContext, AppErrorDto> {
-        let project_root_path = Path::new(project_root);
-        let conn = open_database(project_root_path).map_err(|err| {
-            AppErrorDto::new("DB_OPEN_FAILED", "无法打开项目数据库", false)
-                .with_detail(err.to_string())
-        })?;
+        let normalized_root = normalize_project_root(project_root)?;
+        let conn = open_project_database(normalized_root)?;
 
         let project_id = get_project_id(&conn)?;
 
@@ -609,10 +725,8 @@ impl ContextService {
     }
 
     pub fn get_promise_context(&self, project_root: &str) -> Result<Vec<String>, AppErrorDto> {
-        let conn = open_database(Path::new(project_root)).map_err(|err| {
-            AppErrorDto::new("DB_OPEN_FAILED", "无法打开项目数据库", false)
-                .with_detail(err.to_string())
-        })?;
+        let normalized_root = normalize_project_root(project_root)?;
+        let conn = open_project_database(normalized_root)?;
         let project_id = get_project_id(&conn)?;
         let mut stmt = conn
             .prepare(
@@ -624,10 +738,7 @@ impl ContextService {
                  ORDER BY updated_at DESC, created_at DESC
                  LIMIT 20",
             )
-            .map_err(|err| {
-                AppErrorDto::new("DB_QUERY_FAILED", "查询叙事义务失败", true)
-                    .with_detail(err.to_string())
-            })?;
+            .map_err(promise_context_query_error)?;
         let rows = stmt
             .query_map(params![project_id], |row| {
                 let obligation_type = row.get::<_, String>(0)?;
@@ -641,18 +752,12 @@ impl ContextService {
                     payoff_status,
                 ))
             })
-            .map_err(|err| {
-                AppErrorDto::new("DB_QUERY_FAILED", "查询叙事义务失败", true)
-                    .with_detail(err.to_string())
-            })?;
+            .map_err(promise_context_query_error)?;
 
         let mut lines = Vec::new();
         for row in rows {
             let (obligation_type, description, expected_payoff_chapter_id, payoff_status) = row
-                .map_err(|err| {
-                    AppErrorDto::new("DB_QUERY_FAILED", "查询叙事义务失败", true)
-                        .with_detail(err.to_string())
-                })?;
+                .map_err(promise_context_query_error)?;
             let mut line = format!(
                 "叙事义务[{}]: {}",
                 obligation_type.trim(),
@@ -714,8 +819,7 @@ impl ContextService {
         let snapshot = ChapterService
             .get_window_plan_snapshot(project_root, chapter_id)
             .map_err(|err| {
-                AppErrorDto::new("CONTEXT_COLLECT_FAILED", "查询章节窗口计划失败", true)
-                    .with_detail(format!("{}: {}", err.code, err.message))
+                context_collect_error("查询章节窗口计划失败", format!("{}: {}", err.code, err.message))
             })?;
 
         let mut lines = vec![format!(
@@ -747,10 +851,8 @@ impl ContextService {
         project_root: &str,
         chapter_id: Option<&str>,
     ) -> Result<Vec<String>, AppErrorDto> {
-        let conn = open_database(Path::new(project_root)).map_err(|err| {
-            AppErrorDto::new("DB_OPEN_FAILED", "无法打开项目数据库", false)
-                .with_detail(err.to_string())
-        })?;
+        let normalized_root = normalize_project_root(project_root)?;
+        let conn = open_project_database(normalized_root)?;
         let project_id = get_project_id(&conn)?;
 
         let chapter_index = if let Some(chapter_id) = chapter_id.map(str::trim) {
@@ -764,10 +866,7 @@ impl ContextService {
                     |row| row.get::<_, i64>(0),
                 )
                 .optional()
-                .map_err(|err| {
-                    AppErrorDto::new("DB_QUERY_FAILED", "查询近期章节失败", true)
-                        .with_detail(err.to_string())
-                })?
+                .map_err(recent_continuity_query_error)?
             }
         } else {
             None
@@ -781,10 +880,7 @@ impl ContextService {
                     params![&project_id],
                     |row| row.get::<_, Option<i64>>(0),
                 )
-                .map_err(|err| {
-                    AppErrorDto::new("DB_QUERY_FAILED", "查询近期章节失败", true)
-                        .with_detail(err.to_string())
-                })?,
+                .map_err(recent_continuity_query_error)?,
         };
         let Some(max_index) = max_index else {
             return Ok(Vec::new());
@@ -802,10 +898,7 @@ impl ContextService {
                  ORDER BY chapter_index DESC
                  LIMIT 3",
             )
-            .map_err(|err| {
-                AppErrorDto::new("DB_QUERY_FAILED", "查询近期章节失败", true)
-                    .with_detail(err.to_string())
-            })?;
+            .map_err(recent_continuity_query_error)?;
         let rows = stmt
             .query_map(params![&project_id, min_index, max_index], |row| {
                 Ok((
@@ -814,15 +907,11 @@ impl ContextService {
                     row.get::<_, Option<String>>(2)?.unwrap_or_default(),
                 ))
             })
-            .map_err(|err| {
-                AppErrorDto::new("DB_QUERY_FAILED", "查询近期章节失败", true)
-                    .with_detail(err.to_string())
-            })?;
+            .map_err(recent_continuity_query_error)?;
 
-        let mut entries = rows.collect::<Result<Vec<_>, _>>().map_err(|err| {
-            AppErrorDto::new("DB_QUERY_FAILED", "查询近期章节失败", true)
-                .with_detail(err.to_string())
-        })?;
+        let mut entries = rows
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(recent_continuity_query_error)?;
         entries.reverse();
 
         let mut lines = Vec::new();
@@ -862,33 +951,15 @@ impl ContextService {
         let target_type =
             resolve_candidate_target_type(input.target_kind.as_deref(), &input.asset_type)?;
 
-        let project_root_path = Path::new(project_root);
-        let mut conn = open_database(project_root_path).map_err(|err| {
-            AppErrorDto::new("DB_OPEN_FAILED", "无法打开项目数据库", false)
-                .with_detail(err.to_string())
-        })?;
+        let normalized_root = normalize_project_root(project_root)?;
+        let mut conn = open_project_database(normalized_root)?;
         let project_id = get_project_id(&conn)?;
 
-        let chapter_exists = conn
-            .query_row(
-                "SELECT 1 FROM chapters WHERE id = ?1 AND project_id = ?2 AND is_deleted = 0",
-                params![chapter_id, &project_id],
-                |_row| Ok(()),
-            )
-            .optional()
-            .map_err(|err| {
-                AppErrorDto::new("DB_QUERY_FAILED", "查询章节失败", true)
-                    .with_detail(err.to_string())
-            })?
-            .is_some();
-        if !chapter_exists {
-            return Err(AppErrorDto::new("CHAPTER_NOT_FOUND", "章节不存在", true));
+        if !chapter_exists(&conn, &project_id, chapter_id)? {
+            return Err(chapter_not_found_error());
         }
 
-        let tx = conn.transaction().map_err(|err| {
-            AppErrorDto::new("DB_WRITE_FAILED", "无法写入项目数据库", true)
-                .with_detail(err.to_string())
-        })?;
+        let tx = conn.transaction().map_err(project_db_write_error)?;
         let (target_id, action) = match target_type.as_str() {
             "character" => self.find_or_create_character(&tx, &project_id, &label, &evidence)?,
             "world_rule" => self.find_or_create_world_rule(
@@ -907,19 +978,14 @@ impl ContextService {
                 &evidence,
             )?,
             _ => {
-                return Err(AppErrorDto::new(
-                    "CANDIDATE_TARGET_INVALID",
-                    "不支持的候选目标类型",
-                    true,
-                ))
+                return Err(candidate_target_invalid_error("不支持的候选目标类型"))
             }
         };
 
         let link_created =
             self.ensure_chapter_link(&tx, &project_id, chapter_id, &target_type, &target_id)?;
-        tx.commit().map_err(|err| {
-            AppErrorDto::new("DB_WRITE_FAILED", "保存候选失败", true).with_detail(err.to_string())
-        })?;
+        tx.commit()
+            .map_err(|err| context_write_error("保存候选失败", err))?;
 
         Ok(ApplyAssetCandidateResult {
             action,
@@ -938,26 +1004,11 @@ impl ContextService {
         chapter_id: &str,
         input: ApplyStructuredDraftInput,
     ) -> Result<ApplyStructuredDraftResult, AppErrorDto> {
-        let project_root_path = Path::new(project_root);
-        let mut conn = open_database(project_root_path).map_err(|err| {
-            AppErrorDto::new("DB_OPEN_FAILED", "无法打开项目数据库", false)
-                .with_detail(err.to_string())
-        })?;
+        let normalized_root = normalize_project_root(project_root)?;
+        let mut conn = open_project_database(normalized_root)?;
         let project_id = get_project_id(&conn)?;
-        let chapter_exists = conn
-            .query_row(
-                "SELECT 1 FROM chapters WHERE id = ?1 AND project_id = ?2 AND is_deleted = 0",
-                params![chapter_id, &project_id],
-                |_row| Ok(()),
-            )
-            .optional()
-            .map_err(|err| {
-                AppErrorDto::new("DB_QUERY_FAILED", "查询章节失败", true)
-                    .with_detail(err.to_string())
-            })?
-            .is_some();
-        if !chapter_exists {
-            return Err(AppErrorDto::new("CHAPTER_NOT_FOUND", "章节不存在", true));
+        if !chapter_exists(&conn, &project_id, chapter_id)? {
+            return Err(chapter_not_found_error());
         }
 
         let mut draft_kind = input.draft_kind.trim().to_ascii_lowercase();
@@ -994,10 +1045,7 @@ impl ContextService {
             .filter(|value| !value.is_empty())
             .map(str::to_string);
 
-        let tx = conn.transaction().map_err(|err| {
-            AppErrorDto::new("DB_WRITE_FAILED", "无法写入项目数据库", true)
-                .with_detail(err.to_string())
-        })?;
+        let tx = conn.transaction().map_err(project_db_write_error)?;
 
         if let Some(ref item_id) = draft_item_id {
             let item = tx
@@ -1019,26 +1067,21 @@ impl ContextService {
                     },
                 )
                 .optional()
-                .map_err(|err| {
-                    AppErrorDto::new("DB_QUERY_FAILED", "查询草案池失败", true)
-                        .with_detail(err.to_string())
-                })?
-                .ok_or_else(|| AppErrorDto::new("DRAFT_ITEM_NOT_FOUND", "草案项不存在", true))?;
+                .map_err(draft_pool_query_pool_error)?
+                .ok_or_else(|| draft_pool_item_error("DRAFT_ITEM_NOT_FOUND", "草案项不存在"))?;
 
             if item.5 != "pending" {
-                return Err(AppErrorDto::new(
+                return Err(draft_pool_item_error(
                     "DRAFT_ITEM_ALREADY_PROCESSED",
                     "草案项已处理",
-                    true,
                 ));
             }
 
             let item_kind = item.0.trim().to_ascii_lowercase();
             if !draft_kind.is_empty() && draft_kind != item_kind {
-                return Err(AppErrorDto::new(
+                return Err(draft_pool_item_error(
                     "DRAFT_ITEM_KIND_MISMATCH",
                     "草案类型不匹配",
-                    true,
                 ));
             }
             draft_kind = item_kind;
@@ -1072,25 +1115,17 @@ impl ContextService {
         }
 
         if draft_kind.is_empty() || source_label.is_empty() {
-            return Err(AppErrorDto::new("DRAFT_INVALID", "草案内容为空", true));
+            return Err(draft_invalid_error("草案内容为空"));
         }
 
         let result = match draft_kind.as_str() {
             "relationship" => {
                 let target_label = target_label.clone().unwrap_or_default();
                 if target_label.is_empty() {
-                    return Err(AppErrorDto::new(
-                        "DRAFT_INVALID",
-                        "关系草案缺少目标角色",
-                        true,
-                    ));
+                    return Err(draft_invalid_error("关系草案缺少目标角色"));
                 }
                 if source_label == target_label {
-                    return Err(AppErrorDto::new(
-                        "DRAFT_INVALID",
-                        "关系草案角色不能相同",
-                        true,
-                    ));
+                    return Err(draft_invalid_error("关系草案角色不能相同"));
                 }
                 let relationship_type = relationship_type
                     .clone()
@@ -1109,10 +1144,7 @@ impl ContextService {
                         |row| row.get::<_, String>(0),
                     )
                     .optional()
-                    .map_err(|err| {
-                        AppErrorDto::new("DB_QUERY_FAILED", "查询角色关系失败", true)
-                            .with_detail(err.to_string())
-                    })?;
+                    .map_err(|err| draft_pool_query_error("查询角色关系失败", err))?;
                 let (relation_id, action) = if let Some(existing_id) = existing_relation_id {
                     (existing_id, "reused".to_string())
                 } else {
@@ -1122,10 +1154,7 @@ impl ContextService {
                         "INSERT INTO character_relationships(id, project_id, source_character_id, target_character_id, relationship_type, description, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
                         params![&relation_id, &project_id, &source_id, &target_id, &relationship_type, if evidence.is_empty() { None::<String> } else { Some(evidence.clone()) }, &now, &now],
                     )
-                    .map_err(|err| {
-                        AppErrorDto::new("DB_WRITE_FAILED", "创建角色关系失败", true)
-                            .with_detail(err.to_string())
-                    })?;
+                    .map_err(|err| draft_pool_write_error("创建角色关系失败", err))?;
                     (relation_id, "created".to_string())
                 };
                 let _ = self.ensure_chapter_link_with_relation(
@@ -1192,10 +1221,7 @@ impl ContextService {
                         |row| row.get::<_, String>(0),
                     )
                     .optional()
-                    .map_err(|err| {
-                        AppErrorDto::new("DB_QUERY_FAILED", "查询场景设定失败", true)
-                            .with_detail(err.to_string())
-                    })?;
+                    .map_err(|err| draft_pool_query_error("查询场景设定失败", err))?;
                 let world_rule_id = if let Some(existing_id) = existing_world_rule_id {
                     existing_id
                 } else {
@@ -1210,10 +1236,7 @@ impl ContextService {
                         "INSERT INTO world_rules(id, project_id, title, category, description, constraint_level, related_entities, examples, contradiction_policy, is_deleted, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,NULL,NULL,0,?8,?9)",
                         params![&id, &project_id, &source_label, "场景", &description, "normal", "[]", &now, &now],
                     )
-                    .map_err(|err| {
-                        AppErrorDto::new("DB_WRITE_FAILED", "创建场景设定失败", true)
-                            .with_detail(err.to_string())
-                    })?;
+                    .map_err(|err| draft_pool_write_error("创建场景设定失败", err))?;
                     id
                 };
                 let relation_type = format!("scene:{}", scene_type);
@@ -1235,10 +1258,9 @@ impl ContextService {
                 }
             }
             _ => {
-                return Err(AppErrorDto::new(
+                return Err(draft_pool_item_error(
                     "DRAFT_KIND_INVALID",
                     "不支持的结构化草案类型",
-                    true,
                 ))
             }
         };
@@ -1274,30 +1296,21 @@ impl ContextService {
                     item_id
                 ],
             )
-            .map_err(|err| {
-                AppErrorDto::new("DB_WRITE_FAILED", "回写草案项状态失败", true)
-                    .with_detail(err.to_string())
-            })?;
+            .map_err(|err| draft_pool_write_error("回写草案项状态失败", err))?;
             let batch_id = tx
                 .query_row(
                     "SELECT batch_id FROM structured_draft_items WHERE id = ?1",
                     params![item_id],
                     |row| row.get::<_, String>(0),
                 )
-                .map_err(|err| {
-                    AppErrorDto::new("DB_QUERY_FAILED", "查询草案批次失败", true)
-                        .with_detail(err.to_string())
-                })?;
+                .map_err(draft_pool_query_batch_error)?;
             let pending_count: i64 = tx
                 .query_row(
                     "SELECT COUNT(*) FROM structured_draft_items WHERE batch_id = ?1 AND status = 'pending'",
                     params![&batch_id],
                     |row| row.get(0),
                 )
-                .map_err(|err| {
-                    AppErrorDto::new("DB_QUERY_FAILED", "查询批次状态失败", true)
-                        .with_detail(err.to_string())
-                })?;
+                .map_err(|err| draft_pool_query_error("查询批次状态失败", err))?;
             tx.execute(
                 "UPDATE structured_draft_batches
                  SET status = ?1,
@@ -1313,16 +1326,11 @@ impl ContextService {
                     &batch_id
                 ],
             )
-            .map_err(|err| {
-                AppErrorDto::new("DB_WRITE_FAILED", "回写草案批次失败", true)
-                    .with_detail(err.to_string())
-            })?;
+            .map_err(|err| draft_pool_write_error("回写草案批次失败", err))?;
         }
 
-        tx.commit().map_err(|err| {
-            AppErrorDto::new("DB_WRITE_FAILED", "保存结构化草案失败", true)
-                .with_detail(err.to_string())
-        })?;
+        tx.commit()
+            .map_err(|err| draft_pool_write_error("保存结构化草案失败", err))?;
         Ok(result)
     }
 
@@ -1420,10 +1428,7 @@ impl ContextService {
                 |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
             )
             .optional()
-            .map_err(|err| {
-                AppErrorDto::new("DB_QUERY_FAILED", "查询草案批次失败", true)
-                    .with_detail(err.to_string())
-            })?;
+            .map_err(draft_pool_query_batch_error)?;
 
         let now = now_iso();
         let (run_id, batch_id) = if let Some((existing_batch_id, existing_run_id)) = existing_batch
@@ -1445,10 +1450,7 @@ impl ContextService {
                     &now
                 ],
             )
-            .map_err(|err| {
-                AppErrorDto::new("DB_WRITE_FAILED", "记录草案运行失败", true)
-                    .with_detail(err.to_string())
-            })?;
+            .map_err(|err| draft_pool_write_error("记录草案运行失败", err))?;
             conn.execute(
                 "INSERT INTO structured_draft_batches(
                     id, run_id, project_id, chapter_id, source_task_type, content_hash, status, created_at, updated_at
@@ -1463,16 +1465,13 @@ impl ContextService {
                     &now
                 ],
             )
-            .map_err(|err| {
-                AppErrorDto::new("DB_WRITE_FAILED", "创建草案批次失败", true)
-                    .with_detail(err.to_string())
-            })?;
+            .map_err(|err| draft_pool_write_error("创建草案批次失败", err))?;
             (run_id, batch_id)
         };
 
-        let tx = conn.transaction().map_err(|err| {
-            AppErrorDto::new("DB_WRITE_FAILED", "无法写入草案池", true).with_detail(err.to_string())
-        })?;
+        let tx = conn
+            .transaction()
+            .map_err(|err| draft_pool_write_error("无法写入草案池", err))?;
         for row in rows {
             let existing_pending = tx
                 .query_row(
@@ -1494,10 +1493,7 @@ impl ContextService {
                     },
                 )
                 .optional()
-                .map_err(|err| {
-                    AppErrorDto::new("DB_QUERY_FAILED", "查询草案项失败", true)
-                        .with_detail(err.to_string())
-                })?;
+                .map_err(|err| draft_pool_query_error("查询草案项失败", err))?;
 
             if let Some((
                 existing_id,
@@ -1535,10 +1531,7 @@ impl ContextService {
                         &existing_id
                     ],
                 )
-                .map_err(|err| {
-                    AppErrorDto::new("DB_WRITE_FAILED", "更新草案项失败", true)
-                        .with_detail(err.to_string())
-                })?;
+                .map_err(|err| draft_pool_write_error("更新草案项失败", err))?;
                 continue;
             }
 
@@ -1564,10 +1557,7 @@ impl ContextService {
                     &now
                 ],
             )
-            .map_err(|err| {
-                AppErrorDto::new("DB_WRITE_FAILED", "写入草案项失败", true)
-                    .with_detail(err.to_string())
-            })?;
+            .map_err(|err| draft_pool_write_error("写入草案项失败", err))?;
         }
 
         tx.execute(
@@ -1576,13 +1566,9 @@ impl ContextService {
              WHERE id = ?2",
             params![&now, &batch_id],
         )
-        .map_err(|err| {
-            AppErrorDto::new("DB_WRITE_FAILED", "更新草案批次失败", true)
-                .with_detail(err.to_string())
-        })?;
-        tx.commit().map_err(|err| {
-            AppErrorDto::new("DB_WRITE_FAILED", "保存草案池失败", true).with_detail(err.to_string())
-        })?;
+        .map_err(|err| draft_pool_write_error("更新草案批次失败", err))?;
+        tx.commit()
+            .map_err(|err| draft_pool_write_error("保存草案池失败", err))?;
         Ok(())
     }
 
@@ -1603,9 +1589,7 @@ impl ContextService {
                  WHERE project_id = ?1 AND chapter_id = ?2 AND draft_kind IN ('relationship', 'involvement', 'scene')
                  ORDER BY CASE status WHEN 'pending' THEN 0 ELSE 1 END, updated_at DESC",
             )
-            .map_err(|err| {
-                AppErrorDto::new("DB_QUERY_FAILED", "查询草案池失败", true).with_detail(err.to_string())
-            })?;
+            .map_err(draft_pool_query_pool_error)?;
 
         let rows = stmt
             .query_map(params![project_id, chapter_id], |row| {
@@ -1622,10 +1606,7 @@ impl ContextService {
                     row.get::<_, String>(9)?,
                 ))
             })
-            .map_err(|err| {
-                AppErrorDto::new("DB_QUERY_FAILED", "查询草案池失败", true)
-                    .with_detail(err.to_string())
-            })?;
+            .map_err(draft_pool_query_pool_error)?;
 
         for row in rows {
             let (
@@ -1639,10 +1620,7 @@ impl ContextService {
                 evidence_text,
                 payload_json,
                 status,
-            ) = row.map_err(|err| {
-                AppErrorDto::new("DB_QUERY_FAILED", "解析草案池失败", true)
-                    .with_detail(err.to_string())
-            })?;
+            ) = row.map_err(draft_pool_parse_error)?;
             let payload: serde_json::Value =
                 serde_json::from_str(&payload_json).unwrap_or(serde_json::Value::Null);
             let confidence = confidence.unwrap_or(0.0) as f32;
@@ -1714,9 +1692,7 @@ impl ContextService {
                 |row| row.get::<_, String>(0),
             )
             .optional()
-            .map_err(|err| {
-                AppErrorDto::new("DB_QUERY_FAILED", "查询角色失败", true).with_detail(err.to_string())
-            })?
+            .map_err(|err| context_query_error("查询角色失败", err))?
         {
             return Ok((existing_id, "reused".to_string()));
         }
@@ -1732,9 +1708,7 @@ impl ContextService {
             "INSERT INTO characters(id, project_id, name, aliases, role_type, age, gender, identity_text, appearance, motivation, desire, fear, flaw, arc_stage, locked_fields, notes, is_deleted, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,?6,?7,0,?8,?9)",
             params![id, project_id, label, "[]", "配角", "[]", notes, now, now],
         )
-        .map_err(|err| {
-            AppErrorDto::new("DB_WRITE_FAILED", "创建角色失败", true).with_detail(err.to_string())
-        })?;
+        .map_err(|err| context_write_error("创建角色失败", err))?;
         Ok((id, "created".to_string()))
     }
 
@@ -1753,9 +1727,7 @@ impl ContextService {
                 |row| row.get::<_, String>(0),
             )
             .optional()
-            .map_err(|err| {
-                AppErrorDto::new("DB_QUERY_FAILED", "查询设定失败", true).with_detail(err.to_string())
-            })?
+            .map_err(|err| context_query_error("查询设定失败", err))?
         {
             return Ok((existing_id, "reused".to_string()));
         }
@@ -1777,9 +1749,7 @@ impl ContextService {
             "INSERT INTO world_rules(id, project_id, title, category, description, constraint_level, related_entities, examples, contradiction_policy, is_deleted, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,NULL,NULL,0,?8,?9)",
             params![id, project_id, label, category, description, "normal", "[]", now, now],
         )
-        .map_err(|err| {
-            AppErrorDto::new("DB_WRITE_FAILED", "创建设定失败", true).with_detail(err.to_string())
-        })?;
+        .map_err(|err| context_write_error("创建设定失败", err))?;
         Ok((id, "created".to_string()))
     }
 
@@ -1797,10 +1767,7 @@ impl ContextService {
                 |row| row.get::<_, String>(0),
             )
             .optional()
-            .map_err(|err| {
-                AppErrorDto::new("DB_QUERY_FAILED", "查询剧情节点失败", true)
-                    .with_detail(err.to_string())
-            })?
+            .map_err(|err| context_query_error("查询剧情节点失败", err))?
         {
             return Ok((existing_id, "reused".to_string()));
         }
@@ -1813,10 +1780,7 @@ impl ContextService {
                 params![project_id],
                 |row| row.get::<_, i64>(0),
             )
-            .map_err(|err| {
-                AppErrorDto::new("DB_QUERY_FAILED", "查询剧情节点排序失败", true)
-                    .with_detail(err.to_string())
-            })?;
+            .map_err(|err| context_query_error("查询剧情节点排序失败", err))?;
         let goal = if evidence.is_empty() {
             Some(format!("由章节线索补充：{}", label))
         } else {
@@ -1827,10 +1791,7 @@ impl ContextService {
             "INSERT INTO plot_nodes(id, project_id, title, node_type, sort_order, goal, conflict, emotional_curve, status, related_characters, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,NULL,NULL,?7,?8,?9,?10)",
             params![id, project_id, label, "支线", next_sort_order, goal, "planning", "[]", now, now],
         )
-        .map_err(|err| {
-            AppErrorDto::new("DB_WRITE_FAILED", "创建剧情节点失败", true)
-                .with_detail(err.to_string())
-        })?;
+        .map_err(|err| context_write_error("创建剧情节点失败", err))?;
         Ok((id, "created".to_string()))
     }
 
@@ -1849,10 +1810,7 @@ impl ContextService {
                 |row| row.get::<_, String>(0),
             )
             .optional()
-            .map_err(|err| {
-                AppErrorDto::new("DB_QUERY_FAILED", "查询名词失败", true)
-                    .with_detail(err.to_string())
-            })?
+            .map_err(|err| context_query_error("查询名词失败", err))?
         {
             return Ok((existing_id, "reused".to_string()));
         }
@@ -1874,9 +1832,7 @@ impl ContextService {
             "INSERT INTO glossary_terms(id, project_id, term, term_type, aliases, description, locked, banned, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,0,0,?7,?8)",
             params![id, project_id, label, term_type, "[]", description, now, now],
         )
-        .map_err(|err| {
-            AppErrorDto::new("DB_WRITE_FAILED", "创建名词失败", true).with_detail(err.to_string())
-        })?;
+        .map_err(|err| context_write_error("创建名词失败", err))?;
         Ok((id, "created".to_string()))
     }
 
@@ -1914,10 +1870,7 @@ impl ContextService {
                 |_row| Ok(()),
             )
             .optional()
-            .map_err(|err| {
-                AppErrorDto::new("DB_QUERY_FAILED", "查询章节关联失败", true)
-                    .with_detail(err.to_string())
-            })?
+            .map_err(|err| context_query_error("查询章节关联失败", err))?
             .is_some();
         if exists {
             return Ok(false);
@@ -1935,7 +1888,7 @@ impl ContextService {
             ],
         )
         .map_err(|err| {
-            AppErrorDto::new("DB_WRITE_FAILED", "写入章节关联失败", true).with_detail(err.to_string())
+            context_write_error("写入章节关联失败", err)
         })?;
         Ok(true)
     }
@@ -1945,12 +1898,13 @@ impl ContextService {
         conn: &rusqlite::Connection,
         project_id: &str,
     ) -> Result<Vec<String>, AppErrorDto> {
-        conn.prepare("SELECT name FROM characters WHERE project_id = ?1 AND is_deleted = 0")
-            .map_err(|_| AppErrorDto::new("DB_QUERY_FAILED", "查询角色失败", true))?
-            .query_map(params![project_id], |row| row.get::<_, String>(0))
-            .map_err(|_| AppErrorDto::new("DB_QUERY_FAILED", "查询角色失败", true))?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|_| AppErrorDto::new("DB_QUERY_FAILED", "查询角色失败", true))
+        collect_string_column(
+            conn,
+            "SELECT name FROM characters WHERE project_id = ?1 AND is_deleted = 0",
+            params![project_id],
+            "查询角色失败",
+            true,
+        )
     }
 
     fn collect_project_world_rule_titles(
@@ -1958,12 +1912,13 @@ impl ContextService {
         conn: &rusqlite::Connection,
         project_id: &str,
     ) -> Result<Vec<String>, AppErrorDto> {
-        conn.prepare("SELECT title FROM world_rules WHERE project_id = ?1 AND is_deleted = 0")
-            .map_err(|_| AppErrorDto::new("DB_QUERY_FAILED", "查询设定失败", true))?
-            .query_map(params![project_id], |row| row.get::<_, String>(0))
-            .map_err(|_| AppErrorDto::new("DB_QUERY_FAILED", "查询设定失败", true))?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|_| AppErrorDto::new("DB_QUERY_FAILED", "查询设定失败", true))
+        collect_string_column(
+            conn,
+            "SELECT title FROM world_rules WHERE project_id = ?1 AND is_deleted = 0",
+            params![project_id],
+            "查询设定失败",
+            true,
+        )
     }
 
     fn collect_global_context(
@@ -1985,37 +1940,34 @@ impl ContextService {
                     ))
                 },
             )
-            .map_err(|err| {
-                AppErrorDto::new("PROJECT_NOT_FOUND", "项目不存在", false)
-                    .with_detail(err.to_string())
-            })?;
+            .map_err(project_not_found_error)?;
         let writing_style = project
             .3
             .and_then(|json| serde_json::from_str::<WritingStyle>(&json).ok());
 
         // Locked & banned terms from glossary
-        let locked_terms: Vec<String> = conn
-            .prepare("SELECT term FROM glossary_terms WHERE project_id = ?1 AND locked = 1")
-            .map_err(|_| AppErrorDto::new("DB_QUERY_FAILED", "查询名词库失败", true))?
-            .query_map(params![project_id], |row| row.get::<_, String>(0))
-            .map_err(|_| AppErrorDto::new("DB_QUERY_FAILED", "查询名词库失败", true))?
-            .filter_map(|r| r.ok())
-            .collect();
+        let locked_terms = collect_string_column(
+            conn,
+            "SELECT term FROM glossary_terms WHERE project_id = ?1 AND locked = 1",
+            params![project_id],
+            "查询名词库失败",
+            false,
+        )?;
 
-        let banned_terms: Vec<String> = conn
-            .prepare("SELECT term FROM glossary_terms WHERE project_id = ?1 AND banned = 1")
-            .map_err(|_| AppErrorDto::new("DB_QUERY_FAILED", "查询禁用词失败", true))?
-            .query_map(params![project_id], |row| row.get::<_, String>(0))
-            .map_err(|_| AppErrorDto::new("DB_QUERY_FAILED", "查询禁用词失败", true))?
-            .filter_map(|r| r.ok())
-            .collect();
+        let banned_terms = collect_string_column(
+            conn,
+            "SELECT term FROM glossary_terms WHERE project_id = ?1 AND banned = 1",
+            params![project_id],
+            "查询禁用词失败",
+            false,
+        )?;
 
         // Blueprint steps
         let blueprint_summary: Vec<BlueprintStepSummary> = conn
             .prepare(
                 "SELECT step_key, title, content, status FROM blueprint_steps WHERE project_id = ?1 ORDER BY step_key",
             )
-            .map_err(|_| AppErrorDto::new("DB_QUERY_FAILED", "查询蓝图失败", true))?
+            .map_err(|_| context_query_failed("查询蓝图失败"))?
             .query_map(params![project_id], |row| {
                 Ok(BlueprintStepSummary {
                     step_key: row.get(0)?,
@@ -2024,7 +1976,7 @@ impl ContextService {
                     status: row.get(3)?,
                 })
             })
-            .map_err(|_| AppErrorDto::new("DB_QUERY_FAILED", "查询蓝图失败", true))?
+            .map_err(|_| context_query_failed("查询蓝图失败"))?
             .filter_map(|r| r.ok())
             .collect();
 
@@ -2069,7 +2021,7 @@ impl ContextService {
             ORDER BY g.term
             "#,
         )
-        .map_err(|_| AppErrorDto::new("DB_QUERY_FAILED", "查询名词库失败", true))?
+        .map_err(|_| context_query_failed("查询名词库失败"))?
         .query_map(params![project_id], |row| {
             Ok(GlossaryContextTerm {
                 id: row.get(0)?,
@@ -2082,9 +2034,9 @@ impl ContextService {
                 source_request_id: row.get(7)?,
             })
         })
-        .map_err(|_| AppErrorDto::new("DB_QUERY_FAILED", "查询名词库失败", true))?
+        .map_err(|_| context_query_failed("查询名词库失败"))?
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|_| AppErrorDto::new("DB_QUERY_FAILED", "查询名词库失败", true))
+        .map_err(|_| context_query_failed("查询名词库失败"))
     }
 
     fn collect_blueprint_context(
@@ -2095,16 +2047,16 @@ impl ContextService {
         conn.prepare(
             "SELECT step_key, content FROM blueprint_steps WHERE project_id = ?1 ORDER BY step_key",
         )
-        .map_err(|_| AppErrorDto::new("DB_QUERY_FAILED", "查询蓝图失败", true))?
+        .map_err(|_| context_query_failed("查询蓝图失败"))?
         .query_map(params![project_id], |row| {
             Ok(BlueprintContextStep {
                 step_key: row.get(0)?,
                 content: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
             })
         })
-        .map_err(|_| AppErrorDto::new("DB_QUERY_FAILED", "查询蓝图失败", true))?
+        .map_err(|_| context_query_failed("查询蓝图失败"))?
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|_| AppErrorDto::new("DB_QUERY_FAILED", "查询蓝图失败", true))
+        .map_err(|_| context_query_failed("查询蓝图失败"))
     }
 
     fn collect_related_context(
@@ -2131,10 +2083,7 @@ impl ContextService {
                 },
             )
             .optional()
-            .map_err(|err| {
-                AppErrorDto::new("CHAPTER_QUERY_FAILED", "查询章节失败", true)
-                    .with_detail(err.to_string())
-            })?;
+            .map_err(chapter_context_query_error)?;
 
         // Linked assets first, then project-level fallback assets.
         // This avoids context starvation when a newly created asset has not been linked yet.
@@ -2169,7 +2118,7 @@ impl ContextService {
                 LIMIT 24
                 "#,
             )
-            .map_err(|_| AppErrorDto::new("DB_QUERY_FAILED", "查询角色失败", true))?
+            .map_err(|_| context_query_failed("查询角色失败"))?
             .query_map(params![chapter_id, project_id], |row| {
                 Ok(CharacterSummary {
                     id: row.get(0)?,
@@ -2189,7 +2138,7 @@ impl ContextService {
                     source_request_id: row.get::<_, Option<String>>(14)?,
                 })
             })
-            .map_err(|_| AppErrorDto::new("DB_QUERY_FAILED", "查询角色失败", true))?
+            .map_err(|_| context_query_failed("查询角色失败"))?
             .filter_map(|r| r.ok())
             .collect();
 
@@ -2228,7 +2177,7 @@ impl ContextService {
                 LIMIT 24
                 "#,
             )
-            .map_err(|_| AppErrorDto::new("DB_QUERY_FAILED", "查询世界规则失败", true))?
+            .map_err(|_| context_query_failed("查询世界规则失败"))?
             .query_map(params![chapter_id, project_id], |row| {
                 Ok(WorldRuleSummary {
                     id: row.get(0)?,
@@ -2241,7 +2190,7 @@ impl ContextService {
                     source_request_id: row.get::<_, Option<String>>(7)?,
                 })
             })
-            .map_err(|_| AppErrorDto::new("DB_QUERY_FAILED", "查询世界规则失败", true))?
+            .map_err(|_| context_query_failed("查询世界规则失败"))?
             .filter_map(|r| r.ok())
             .collect();
 
@@ -2281,7 +2230,7 @@ impl ContextService {
                 LIMIT 24
                 "#,
             )
-            .map_err(|_| AppErrorDto::new("DB_QUERY_FAILED", "查询主线节点失败", true))?
+            .map_err(|_| context_query_failed("查询主线节点失败"))?
             .query_map(params![chapter_id, project_id], |row| {
                 Ok(PlotNodeSummary {
                     id: row.get(0)?,
@@ -2295,7 +2244,7 @@ impl ContextService {
                     source_request_id: row.get::<_, Option<String>>(8)?,
                 })
             })
-            .map_err(|_| AppErrorDto::new("DB_QUERY_FAILED", "查询主线节点失败", true))?
+            .map_err(|_| context_query_failed("查询主线节点失败"))?
             .filter_map(|r| r.ok())
             .collect();
 
@@ -2317,7 +2266,7 @@ impl ContextService {
                 LIMIT 80
                 "#,
             )
-            .map_err(|_| AppErrorDto::new("DB_QUERY_FAILED", "查询角色关系失败", true))?
+            .map_err(|_| context_query_failed("查询角色关系失败"))?
             .query_map(params![project_id], |row| {
                 Ok(CharacterRelationshipEdge {
                     id: row.get(0)?,
@@ -2329,7 +2278,7 @@ impl ContextService {
                     description: row.get(6)?,
                 })
             })
-            .map_err(|_| AppErrorDto::new("DB_QUERY_FAILED", "查询角色关系失败", true))?
+            .map_err(|_| context_query_failed("查询角色关系失败"))?
             .filter_map(|r| r.ok())
             .collect();
 
@@ -2680,11 +2629,7 @@ fn resolve_candidate_target_type(
             "plot" | "plot_node" => "plot_node",
             "glossary" | "glossary_term" | "term" => "glossary_term",
             _ => {
-                return Err(AppErrorDto::new(
-                    "CANDIDATE_TARGET_INVALID",
-                    "目标类型不支持",
-                    true,
-                ))
+                return Err(candidate_target_invalid_error("目标类型不支持"))
             }
         };
         return Ok(value.to_string());
@@ -2727,7 +2672,7 @@ fn display_language_style(raw: &str) -> String {
         "balanced" => "适中".to_string(),
         "ornate" => "华丽".to_string(),
         "colloquial" => "口语化".to_string(),
-        other if other.is_empty() => "适中".to_string(),
+        "" => "适中".to_string(),
         other => other.to_string(),
     }
 }
@@ -3150,6 +3095,80 @@ mod tests {
         );
 
         remove_temp_workspace(&workspace);
+    }
+
+    #[test]
+    fn context_methods_accept_trimmed_project_root() {
+        let workspace = create_temp_workspace();
+        let project_service = ProjectService;
+        let chapter_service = ChapterService;
+        let context_service = ContextService;
+
+        let project = project_service
+            .create_project(CreateProjectInput {
+                name: "上下文路径空白测试".to_string(),
+                author: None,
+                genre: "测试".to_string(),
+                target_words: None,
+                save_directory: workspace.to_string_lossy().to_string(),
+            })
+            .expect("project created");
+        let chapter = chapter_service
+            .create_chapter(
+                &project.project_root,
+                ChapterInput {
+                    title: "第一章".to_string(),
+                    summary: None,
+                    target_words: None,
+                    status: None,
+                },
+            )
+            .expect("chapter created");
+        let wrapped_root = format!("  {}  ", project.project_root);
+
+        let global = context_service
+            .collect_global_context_only(&wrapped_root)
+            .expect("collect global context with trimmed root");
+        assert!(!global.global_context.project_name.trim().is_empty());
+
+        let chapter_context = context_service
+            .collect_chapter_context(&wrapped_root, &chapter.id)
+            .expect("collect chapter context with trimmed root");
+        assert_eq!(
+            chapter_context
+                .related_context
+                .chapter
+                .as_ref()
+                .map(|item| item.id.as_str()),
+            Some(chapter.id.as_str())
+        );
+
+        let promise = context_service
+            .get_promise_context(&wrapped_root)
+            .expect("get promise context with trimmed root");
+        assert!(promise.is_empty());
+
+        let recent = context_service
+            .get_recent_continuity(&wrapped_root, Some(&chapter.id))
+            .expect("get recent continuity with trimmed root");
+        assert!(!recent.is_empty());
+
+        remove_temp_workspace(&workspace);
+    }
+
+    #[test]
+    fn context_methods_reject_blank_project_root() {
+        let context_service = ContextService;
+
+        let err = context_service
+            .collect_global_context_only("   ")
+            .expect_err("blank root should be rejected");
+        assert_eq!(err.code, "PROJECT_INVALID_PATH");
+
+        let err = context_service
+            .get_recent_continuity("   ", None)
+            .expect_err("blank root should be rejected");
+        assert_eq!(err.code, "PROJECT_INVALID_PATH");
     }
 
     #[test]

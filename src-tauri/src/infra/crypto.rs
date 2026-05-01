@@ -40,15 +40,16 @@ fn hostname_info() -> Option<String> {
 pub fn encrypt(plaintext: &str) -> Result<String, AppErrorDto> {
     let key = derive_key();
     let cipher = Aes256Gcm::new_from_slice(&key).map_err(|e| {
-        AppErrorDto::new("CRYPTO_INIT_FAILED", "Cannot initialize encryption", false)
+        AppErrorDto::new("CRYPTO_INIT_FAILED", "无法初始化加密器", false)
             .with_detail(e.to_string())
     })?;
 
-    let nonce_bytes: [u8; 12] = Uuid::new_v4().as_bytes()[..12].try_into().unwrap();
+    let mut nonce_bytes = [0u8; 12];
+    nonce_bytes.copy_from_slice(&Uuid::new_v4().as_bytes()[..12]);
     let nonce = Nonce::from_slice(&nonce_bytes);
 
     let ciphertext = cipher.encrypt(nonce, plaintext.as_bytes()).map_err(|e| {
-        AppErrorDto::new("CRYPTO_ENCRYPT_FAILED", "Encryption failed", false)
+        AppErrorDto::new("CRYPTO_ENCRYPT_FAILED", "加密失败", false)
             .with_detail(e.to_string())
     })?;
 
@@ -60,12 +61,12 @@ pub fn encrypt(plaintext: &str) -> Result<String, AppErrorDto> {
 /// Decrypt base64-encoded (nonce || ciphertext) with AES-256-GCM.
 pub fn decrypt(encoded: &str) -> Result<String, AppErrorDto> {
     let data = base64_decode(encoded)
-        .map_err(|_| AppErrorDto::new("CRYPTO_DECODE_FAILED", "Invalid base64 data", false))?;
+        .map_err(|_| AppErrorDto::new("CRYPTO_DECODE_FAILED", "Base64 数据无效", false))?;
 
     if data.len() < 12 {
         return Err(AppErrorDto::new(
             "CRYPTO_INVALID_DATA",
-            "Encrypted data too short",
+            "加密数据长度不足",
             false,
         ));
     }
@@ -75,14 +76,14 @@ pub fn decrypt(encoded: &str) -> Result<String, AppErrorDto> {
 
     let key = derive_key();
     let cipher = Aes256Gcm::new_from_slice(&key).map_err(|e| {
-        AppErrorDto::new("CRYPTO_INIT_FAILED", "Cannot initialize decryption", false)
+        AppErrorDto::new("CRYPTO_INIT_FAILED", "无法初始化解密器", false)
             .with_detail(e.to_string())
     })?;
 
     let plaintext = cipher.decrypt(nonce, ciphertext).map_err(|_| {
         AppErrorDto::new(
             "CRYPTO_DECRYPT_FAILED",
-            "Decryption failed — key mismatch or data corrupted",
+            "解密失败：密钥不匹配或数据已损坏",
             false,
         )
     })?;
@@ -90,7 +91,7 @@ pub fn decrypt(encoded: &str) -> Result<String, AppErrorDto> {
     String::from_utf8(plaintext).map_err(|_| {
         AppErrorDto::new(
             "CRYPTO_INVALID_UTF8",
-            "Decrypted data is not valid UTF-8",
+            "解密结果不是有效的 UTF-8 文本",
             false,
         )
     })
@@ -104,4 +105,29 @@ fn base64_encode(data: &[u8]) -> String {
 fn base64_decode(data: &str) -> Result<Vec<u8>, String> {
     use base64::{engine::general_purpose::STANDARD, Engine as _};
     STANDARD.decode(data).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{decrypt, encrypt};
+
+    #[test]
+    fn encrypt_and_decrypt_roundtrip_succeeds() {
+        let plaintext = "novelforge-secret-token";
+        let encoded = encrypt(plaintext).expect("encrypt should succeed");
+        let decoded = decrypt(&encoded).expect("decrypt should succeed");
+        assert_eq!(decoded, plaintext);
+    }
+
+    #[test]
+    fn decrypt_rejects_invalid_base64() {
+        let err = decrypt("%%%").expect_err("invalid base64 should fail");
+        assert_eq!(err.code, "CRYPTO_DECODE_FAILED");
+    }
+
+    #[test]
+    fn decrypt_rejects_too_short_payload() {
+        let err = decrypt("YQ==").expect_err("too short payload should fail");
+        assert_eq!(err.code, "CRYPTO_INVALID_DATA");
+    }
 }

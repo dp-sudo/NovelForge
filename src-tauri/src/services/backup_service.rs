@@ -34,7 +34,8 @@ pub struct BackupService;
 
 impl BackupService {
     pub fn create_backup(&self, project_root: &str) -> Result<BackupResult, AppErrorDto> {
-        let root = Path::new(project_root);
+        let normalized_root = normalize_project_root(project_root)?;
+        let root = Path::new(&normalized_root);
         let now = now_iso();
         let safe_now = now.replace([':', '.'], "-");
         let backup_dir = root.join("backups");
@@ -152,7 +153,8 @@ impl BackupService {
     }
 
     pub fn list_backups(&self, project_root: &str) -> Result<Vec<BackupResult>, AppErrorDto> {
-        let backup_dir = Path::new(project_root).join("backups");
+        let normalized_root = normalize_project_root(project_root)?;
+        let backup_dir = Path::new(&normalized_root).join("backups");
         if !backup_dir.exists() {
             return Ok(vec![]);
         }
@@ -190,10 +192,11 @@ impl BackupService {
         project_root: &str,
         backup_path: &str,
     ) -> Result<RestoreResult, AppErrorDto> {
-        let backup_file = Path::new(backup_path);
-        let root = Path::new(project_root);
+        let normalized_root = normalize_project_root(project_root)?;
+        let backup_file = normalize_backup_file_path(backup_path)?;
+        let root = Path::new(&normalized_root);
 
-        let file = fs::File::open(backup_file).map_err(|e| {
+        let file = fs::File::open(&backup_file).map_err(|e| {
             AppErrorDto::new("RESTORE_FAILED", "打开备份文件失败", true).with_detail(e.to_string())
         })?;
         let mut archive = ZipArchive::new(file).map_err(|e| {
@@ -258,10 +261,64 @@ impl BackupService {
         }
 
         Ok(RestoreResult {
-            project_root: project_root.to_string(),
+            project_root: normalized_root,
             files_restored: restored,
         })
     }
+}
+
+fn normalize_project_root(project_root: &str) -> Result<String, AppErrorDto> {
+    let normalized = project_root.trim();
+    if normalized.is_empty() {
+        return Err(
+            AppErrorDto::new("PROJECT_INVALID_PATH", "项目目录不能为空", true)
+                .with_suggested_action("请输入有效的项目目录路径"),
+        );
+    }
+
+    let root = Path::new(normalized);
+    if !root.is_absolute() {
+        return Err(
+            AppErrorDto::new("PROJECT_INVALID_PATH", "项目目录必须是绝对路径", true)
+                .with_suggested_action("请输入有效的 Windows 绝对路径"),
+        );
+    }
+    if !root.exists() || !root.is_dir() {
+        return Err(
+            AppErrorDto::new("PROJECT_INVALID_PATH", "项目目录不存在或不可用", true)
+                .with_detail(normalized.to_string())
+                .with_suggested_action("请检查目录路径并重试"),
+        );
+    }
+
+    Ok(normalized.to_string())
+}
+
+fn normalize_backup_file_path(backup_path: &str) -> Result<String, AppErrorDto> {
+    let normalized = backup_path.trim();
+    if normalized.is_empty() {
+        return Err(
+            AppErrorDto::new("RESTORE_INVALID", "备份文件路径不能为空", true)
+                .with_suggested_action("请选择有效的备份文件"),
+        );
+    }
+
+    let path = Path::new(normalized);
+    if !path.is_absolute() {
+        return Err(
+            AppErrorDto::new("RESTORE_INVALID", "备份文件路径必须是绝对路径", true)
+                .with_suggested_action("请选择有效的备份文件"),
+        );
+    }
+    if !path.exists() || !path.is_file() {
+        return Err(
+            AppErrorDto::new("RESTORE_INVALID", "备份文件不存在或不可用", true)
+                .with_detail(normalized.to_string())
+                .with_suggested_action("请检查备份文件路径并重试"),
+        );
+    }
+
+    Ok(normalized.to_string())
 }
 
 #[cfg(test)]
@@ -319,6 +376,30 @@ mod tests {
 
         assert_eq!(err.code, "RESTORE_INVALID_PATH");
         assert!(!outside_path.exists());
+
+        remove_temp_workspace(&workspace);
+    }
+
+    #[test]
+    fn create_backup_rejects_blank_project_root() {
+        let service = BackupService;
+        let err = service
+            .create_backup("   ")
+            .expect_err("blank project path should be rejected");
+        assert_eq!(err.code, "PROJECT_INVALID_PATH");
+    }
+
+    #[test]
+    fn restore_rejects_blank_backup_path() {
+        let workspace = create_temp_workspace();
+        let project_root = workspace.join("project");
+        fs::create_dir_all(&project_root).expect("create project root");
+
+        let service = BackupService;
+        let err = service
+            .restore_backup(project_root.to_string_lossy().as_ref(), "   ")
+            .expect_err("blank backup path should be rejected");
+        assert_eq!(err.code, "RESTORE_INVALID");
 
         remove_temp_workspace(&workspace);
     }

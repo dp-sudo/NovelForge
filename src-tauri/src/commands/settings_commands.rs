@@ -1,5 +1,5 @@
 use serde::Serialize;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use tauri::State;
 use tauri_plugin_updater::UpdaterExt;
 use uuid::Uuid;
@@ -113,6 +113,42 @@ fn log_deprecated_command(message: &str, command: &str, source: Option<&str>) {
     crate::infra::logger::record_deprecated_command_usage(command, src);
 }
 
+fn invalid_input_error(message: &'static str) -> AppErrorDto {
+    AppErrorDto::new("INVALID_INPUT", message, true)
+}
+
+fn serialize_provider_config_error(err: impl ToString) -> AppErrorDto {
+    AppErrorDto::new("SERIALIZE_ERROR", "无法序列化供应商配置", false).with_detail(err.to_string())
+}
+
+fn parse_provider_config_error(err: impl ToString) -> AppErrorDto {
+    invalid_input_error("供应商配置格式无效").with_detail(err.to_string())
+}
+
+fn collect_task_route_delete_ids(routes: &[TaskRoute], route_id: &str) -> Vec<String> {
+    let Some(canonical_target) = routes
+        .iter()
+        .find(|route| route.id == route_id)
+        .map(|route| task_routing::canonical_task_type(&route.task_type).into_owned())
+    else {
+        return Vec::new();
+    };
+
+    let mut delete_ids = vec![route_id.to_string()];
+    let mut seen_ids = HashSet::from([route_id.to_string()]);
+    delete_ids.extend(
+        routes
+            .iter()
+            .filter(|route| {
+                route.id != route_id
+                    && task_routing::canonical_task_type(&route.task_type).as_ref() == canonical_target
+                    && seen_ids.insert(route.id.clone())
+            })
+            .map(|route| route.id.clone()),
+    );
+    delete_ids
+}
+
 fn updater_init_error(err: impl ToString) -> AppErrorDto {
     AppErrorDto::new("UPDATER_INIT_FAILED", "无法初始化更新器", false)
         .with_detail(err.to_string())
@@ -120,6 +156,11 @@ fn updater_init_error(err: impl ToString) -> AppErrorDto {
 
 fn updater_check_error(err: impl ToString) -> AppErrorDto {
     AppErrorDto::new("UPDATER_CHECK_FAILED", "无法检查更新", true)
+        .with_detail(err.to_string())
+}
+
+fn updater_install_error(err: impl ToString) -> AppErrorDto {
+    AppErrorDto::new("UPDATER_INSTALL_FAILED", "无法下载或安装更新", true)
         .with_detail(err.to_string())
 }
 
@@ -187,14 +228,7 @@ pub async fn install_app_update(
     update
         .download_and_install(|_chunk_length, _content_length| {}, || {})
         .await
-        .map_err(|err| {
-            AppErrorDto::new(
-                "UPDATER_INSTALL_FAILED",
-                "无法下载或安装更新",
-                true,
-            )
-            .with_detail(err.to_string())
-        })?;
+        .map_err(updater_install_error)?;
 
     Ok(AppUpdateInfo {
         available: true,
@@ -332,10 +366,10 @@ pub async fn save_task_route(
     };
 
     if r.provider_id.is_empty() {
-        return Err(AppErrorDto::new("INVALID_INPUT", "供应商不能为空", true));
+        return Err(invalid_input_error("供应商不能为空"));
     }
     if r.model_id.is_empty() {
-        return Err(AppErrorDto::new("INVALID_INPUT", "模型ID不能为空", true));
+        return Err(invalid_input_error("模型ID不能为空"));
     }
 
     let existing_routes = app_database::load_task_routes(&conn)?;
@@ -379,25 +413,8 @@ pub async fn delete_task_route(
 ) -> Result<(), AppErrorDto> {
     let conn = app_database::open_or_create()?;
     let routes = app_database::load_task_routes(&conn)?;
-    let Some(canonical_target) = routes
-        .iter()
-        .find(|r| r.id == route_id)
-        .map(|route| task_routing::canonical_task_type(&route.task_type).into_owned())
-    else {
-        return Ok(());
-    };
-    let alias_route_ids = routes
-        .iter()
-        .filter(|r| {
-            r.id != route_id
-                && task_routing::canonical_task_type(&r.task_type).as_ref() == canonical_target
-        })
-        .map(|r| r.id.clone())
-        .collect::<Vec<_>>();
-
-    app_database::delete_task_route(&conn, &route_id)?;
-    for alias_route_id in alias_route_ids {
-        app_database::delete_task_route(&conn, &alias_route_id)?;
+    for delete_route_id in collect_task_route_delete_ids(&routes, &route_id) {
+        app_database::delete_task_route(&conn, &delete_route_id)?;
     }
     Ok(())
 }
@@ -458,14 +475,7 @@ pub async fn load_provider_config(
         source.as_deref(),
     );
     let providers = state.settings_service.list_providers()?;
-    serde_json::to_value(providers).map_err(|e| {
-        AppErrorDto::new(
-            "SERIALIZE_ERROR",
-            "无法序列化供应商配置",
-            false,
-        )
-        .with_detail(e.to_string())
-    })
+    serde_json::to_value(providers).map_err(serialize_provider_config_error)
 }
 
 #[tauri::command]
@@ -481,11 +491,69 @@ pub async fn save_provider_config(
         "save_provider_config",
         source.as_deref(),
     );
-    let mut config: ProviderConfig = serde_json::from_value(input).map_err(|e| {
-        AppErrorDto::new("INVALID_INPUT", "供应商配置格式无效", true)
-            .with_detail(e.to_string())
-    })?;
+    let mut config: ProviderConfig =
+        serde_json::from_value(input).map_err(parse_provider_config_error)?;
     let api_key = config.api_key.take();
     save_provider_and_reload(&state, config, api_key).await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_task_route(id: &str, task_type: &str) -> TaskRoute {
+        TaskRoute {
+            id: id.to_string(),
+            task_type: task_type.to_string(),
+            provider_id: "provider".to_string(),
+            model_id: "model".to_string(),
+            fallback_provider_id: None,
+            fallback_model_id: None,
+            max_retries: 1,
+            created_at: None,
+            updated_at: None,
+        }
+    }
+
+    #[test]
+    fn collect_task_route_delete_ids_returns_empty_when_route_missing() {
+        let routes = vec![make_task_route("route-a", "chapter.draft")];
+        assert!(collect_task_route_delete_ids(&routes, "missing-route").is_empty());
+    }
+
+    #[test]
+    fn collect_task_route_delete_ids_keeps_target_first_and_collects_aliases() {
+        let routes = vec![
+            make_task_route("alias-1", "generate_chapter_draft"),
+            make_task_route("target", "chapter.draft"),
+            make_task_route("other", "chapter.continue"),
+            make_task_route("alias-2", "draft"),
+        ];
+
+        let delete_ids = collect_task_route_delete_ids(&routes, "target");
+        assert_eq!(
+            delete_ids,
+            vec![
+                "target".to_string(),
+                "alias-1".to_string(),
+                "alias-2".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn collect_task_route_delete_ids_deduplicates_repeated_alias_ids() {
+        let routes = vec![
+            make_task_route("target", "chapter.draft"),
+            make_task_route("alias-dup", "draft"),
+            make_task_route("alias-dup", "generate_chapter_draft"),
+        ];
+
+        let delete_ids = collect_task_route_delete_ids(&routes, "target");
+        assert_eq!(
+            delete_ids,
+            vec!["target".to_string(), "alias-dup".to_string()]
+        );
+    }
 }

@@ -207,7 +207,7 @@ impl<'a> PipelineOrchestrator<'a> {
             })?;
 
         let continuity_depth = self.resolve_continuity_pack_depth();
-        let continuity_pack = ContinuityPackCompiler::default().compile(
+        let continuity_pack = ContinuityPackCompiler.compile(
             &self.input.project_root,
             self.canonical_task,
             &continuity_depth,

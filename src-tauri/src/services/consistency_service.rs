@@ -47,10 +47,9 @@ impl ConsistencyService {
         project_root: &str,
         input: ScanChapterInput,
     ) -> Result<Vec<ConsistencyIssue>, AppErrorDto> {
-        let project_root_path = Path::new(project_root);
-        let conn = open_database(project_root_path).map_err(|e| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
-        })?;
+        let normalized_root = normalize_project_root(project_root)?;
+        let project_root_path = Path::new(normalized_root);
+        let conn = open_project_database(normalized_root)?;
         let project_id = get_project_id(&conn)?;
         let banned_terms = self.load_banned_terms(&conn, &project_id)?;
         let chapter = self.load_chapter_target(&conn, &project_id, &input.chapter_id)?;
@@ -62,10 +61,9 @@ impl ConsistencyService {
     }
 
     pub fn scan_full(&self, project_root: &str) -> Result<Vec<ConsistencyIssue>, AppErrorDto> {
-        let project_root_path = Path::new(project_root);
-        let conn = open_database(project_root_path).map_err(|e| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
-        })?;
+        let normalized_root = normalize_project_root(project_root)?;
+        let project_root_path = Path::new(normalized_root);
+        let conn = open_project_database(normalized_root)?;
         let project_id = get_project_id(&conn)?;
         let banned_terms = self.load_banned_terms(&conn, &project_id)?;
         let chapters = self.list_chapter_targets(&conn, &project_id)?;
@@ -81,13 +79,11 @@ impl ConsistencyService {
     }
 
     pub fn list_issues(&self, project_root: &str) -> Result<Vec<ConsistencyIssue>, AppErrorDto> {
-        let conn = open_database(Path::new(project_root)).map_err(|e| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
-        })?;
+        let conn = open_project_database(project_root)?;
         let project_id = get_project_id(&conn)?;
         let mut stmt = conn
             .prepare("SELECT id, issue_type, severity, COALESCE(chapter_id,''), COALESCE(source_text,''), explanation, suggested_fix, status FROM consistency_issues WHERE project_id = ?1 ORDER BY created_at DESC")
-            .map_err(|e| AppErrorDto::new("QUERY_FAILED", "查询问题列表失败", true).with_detail(e.to_string()))?;
+            .map_err(query_issues_error)?;
         let issues = stmt
             .query_map(params![project_id], |row| {
                 Ok(ConsistencyIssue {
@@ -101,15 +97,9 @@ impl ConsistencyService {
                     status: row.get(7)?,
                 })
             })
-            .map_err(|e| {
-                AppErrorDto::new("QUERY_FAILED", "查询问题列表失败", true)
-                    .with_detail(e.to_string())
-            })?
+            .map_err(query_issues_error)?
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| {
-                AppErrorDto::new("QUERY_FAILED", "查询问题列表失败", true)
-                    .with_detail(e.to_string())
-            })?;
+            .map_err(query_issues_error)?;
         Ok(issues)
     }
 
@@ -119,17 +109,13 @@ impl ConsistencyService {
         issue_id: &str,
         status: &str,
     ) -> Result<(), AppErrorDto> {
-        let conn = open_database(Path::new(project_root)).map_err(|e| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
-        })?;
+        let conn = open_project_database(project_root)?;
         let now = now_iso();
         conn.execute(
             "UPDATE consistency_issues SET status = ?1, updated_at = ?2 WHERE id = ?3",
             params![status, now, issue_id],
         )
-        .map_err(|e| {
-            AppErrorDto::new("UPDATE_FAILED", "更新问题状态失败", true).with_detail(e.to_string())
-        })?;
+        .map_err(update_issue_status_error)?;
         Ok(())
     }
 
@@ -140,18 +126,12 @@ impl ConsistencyService {
     ) -> Result<Vec<String>, AppErrorDto> {
         let mut stmt = conn
             .prepare("SELECT term FROM glossary_terms WHERE project_id = ?1 AND banned = 1")
-            .map_err(|e| {
-                AppErrorDto::new("QUERY_FAILED", "查询禁用词失败", true).with_detail(e.to_string())
-            })?;
+            .map_err(query_banned_terms_error)?;
         let terms = stmt
             .query_map(params![project_id], |row| row.get::<_, String>(0))
-            .map_err(|e| {
-                AppErrorDto::new("QUERY_FAILED", "查询禁用词失败", true).with_detail(e.to_string())
-            })?
+            .map_err(query_banned_terms_error)?
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| {
-                AppErrorDto::new("QUERY_FAILED", "查询禁用词失败", true).with_detail(e.to_string())
-            })?;
+            .map_err(query_banned_terms_error)?;
         Ok(terms)
     }
 
@@ -172,9 +152,7 @@ impl ConsistencyService {
             },
         )
         .optional()
-        .map_err(|e| {
-            AppErrorDto::new("QUERY_FAILED", "查询章节失败", true).with_detail(e.to_string())
-        })?
+        .map_err(query_chapters_error)?
         .ok_or_else(|| AppErrorDto::new("CHAPTER_NOT_FOUND", "章节不存在", true))
     }
 
@@ -187,9 +165,7 @@ impl ConsistencyService {
             .prepare(
                 "SELECT id, content_path FROM chapters WHERE project_id = ?1 AND is_deleted = 0 ORDER BY chapter_index",
             )
-            .map_err(|e| {
-                AppErrorDto::new("QUERY_FAILED", "查询章节失败", true).with_detail(e.to_string())
-            })?;
+            .map_err(query_chapters_error)?;
 
         let chapters = stmt
             .query_map(params![project_id], |row| {
@@ -198,13 +174,9 @@ impl ConsistencyService {
                     content_path: row.get(1)?,
                 })
             })
-            .map_err(|e| {
-                AppErrorDto::new("QUERY_FAILED", "查询章节失败", true).with_detail(e.to_string())
-            })?
+            .map_err(query_chapters_error)?
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| {
-                AppErrorDto::new("QUERY_FAILED", "查询章节失败", true).with_detail(e.to_string())
-            })?;
+            .map_err(query_chapters_error)?;
         Ok(chapters)
     }
 
@@ -287,9 +259,7 @@ impl ConsistencyService {
             "DELETE FROM consistency_issues WHERE project_id = ?1 AND chapter_id = ?2",
             params![project_id, chapter_id],
         )
-        .map_err(|e| {
-            AppErrorDto::new("DELETE_FAILED", "清理旧问题失败", true).with_detail(e.to_string())
-        })?;
+        .map_err(delete_issues_error)?;
         self.insert_issues(conn, project_id, issues)
     }
 
@@ -303,9 +273,7 @@ impl ConsistencyService {
             "DELETE FROM consistency_issues WHERE project_id = ?1",
             params![project_id],
         )
-        .map_err(|e| {
-            AppErrorDto::new("DELETE_FAILED", "清理旧问题失败", true).with_detail(e.to_string())
-        })?;
+        .map_err(delete_issues_error)?;
         self.insert_issues(conn, project_id, issues)
     }
 
@@ -321,11 +289,104 @@ impl ConsistencyService {
                 "INSERT INTO consistency_issues(id, project_id, issue_type, severity, chapter_id, source_text, explanation, suggested_fix, status, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
                 params![issue.id, project_id, issue.issue_type, issue.severity, issue.chapter_id, issue.source_text, issue.explanation, issue.suggested_fix, issue.status, now, now],
             )
-            .map_err(|e| {
-                AppErrorDto::new("INSERT_FAILED", "写入一致性问题失败", true)
-                    .with_detail(e.to_string())
-            })?;
+            .map_err(insert_issue_error)?;
         }
         Ok(())
+    }
+}
+
+fn normalize_project_root(project_root: &str) -> Result<&str, AppErrorDto> {
+    let normalized_root = project_root.trim();
+    if normalized_root.is_empty() {
+        return Err(
+            AppErrorDto::new("PROJECT_INVALID_PATH", "项目目录不能为空", true)
+                .with_suggested_action("请输入有效的项目目录路径"),
+        );
+    }
+    Ok(normalized_root)
+}
+
+fn open_project_database(project_root: &str) -> Result<rusqlite::Connection, AppErrorDto> {
+    let normalized_root = normalize_project_root(project_root)?;
+    open_database(Path::new(normalized_root)).map_err(|e| {
+        AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
+    })
+}
+
+fn query_issues_error(err: impl ToString) -> AppErrorDto {
+    AppErrorDto::new("QUERY_FAILED", "查询问题列表失败", true).with_detail(err.to_string())
+}
+
+fn update_issue_status_error(err: impl ToString) -> AppErrorDto {
+    AppErrorDto::new("UPDATE_FAILED", "更新问题状态失败", true).with_detail(err.to_string())
+}
+
+fn query_banned_terms_error(err: impl ToString) -> AppErrorDto {
+    AppErrorDto::new("QUERY_FAILED", "查询禁用词失败", true).with_detail(err.to_string())
+}
+
+fn query_chapters_error(err: impl ToString) -> AppErrorDto {
+    AppErrorDto::new("QUERY_FAILED", "查询章节失败", true).with_detail(err.to_string())
+}
+
+fn delete_issues_error(err: impl ToString) -> AppErrorDto {
+    AppErrorDto::new("DELETE_FAILED", "清理旧问题失败", true).with_detail(err.to_string())
+}
+
+fn insert_issue_error(err: impl ToString) -> AppErrorDto {
+    AppErrorDto::new("INSERT_FAILED", "写入一致性问题失败", true).with_detail(err.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    use std::path::PathBuf;
+
+    use uuid::Uuid;
+
+    use super::ConsistencyService;
+    use crate::services::project_service::{CreateProjectInput, ProjectService};
+
+    fn create_temp_workspace() -> PathBuf {
+        let w = std::env::temp_dir().join(format!("novelforge-rust-tests-{}", Uuid::new_v4()));
+        fs::create_dir_all(&w).expect("create temp workspace");
+        w
+    }
+
+    fn remove_temp_workspace(path: &PathBuf) {
+        let _ = fs::remove_dir_all(path);
+    }
+
+    #[test]
+    fn consistency_methods_accept_trimmed_project_root() {
+        let ws = create_temp_workspace();
+        let ps = ProjectService;
+        let cs = ConsistencyService;
+        let project = ps
+            .create_project(CreateProjectInput {
+                name: "一致性路径空白测试".into(),
+                author: None,
+                genre: "悬疑".into(),
+                target_words: None,
+                save_directory: ws.to_string_lossy().into(),
+            })
+            .expect("project created");
+        let wrapped_root = format!("  {}  ", project.project_root);
+
+        let issues = cs
+            .list_issues(&wrapped_root)
+            .expect("list issues with trimmed root");
+        assert_eq!(issues.len(), 0);
+
+        remove_temp_workspace(&ws);
+    }
+
+    #[test]
+    fn consistency_methods_reject_blank_project_root() {
+        let cs = ConsistencyService;
+        let err = cs
+            .list_issues("   ")
+            .expect_err("blank root should be rejected");
+        assert_eq!(err.code, "PROJECT_INVALID_PATH");
     }
 }

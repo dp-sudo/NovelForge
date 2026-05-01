@@ -11,6 +11,17 @@ fn deprecated_source(source: Option<&str>) -> &str {
     source.unwrap_or("unknown")
 }
 
+const DEPRECATED_REGISTER_AI_PROVIDER_LOG: &str =
+    "[DEPRECATED_COMMAND] register_ai_provider is compatibility-only";
+const DEPRECATED_TEST_AI_CONNECTION_LOG: &str =
+    "[DEPRECATED_COMMAND] test_ai_connection is compatibility-only";
+
+fn log_deprecated_command(message: &str, command: &str, source: Option<&str>) {
+    let src = deprecated_source(source);
+    log::warn!("{} source={}", message, src);
+    crate::infra::logger::record_deprecated_command_usage(command, src);
+}
+
 #[tauri::command]
 pub async fn run_ai_task_pipeline(
     app_handle: tauri::AppHandle,
@@ -106,12 +117,11 @@ pub async fn register_ai_provider(
     state: State<'_, AppState>,
 ) -> Result<(), AppErrorDto> {
     // 问题2修复(命令面收敛): compatibility-only，计划在 2026-07-31 后移除。
-    let src = deprecated_source(source.as_deref());
-    log::warn!(
-        "[DEPRECATED_COMMAND] register_ai_provider is compatibility-only source={}",
-        src
+    log_deprecated_command(
+        DEPRECATED_REGISTER_AI_PROVIDER_LOG,
+        "register_ai_provider",
+        source.as_deref(),
     );
-    crate::infra::logger::record_deprecated_command_usage("register_ai_provider", src);
     state.ai_service.register_provider(config).await;
     Ok(())
 }
@@ -123,11 +133,10 @@ pub async fn test_ai_connection(
     state: State<'_, AppState>,
 ) -> Result<(), AppErrorDto> {
     // 问题2修复(命令面收敛): compatibility-only，计划在 2026-07-31 后移除。
-    let src = deprecated_source(source.as_deref());
-    log::warn!(
-        "[DEPRECATED_COMMAND] test_ai_connection is compatibility-only source={}",
-        src
+    log_deprecated_command(
+        DEPRECATED_TEST_AI_CONNECTION_LOG,
+        "test_ai_connection",
+        source.as_deref(),
     );
-    crate::infra::logger::record_deprecated_command_usage("test_ai_connection", src);
     state.ai_service.test_connection(&provider_id).await
 }
