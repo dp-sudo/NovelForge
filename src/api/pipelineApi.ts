@@ -113,14 +113,17 @@ function resolvePersistPolicy(input: RunTaskPipelineInput): {
   autoPersist: boolean;
   persistMode?: PersistMode;
   automationTier: AutomationTier;
+  legacyBridgeUsed: boolean;
 } {
+  const legacyBridgeUsed =
+    typeof input.autoPersist === "boolean" && typeof input.persistMode === "undefined";
   let persistMode = input.persistMode;
   if (!persistMode && input.autoPersist) {
     persistMode = inferPersistModeFromLegacy(input.taskType);
   }
   const automationTier = input.automationTier ?? "supervised";
   const autoPersist = persistMode ? persistMode !== "none" : (input.autoPersist ?? false);
-  return { autoPersist, persistMode, automationTier };
+  return { autoPersist, persistMode, automationTier, legacyBridgeUsed };
 }
 
 function trackRequestId(requestId: string): void {
@@ -178,6 +181,12 @@ export async function runTaskPipeline(
 ): Promise<string> {
   const timeoutMs = Math.max(options.timeoutMs ?? DEFAULT_START_TIMEOUT_MS, MIN_EVENT_TIMEOUT_MS);
   const policy = resolvePersistPolicy(input);
+  if (policy.legacyBridgeUsed) {
+    logUI(
+      "PIPELINE.LEGACY_POLICY_BRIDGE",
+      `taskType=${input.taskType} source=autoPersist_only`,
+    );
+  }
   const requestPromise = invokeCommand<string>("run_ai_task_pipeline", {
     input: {
       projectRoot: input.projectRoot,

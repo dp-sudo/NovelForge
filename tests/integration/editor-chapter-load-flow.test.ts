@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import path from "node:path";
 import test from "node:test";
 
 import { loadEditorChapterContentWithRecovery } from "../../src/pages/Editor/chapterLoadFlow.js";
@@ -43,4 +45,13 @@ test("问题1回归：切换章节时不应把已有正文清空为占位内容"
   assert.equal(chapter1.recoveryContent, null);
   assert.equal(chapter2.persistedContent, "第二章已有正文");
   assert.equal(chapter2.recoveryContent, null);
+});
+
+test("Task4 契约：Editor 页面引用流式 hook 与上下文侧栏组件", async () => {
+  const page = await fs.readFile(
+    path.join(process.cwd(), "src/pages/Editor/EditorPage.tsx"),
+    "utf-8",
+  );
+  assert.match(page, /usePipelineStream/);
+  assert.match(page, /EditorContextPanel/);
 });

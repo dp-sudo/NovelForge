@@ -59,6 +59,8 @@ import {
 import { SkillsManager } from "../../components/skills/SkillsManager.js";
 import { AiStrategyPanel } from "../../components/settings/AiStrategyPanel";
 import { TASK_ROUTE_OPTIONS, canonicalTaskType } from "../../utils/taskRouting.js";
+import { ModelRoutingPanel } from "./components/ModelRoutingPanel";
+import { DataOpsPanel } from "./components/DataOpsPanel";
 
 type TabKey = "model" | "routing" | "skills" | "aiStrategy" | "editor" | "writing" | "backup" | "about";
 
@@ -1261,129 +1263,19 @@ export function SettingsPage() {
       )}
 
       {activeTab === "routing" && (
-        <Card padding="lg" className="space-y-4">
-          <h2 className="text-base font-semibold text-surface-100">任务路由配置</h2>
-          <p className="text-sm text-surface-400">按任务类型指定供应商与模型，保存后 AI 调用会按路由命中。</p>
-          {!hasConfiguredProvidersForRouting && (
-            <div className="px-3 py-2 rounded-lg text-sm bg-warning/10 text-warning border border-warning/30">
-              请先在“模型设置”中保存至少一个供应商，再配置任务路由。
-            </div>
-          )}
-          {taskRouteMessage && (
-            <div className="px-3 py-2 rounded-lg text-sm bg-success/10 text-success border border-success/20">
-              {taskRouteMessage}
-            </div>
-          )}
-          {taskRoutesLoading ? (
-            <p className="text-sm text-surface-400">路由加载中...</p>
-          ) : (
-            <div className="space-y-4">
-              {TASK_ROUTE_OPTIONS.map((task) => {
-                const state = taskRoutes[task.value];
-                if (!state) return null;
-                const route = state.route;
-                const routeProviderOptions = buildRouteProviderOptions(route.providerId || "");
-                const fallbackProviderOptions = [
-                  { value: "", label: "不使用兜底" },
-                  ...buildRouteProviderOptions(route.fallbackProviderId || ""),
-                ];
-                const modelOptions = buildRouteModelOptions(route.providerId || "", route.modelId || "");
-                const fallbackModelOptions = buildRouteModelOptions(
-                  route.fallbackProviderId || "",
-                  route.fallbackModelId || "",
-                );
-                return (
-                  <div key={task.value} className="border border-surface-700 rounded-lg p-4 space-y-3 bg-surface-800/40">
-                    <div className="flex items-center justify-between">
-                      <div className="text-sm font-medium text-surface-100">{task.label}</div>
-                      <div className="text-xs text-surface-500">{task.value}</div>
-                    </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                      <Select
-                        label="供应商"
-                        value={route.providerId || ""}
-                        onChange={(e) => handleTaskRouteProviderChange(task.value, e.target.value)}
-                        options={routeProviderOptions}
-                        placeholder="选择供应商"
-                      />
-                      {modelOptions.length > 0 ? (
-                        <Select
-                          label="模型 ID"
-                          value={route.modelId || ""}
-                          onChange={(e) => updateTaskRoute(task.value, { modelId: e.target.value })}
-                          options={modelOptions}
-                          placeholder="选择已配置模型"
-                        />
-                      ) : (
-                        <Input
-                          label="模型 ID"
-                          value={route.modelId || ""}
-                          onChange={(e) => updateTaskRoute(task.value, { modelId: e.target.value })}
-                          placeholder="例如 deepseek-v4-flash"
-                        />
-                      )}
-                      <Select
-                        label="兜底供应商"
-                        value={route.fallbackProviderId || ""}
-                        onChange={(e) => handleTaskRouteFallbackProviderChange(task.value, e.target.value)}
-                        options={fallbackProviderOptions}
-                      />
-                      {fallbackModelOptions.length > 0 ? (
-                        <Select
-                          label="兜底模型ID"
-                          value={route.fallbackModelId || ""}
-                          onChange={(e) => updateTaskRoute(task.value, { fallbackModelId: e.target.value })}
-                          options={fallbackModelOptions}
-                          placeholder="选择已配置模型"
-                        />
-                      ) : (
-                        <Input
-                          label="兜底模型ID"
-                          value={route.fallbackModelId || ""}
-                          onChange={(e) => updateTaskRoute(task.value, { fallbackModelId: e.target.value })}
-                          placeholder="可留空"
-                        />
-                      )}
-                      <Input
-                        label="最大重试次数"
-                        type="number"
-                        min={1}
-                        max={8}
-                        value={String(route.maxRetries || 1)}
-                        onChange={(e) => updateTaskRoute(task.value, { maxRetries: parseInt(e.target.value) || 1 })}
-                      />
-                    </div>
-                    {state.error && (
-                      <div className="px-3 py-2 rounded-lg text-sm bg-error/10 text-error border border-error/20">
-                        {state.error}
-                      </div>
-                    )}
-                    <div className="flex justify-end gap-2 pt-1">
-                      {route.id && (
-                        <Button
-                          variant="danger"
-                          size="sm"
-                          onClick={() => void handleDeleteTaskRoute(task.value)}
-                          disabled={state.deleting}
-                        >
-                          {state.deleting ? "删除中..." : "删除"}
-                        </Button>
-                      )}
-                      <Button
-                        variant="primary"
-                        size="sm"
-                        onClick={() => void handleSaveTaskRoute(task.value)}
-                        disabled={state.saving || !hasConfiguredProvidersForRouting}
-                      >
-                        {state.saving ? "保存中..." : "保存路由"}
-                      </Button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </Card>
+        <ModelRoutingPanel
+          hasConfiguredProvidersForRouting={hasConfiguredProvidersForRouting}
+          taskRouteMessage={taskRouteMessage}
+          taskRoutesLoading={taskRoutesLoading}
+          taskRoutes={taskRoutes}
+          buildRouteProviderOptions={buildRouteProviderOptions}
+          buildRouteModelOptions={buildRouteModelOptions}
+          onTaskRouteProviderChange={handleTaskRouteProviderChange}
+          onTaskRouteFallbackProviderChange={handleTaskRouteFallbackProviderChange}
+          onUpdateTaskRoute={updateTaskRoute}
+          onSaveTaskRoute={handleSaveTaskRoute}
+          onDeleteTaskRoute={handleDeleteTaskRoute}
+        />
       )}
 
       {activeTab === "skills" && (
@@ -1551,186 +1443,35 @@ export function SettingsPage() {
       )}
 
       {activeTab === "backup" && (
-        <Card padding="lg" className="space-y-4">
-          <h2 className="text-base font-semibold text-surface-100">数据与备份</h2>
-          <p className="text-sm text-surface-400">项目数据默认保存在本地。支持手动备份和恢复。</p>
-          <p className="text-xs text-surface-500">备份包含 project.json、数据库、章节正文和蓝图文件。API 密钥不会进入备份包。</p>
-          <div className="flex gap-3">
-            <Button variant="secondary" loading={backupCreating} onClick={() => void handleCreateBackup()}>
-              {backupCreating ? "备份中..." : "创建备份"}
-            </Button>
-            <Button variant="secondary" loading={integrityChecking} onClick={() => void handleCheckIntegrity()}>
-              {integrityChecking ? "检查中..." : "完整性检查"}
-            </Button>
-          </div>
-          {backupMessage && (
-            <div className={`px-3 py-2 rounded-lg text-sm ${
-              backupMessage.startsWith("备份成功") || backupMessage.startsWith("恢复成功")
-                ? "bg-success/10 text-success border border-success/20"
-                : backupMessage.startsWith("备份失败") || backupMessage.startsWith("恢复失败")
-                ? "bg-error/10 text-error border border-error/20"
-                : "bg-info/10 text-info border border-info/20"
-            }`}>
-              {backupMessage}
-            </div>
-          )}
-          {backupList.length > 0 && (
-            <div>
-              <h3 className="text-sm font-semibold text-surface-200 mb-2">历史备份</h3>
-              <div className="space-y-2 max-h-48 overflow-y-auto">
-                {backupList.map((b, i) => (
-                  <div key={i} className="flex items-center justify-between p-2 bg-surface-800 rounded-lg">
-                    <div className="text-xs text-surface-300 truncate flex-1">
-                      {b.filePath.split(/[/\\]/).pop()}
-                      <span className="text-surface-500 ml-2">({(b.fileSize / 1024).toFixed(0)} KB)</span>
-                    </div>
-                    <Button variant="ghost" size="sm" loading={backupRestoring}
-                      onClick={() => void handleRestoreBackup(b.filePath)}>
-                      恢复
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-          {integrityReport && (
-            <div className="space-y-2">
-              <h3 className="text-sm font-semibold text-surface-200">完整性报告</h3>
-              <div className="text-xs text-surface-400">
-                状态:{" "}
-                <span className={
-                  integrityReport.status === "healthy"
-                    ? "text-success"
-                    : integrityReport.status === "issues_found"
-                      ? "text-warning"
-                      : "text-error"
-                }>
-                  {integrityReport.status}
-                </span>
-                {" · "}
-                schema: {integrityReport.summary.schemaVersion}
-                {" · "}
-                章节正常: {integrityReport.summary.chaptersOk}
-                {" · "}
-                缺失: {integrityReport.summary.chaptersMissing}
-                {" · "}
-                孤立草稿: {integrityReport.summary.orphanDrafts}
-              </div>
-              {integrityReport.issues.length > 0 && (
-                <div className="max-h-40 overflow-y-auto space-y-2 pr-1">
-                  {integrityReport.issues.map((issue, index) => (
-                    <div key={`${issue.category}-${index}`} className="text-xs px-3 py-2 rounded-lg bg-surface-800 border border-surface-700">
-                      <div className={
-                        issue.severity === "error"
-                          ? "text-error"
-                          : issue.severity === "warning"
-                            ? "text-warning"
-                            : "text-info"
-                      }>
-                        [{issue.severity}] {issue.message}
-                      </div>
-                      {issue.detail && <div className="text-surface-500 mt-1">{issue.detail}</div>}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-          <div className="pt-4 border-t border-surface-700 space-y-3">
-            <h3 className="text-sm font-semibold text-surface-200">高级检索诊断</h3>
-            <p className="text-xs text-surface-400">
-              该入口直接调用语义检索与向量重建命令，仅用于排查检索链路，不影响默认聚合搜索行为。
-            </p>
-            <Input
-              label="语义检索关键词"
-              value={semanticQuery}
-              onChange={(e) => setSemanticQuery(e.target.value)}
-              placeholder="例如：主角身世伏笔"
-            />
-            <div className="flex gap-2">
-              <Button
-                variant="secondary"
-                loading={semanticSearching}
-                onClick={() => void handleSemanticSearch()}
-                disabled={!projectRoot}
-              >
-                {semanticSearching ? "检索中..." : "语义检索"}
-              </Button>
-              <Button
-                variant="ghost"
-                loading={semanticRebuilding}
-                onClick={() => void handleRebuildVector()}
-                disabled={!projectRoot}
-              >
-                {semanticRebuilding ? "重建中..." : "重建向量索引"}
-              </Button>
-            </div>
-            {semanticMessage && (
-              <div className="px-3 py-2 rounded-lg text-xs bg-info/10 text-info border border-info/20">
-                {semanticMessage}
-              </div>
-            )}
-            {semanticResults.length > 0 && (
-              <div className="max-h-40 overflow-y-auto space-y-2 pr-1">
-                {semanticResults.map((item) => (
-                  <div
-                    key={`${item.entityType}:${item.entityId}`}
-                    className="text-xs px-3 py-2 rounded-lg bg-surface-800 border border-surface-700"
-                  >
-                    <div className="text-surface-200">
-                      [{item.entityType}] {item.title}
-                    </div>
-                    <div className="text-surface-500 mt-1">{item.bodySnippet}</div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-          {!projectRoot && (
-            <p className="text-xs text-warning">请先打开项目以使用备份功能</p>
-          )}
-          <div className="pt-4 border-t border-surface-700 space-y-3">
-            <h3 className="text-sm font-semibold text-surface-200">Git 快照</h3>
-            <p className="text-xs text-surface-400">
-              支持初始化仓库、提交项目快照并查看最近历史记录。
-            </p>
-            <div className="text-xs text-surface-400">
-              状态：{gitStatus?.initialized ? `已初始化（${gitStatus.branch}）` : "未初始化"} / {gitStatus?.hasChanges ? "有未提交变更" : "工作区干净"}
-            </div>
-            <Input
-              label="提交说明（可选）"
-              value={snapshotMessage}
-              onChange={(e) => setSnapshotMessage(e.target.value)}
-              placeholder="例如：完成第 10 章初稿"
-            />
-            <div className="flex gap-2">
-              <Button variant="secondary" onClick={() => void handleInitGitRepo()} disabled={gitBusy}>
-                {gitBusy ? "处理中..." : "初始化仓库"}
-              </Button>
-              <Button variant="primary" onClick={() => void handleCommitSnapshot()} disabled={gitBusy || !projectRoot}>
-                {gitBusy ? "处理中..." : "提交快照"}
-              </Button>
-              <Button variant="ghost" onClick={() => void refreshGitData()} disabled={gitBusy || !projectRoot}>
-                刷新历史
-              </Button>
-            </div>
-            {gitMessage && (
-              <div className="px-3 py-2 rounded-lg text-xs bg-info/10 text-info border border-info/20">
-                {gitMessage}
-              </div>
-            )}
-            {gitHistory.length > 0 && (
-              <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
-                {gitHistory.map((row) => (
-                  <div key={row.commitId} className="text-xs px-3 py-2 rounded-lg bg-surface-800 border border-surface-700">
-                    <div className="text-surface-200 break-all">{row.commitId.slice(0, 10)} · {row.summary}</div>
-                    <div className="text-surface-500 mt-1">{new Date(row.committedAt).toLocaleString("zh-CN")}</div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </Card>
+        <DataOpsPanel
+          projectRoot={projectRoot}
+          backupCreating={backupCreating}
+          integrityChecking={integrityChecking}
+          backupRestoring={backupRestoring}
+          backupMessage={backupMessage}
+          backupList={backupList}
+          integrityReport={integrityReport}
+          semanticQuery={semanticQuery}
+          semanticSearching={semanticSearching}
+          semanticRebuilding={semanticRebuilding}
+          semanticMessage={semanticMessage}
+          semanticResults={semanticResults}
+          gitStatus={gitStatus}
+          gitHistory={gitHistory}
+          gitBusy={gitBusy}
+          gitMessage={gitMessage}
+          snapshotMessage={snapshotMessage}
+          onCreateBackup={handleCreateBackup}
+          onCheckIntegrity={handleCheckIntegrity}
+          onRestoreBackup={handleRestoreBackup}
+          onSemanticQueryChange={setSemanticQuery}
+          onSemanticSearch={handleSemanticSearch}
+          onRebuildVector={handleRebuildVector}
+          onInitGitRepo={handleInitGitRepo}
+          onCommitSnapshot={handleCommitSnapshot}
+          onRefreshGitData={refreshGitData}
+          onSnapshotMessageChange={setSnapshotMessage}
+        />
       )}
 
       {activeTab === "about" && (

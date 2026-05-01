@@ -25,10 +25,6 @@ import {
   getChapterContext,
   type ChapterContext
 } from "../../api/contextApi";
-import {
-  cancelTaskPipeline,
-  streamTaskPipeline
-} from "../../api/pipelineApi";
 import type { ChapterRecord } from "../../api/chapterApi";
 import { Modal } from "../../components/dialogs/Modal";
 import { Input } from "../../components/forms/Input";
@@ -38,6 +34,8 @@ import { Button } from "../../components/ui/Button.js";
 import { FindBar } from "../../components/editor/FindBar.js";
 import { canonicalTaskType, getTaskRequirements } from "../../utils/taskRouting.js";
 import { loadEditorChapterContentWithRecovery } from "./chapterLoadFlow.js";
+import { EditorContextPanel, type EditorCandidateTargetKind } from "./components/EditorContextPanel";
+import { usePipelineStream } from "./hooks/usePipelineStream";
 
 const AUTOSAVE_DELAY_MS = 5000;
 
@@ -49,75 +47,11 @@ const STATUS_BADGE: Record<string, { variant: "default" | "success" | "warning" 
   error: { variant: "error", label: "保存失败" }
 };
 
-const ASSET_TYPE_LABEL: Record<string, string> = {
-  character: "角色",
-  location: "地点",
-  organization: "组织",
-  world_rule: "规则",
-  term: "术语"
-};
-
-const CANDIDATE_STATUS_LABEL: Record<"idle" | "applying" | "applied" | "error", string> = {
-  idle: "待处理",
-  applying: "处理中",
-  applied: "已采纳",
-  error: "失败"
-};
-
-const STRUCTURED_DRAFT_STATUS_LABEL: Record<"pending" | "applying" | "applied" | "rejected" | "error", string> = {
-  pending: "待确认",
-  applying: "处理中",
-  applied: "已入库",
-  rejected: "已忽略",
-  error: "失败"
-};
-
-const PIPELINE_PHASE_LABEL: Record<string, string> = {
-  validate: "参数校验",
-  context: "上下文聚合",
-  route: "任务路由",
-  prompt: "提示词构建",
-  generate: "模型生成",
-  postprocess: "结果整理",
-  persist: "结果落库",
-  done: "完成",
-  run: "任务启动"
-};
-
-const PIPELINE_SUGGESTION_BY_ERROR_CODE: Record<string, string> = {
-  PIPELINE_SELECTED_TEXT_REQUIRED: "先在正文中选中一段文本，再重试该任务。",
-  PIPELINE_USER_INSTRUCTION_REQUIRED: "先输入任务描述，再重新执行。",
-  PIPELINE_CHAPTER_ID_REQUIRED: "先选择目标章节，再执行该任务。",
-  PIPELINE_CHAPTER_CONTENT_REQUIRED: "先保存或填写章节内容，再执行一致性扫描。",
-  TASK_ROUTE_NOT_FOUND: "前往 设置 > 任务路由，为该任务配置供应商和模型ID。",
-  MODEL_NOT_CONFIGURED: "前往 设置 > 模型配置，补齐该供应商的默认模型。",
-  PROVIDER_NOT_FOUND: "前往 设置 > 模型配置，确认供应商已创建且可用。",
-  LLM_ADAPTER_NOT_FOUND: "前往 设置 > 模型配置，先测试并重新加载该供应商。",
-  LLM_NO_PROVIDER: "前往 设置 > 任务路由或模型配置，补齐可用模型后重试。",
-  PIPELINE_START_TIMEOUT: "任务启动超时，可能是开发热重载或后端回调中断，重试前先确认页面未重载。",
-  PIPELINE_FIRST_EVENT_TIMEOUT: "任务已启动但未收到事件，可能存在事件监听竞态或开发热重载，请重试。",
-  PIPELINE_EVENT_TIMEOUT: "模型响应超时，请检查网络/API 密钥或切换模型后重试。",
-  PIPELINE_CANCELLED: "任务已取消，可重新发起。",
-  PIPELINE_FREEZE_CONFLICT: "请到 蓝图 > 章节路线 > 确定性分区 调整冻结区，或修改指令避免改写冻结事实。"
-};
-
-const PIPELINE_SUGGESTION_BY_PHASE: Record<string, string> = {
-  validate: "检查输入参数（章节、选区、任务描述）后重试。",
-  context: "检查项目目录和章节数据是否可读，必要时重开项目。",
-  route: "检查任务路由的供应商与模型ID是否已配置。",
-  prompt: "检查技能模板或提示词参数是否完整。",
-  generate: "检查 API 密钥、模型可用性与网络状态，必要时切换模型。",
-  postprocess: "模型返回格式异常，请重试；若持续失败可更换模型。",
-  persist: "检查项目目录写权限和数据库状态后重试。",
-  run: "检查控制台日志，确认后端命令是否执行成功。"
-};
 
 export function EditorPage() {
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const selRef = useRef<{ start: number; end: number }>({ start: 0, end: 0 });
   const autosaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const activeAiRequestIdRef = useRef<string | null>(null);
-  const aiRunTokenRef = useRef(0);
   const lastChapterIdRef = useRef<string | null>(null);
   const hydratingContentRef = useRef(false);
 
@@ -141,7 +75,6 @@ export function EditorPage() {
   const [editorNotice, setEditorNotice] = useState<string | null>(null);
   const [candidateStatus, setCandidateStatus] = useState<Record<string, "idle" | "applying" | "applied" | "error">>({});
   const [structuredDraftStatus, setStructuredDraftStatus] = useState<Record<string, "applying" | "error">>({});
-  const [currentTab, setCurrentTab] = useState<"characters" | "world" | "plot" | "glossary">("characters");
 
   const chapterId = useEditorStore((s) => s.activeChapterId);
   const chapterTitle = useEditorStore((s) => s.activeChapterTitle);
@@ -153,9 +86,19 @@ export function EditorPage() {
   const aiPreviewContent = useEditorStore((s) => s.aiPreviewContent);
   const aiTaskType = useEditorStore((s) => s.aiTaskType);
   const aiStreamError = useEditorStore((s) => s.aiStreamError);
+  const setAiStreamStatus = useEditorStore((s) => s.setAiStreamStatus);
+  const setAiStreamError = useEditorStore((s) => s.setAiStreamError);
+  const appendAiPreviewContent = useEditorStore((s) => s.appendAiPreviewContent);
   const setAiRequestId = useEditorStore((s) => s.setAiRequestId);
   const store = useEditorStore();
   const projectRoot = useProjectStore((s) => s.currentProjectPath);
+
+  const { startPipeline, cancelActivePipeline, formatPipelineError } = usePipelineStream({
+    setAiRequestId,
+    setAiStreamStatus,
+    setAiStreamError,
+    appendAiPreviewContent,
+  });
 
   const load = useCallback(async () => {
     if (!projectRoot) {
@@ -321,55 +264,6 @@ export function EditorPage() {
       editorRef.current.scrollTop = Math.max(0, linesBefore * lineHeight - 100);
     }
   }
-
-  const formatPipelineError = useCallback((event: {
-    phase?: string;
-    errorCode?: string;
-    message?: string;
-    recoverable?: boolean;
-  }) => {
-    const suggestion = (() => {
-      if (event.errorCode && PIPELINE_SUGGESTION_BY_ERROR_CODE[event.errorCode]) {
-        return PIPELINE_SUGGESTION_BY_ERROR_CODE[event.errorCode];
-      }
-      if (event.phase && PIPELINE_SUGGESTION_BY_PHASE[event.phase]) {
-        return PIPELINE_SUGGESTION_BY_PHASE[event.phase];
-      }
-      if (event.recoverable === false) {
-        return "建议查看控制台日志，并在确认模型/路由配置后再重试。";
-      }
-      return "请检查控制台日志与模型配置后重试。";
-    })();
-
-    const parts: string[] = [];
-    if (event.phase) {
-      parts.push(`阶段: ${PIPELINE_PHASE_LABEL[event.phase] ?? event.phase}`);
-    }
-    if (event.errorCode) {
-      parts.push(`错误码: ${event.errorCode}`);
-    }
-    if (event.message) {
-      parts.push(event.message);
-    }
-    parts.push(`建议: ${suggestion}`);
-    return parts.join(" | ") || "AI 生成异常，请检查控制台日志";
-  }, []);
-
-  const cancelActivePipeline = useCallback(async (reason: string = "manual") => {
-    const requestId = activeAiRequestIdRef.current;
-    if (!requestId) return;
-    activeAiRequestIdRef.current = null;
-    aiRunTokenRef.current += 1;
-    setAiRequestId(null);
-    await cancelTaskPipeline(requestId, reason).catch(() => undefined);
-  }, [setAiRequestId]);
-
-  useEffect(() => {
-    return () => {
-      void cancelActivePipeline("unmount");
-    };
-  }, [cancelActivePipeline]);
-
   useEffect(() => {
     if (lastChapterIdRef.current !== null && lastChapterIdRef.current !== chapterId) {
       void cancelActivePipeline("chapter_change");
@@ -480,10 +374,6 @@ export function EditorPage() {
       return;
     }
 
-    await cancelActivePipeline("new_request");
-    const runToken = aiRunTokenRef.current + 1;
-    aiRunTokenRef.current = runToken;
-
     setShowAiPanel(true);
     setOriginalText(selectedText);
     store.resetAiPreview();
@@ -491,61 +381,14 @@ export function EditorPage() {
     store.setAiStreamStatus("streaming");
     store.setAiStreamError(null);
 
-    try {
-      const stream = streamTaskPipeline({
-        projectRoot,
-        taskType: canonicalTask,
-        chapterId,
-        uiAction: `editor.ai.${canonicalTask}`,
-        userInstruction: trimmedInstruction,
-        selectedText,
-        chapterContent: requirements.requiresChapterContent ? content : undefined
-      });
-
-      for await (const event of stream) {
-        if (runToken !== aiRunTokenRef.current) {
-          break;
-        }
-        if (activeAiRequestIdRef.current !== event.requestId) {
-          activeAiRequestIdRef.current = event.requestId;
-          setAiRequestId(event.requestId);
-        }
-        if (event.type === "delta" && event.delta) {
-          store.appendAiPreviewContent(event.delta);
-          continue;
-        }
-        if (event.type === "done") {
-          store.setAiStreamStatus("completed");
-          continue;
-        }
-        if (event.type === "error") {
-          store.setAiStreamError(formatPipelineError(event));
-          store.setAiStreamStatus("error");
-        }
-      }
-    } catch (err) {
-      if (runToken !== aiRunTokenRef.current) {
-        return;
-      }
-      const fallback = (() => {
-        if (err && typeof err === "object") {
-          const candidate = err as { code?: unknown; message?: unknown };
-          return formatPipelineError({
-            phase: "run",
-            errorCode: typeof candidate.code === "string" ? candidate.code : undefined,
-            message: typeof candidate.message === "string" ? candidate.message : undefined
-          });
-        }
-        return formatPipelineError({ phase: "run", message: "AI 生成异常，请检查控制台日志" });
-      })();
-      store.setAiStreamError(fallback);
-      store.setAiStreamStatus("error");
-    } finally {
-      if (runToken === aiRunTokenRef.current) {
-        activeAiRequestIdRef.current = null;
-        setAiRequestId(null);
-      }
-    }
+    await startPipeline({
+      projectRoot,
+      chapterId,
+      taskType: canonicalTask,
+      userInstruction: trimmedInstruction,
+      selectedText,
+      chapterContent: requirements.requiresChapterContent ? content : undefined,
+    });
   }
 
   function handleAiInsert(strategy: "cursor" | "replace" | "append") {
@@ -659,7 +502,7 @@ export function EditorPage() {
     }
   }
 
-  function getCandidateActions(assetType: string): Array<{ label: string; targetKind: "character" | "world_rule" | "plot_node" | "glossary_term" }> {
+  function getCandidateActions(assetType: string): Array<{ label: string; targetKind: EditorCandidateTargetKind }> {
     if (assetType === "character") {
       return [
         { label: "加入角色", targetKind: "character" },
@@ -681,7 +524,7 @@ export function EditorPage() {
 
   async function handleApplyCandidate(
     candidate: { label: string; assetType: string; evidence: string },
-    targetKind: "character" | "world_rule" | "plot_node" | "glossary_term"
+    targetKind: EditorCandidateTargetKind
   ) {
     if (!projectRoot || !chapterId) return;
     const key = getCandidateKey(candidate.assetType, candidate.label);
@@ -1027,301 +870,18 @@ export function EditorPage() {
           />
         )}
       </div>
-
-      {/* Right: Context Panel */}
-      <div className="w-72 shrink-0 hidden xl:block">
-        <Card padding="md" className="h-full overflow-y-auto">
-          <h3 className="text-xs font-semibold text-surface-400 uppercase tracking-wider mb-3">
-            上下文
-          </h3>
-
-          {!chapterId ? (
-            <p className="text-xs text-surface-500">选择章节后显示关联上下文</p>
-          ) : !context ? (
-            <p className="text-xs text-surface-500">加载中...</p>
-          ) : (
-            <>
-              {/* Tabs */}
-              <div className="flex gap-1 mb-3 border-b border-surface-700 pb-2">
-                {(["characters", "world", "plot", "glossary"] as const).map((tab) => (
-                  <button
-                    key={tab}
-                    onClick={() => setCurrentTab(tab)}
-                    className={`text-xs px-2 py-1 rounded transition-colors ${
-                      currentTab === tab
-                        ? "bg-primary/10 text-primary"
-                        : "text-surface-400 hover:text-surface-200"
-                    }`}
-                  >
-                    {tab === "characters" ? "角色" : tab === "world" ? "设定" : tab === "plot" ? "剧情" : "名词"}
-                  </button>
-                ))}
-              </div>
-
-              {/* Character Tab */}
-              {currentTab === "characters" && (
-                <div className="space-y-2">
-                  {context.characters.length === 0 ? (
-                    <p className="text-xs text-surface-500">暂无关联角色</p>
-                  ) : (
-                    context.characters.map((c) => (
-                      <div key={c.id} className="p-2 bg-surface-700/50 rounded-lg">
-                        <div className="text-sm font-medium text-surface-200">{c.name}</div>
-                        <div className="text-xs text-surface-400">{c.roleType}</div>
-                        {c.motivation && (
-                          <div className="text-xs text-surface-500 mt-1">
-                            动机: {c.motivation.slice(0, 60)}
-                          </div>
-                        )}
-                      </div>
-                    ))
-                  )}
-                </div>
-              )}
-
-              {/* World Tab */}
-              {currentTab === "world" && (
-                <div className="space-y-2">
-                  {context.worldRules.length === 0 ? (
-                    <p className="text-xs text-surface-500">暂无设定</p>
-                  ) : (
-                    context.worldRules.map((w) => (
-                      <div key={w.id} className="p-2 bg-surface-700/50 rounded-lg">
-                        <div className="text-sm font-medium text-surface-200">{w.title}</div>
-                        <div className="text-xs text-surface-400">{w.category}</div>
-                        <div className="text-xs text-surface-500 mt-1">{w.description.slice(0, 80)}</div>
-                      </div>
-                    ))
-                  )}
-                </div>
-              )}
-
-              {/* Plot Tab */}
-              {currentTab === "plot" && (
-                <div className="space-y-2">
-                  {context.plotNodes.length === 0 ? (
-                    <p className="text-xs text-surface-500">暂无主线节点</p>
-                  ) : (
-                    context.plotNodes.map((p) => (
-                      <div key={p.id} className="p-2 bg-surface-700/50 rounded-lg">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs text-surface-500">#{p.sortOrder}</span>
-                          <span className="text-sm font-medium text-surface-200">{p.title}</span>
-                        </div>
-                        <span className="text-xs text-surface-400">{p.nodeType}</span>
-                        {p.goal && <div className="text-xs text-surface-500 mt-1">{p.goal.slice(0, 60)}</div>}
-                      </div>
-                    ))
-                  )}
-                </div>
-              )}
-
-              {/* Glossary Tab */}
-              {currentTab === "glossary" && (
-                <div className="space-y-2">
-                  {context.glossary.length === 0 ? (
-                    <p className="text-xs text-surface-500">暂无名词</p>
-                  ) : (
-                    context.glossary.map((g, i) => (
-                      <div key={i} className="flex items-center gap-2 p-2 bg-surface-700/50 rounded-lg">
-                        <span className="text-sm font-medium text-surface-200">{g.term}</span>
-                        <span className="text-xs text-surface-400">{g.termType}</span>
-                        {g.locked && <span className="text-xs text-info ml-auto">锁定</span>}
-                        {g.banned && <span className="text-xs text-error ml-auto">禁用</span>}
-                      </div>
-                    ))
-                  )}
-                </div>
-              )}
-
-              {/* Chapter Info */}
-              <div className="mt-3 pt-3 border-t border-surface-700">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="text-xs font-semibold text-surface-400 uppercase tracking-wider">
-                    资产候选
-                  </div>
-                  <span className="text-[11px] text-surface-500">
-                    {context.assetCandidates.length} 条
-                  </span>
-                </div>
-                {context.assetCandidates.length === 0 ? (
-                  <p className="text-xs text-surface-500">未发现可抽取候选</p>
-                ) : (
-                  <div className="space-y-2">
-                    {context.assetCandidates.slice(0, 8).map((candidate) => (
-                      <div key={`${candidate.assetType}:${candidate.label}`} className="p-2 bg-surface-700/50 rounded-lg">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-sm text-surface-200">{candidate.label}</span>
-                          <div className="flex items-center gap-2">
-                            <span className="text-[11px] text-primary">
-                              {ASSET_TYPE_LABEL[candidate.assetType] ?? candidate.assetType}
-                            </span>
-                            <span className="text-[11px] text-surface-500">
-                              {CANDIDATE_STATUS_LABEL[candidateStatus[getCandidateKey(candidate.assetType, candidate.label)] ?? "idle"]}
-                            </span>
-                          </div>
-                        </div>
-                        <p className="text-[11px] text-surface-500 mt-1">
-                          命中 {candidate.occurrences} 次 · 置信度 {(candidate.confidence * 100).toFixed(0)}%
-                        </p>
-                        <p className="text-xs text-surface-400 mt-1 whitespace-pre-wrap break-words">
-                          {candidate.evidence}
-                        </p>
-                        <div className="mt-2 flex flex-wrap gap-2">
-                          {getCandidateActions(candidate.assetType).map((action) => {
-                            const status = candidateStatus[getCandidateKey(candidate.assetType, candidate.label)] ?? "idle";
-                            const isApplying = status === "applying";
-                            return (
-                              <button
-                                key={`${candidate.assetType}:${candidate.label}:${action.targetKind}`}
-                                onClick={() => void handleApplyCandidate(candidate, action.targetKind)}
-                                disabled={isApplying}
-                                className="px-2 py-1 text-[11px] bg-surface-800 text-surface-200 border border-surface-600 rounded hover:bg-surface-700 disabled:opacity-40 transition-colors"
-                              >
-                                {action.label}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div className="mt-3 pt-3 border-t border-surface-700 space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="text-xs font-semibold text-surface-400 uppercase tracking-wider">
-                    结构化草案
-                  </div>
-                  <span className="text-[11px] text-surface-500">
-                    {(context.relationshipDrafts.length + context.involvementDrafts.length + context.sceneDrafts.length).toString()} 条
-                  </span>
-                </div>
-
-                <div className="space-y-2">
-                  <div className="text-[11px] text-surface-500">关系</div>
-                  {context.relationshipDrafts.length === 0 ? (
-                    <p className="text-xs text-surface-500">未发现关系草案</p>
-                  ) : (
-                    context.relationshipDrafts.slice(0, 4).map((draft) => {
-                      const status = getStructuredDraftDisplayStatus(draft.id, draft.status);
-                      return (
-                        <div key={draft.id} className="p-2 bg-surface-700/50 rounded-lg">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="text-sm text-surface-200">
-                              {draft.sourceLabel} ↔ {draft.targetLabel}
-                            </span>
-                            <span className="text-[11px] text-surface-500">
-                              {STRUCTURED_DRAFT_STATUS_LABEL[status]}
-                            </span>
-                          </div>
-                          <p className="text-[11px] text-primary mt-1">{draft.relationshipType}</p>
-                          <p className="text-xs text-surface-400 mt-1">{draft.evidence}</p>
-                          <button
-                            onClick={() => void handleApplyRelationshipDraft(draft)}
-                            disabled={status === "applying" || status === "applied" || status === "rejected"}
-                            className="mt-2 px-2 py-1 text-[11px] bg-surface-800 text-surface-200 border border-surface-600 rounded hover:bg-surface-700 disabled:opacity-40 transition-colors"
-                          >
-                            确认入库
-                          </button>
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
-
-                <div className="space-y-2">
-                  <div className="text-[11px] text-surface-500">戏份</div>
-                  {context.involvementDrafts.length === 0 ? (
-                    <p className="text-xs text-surface-500">未发现戏份草案</p>
-                  ) : (
-                    context.involvementDrafts.slice(0, 4).map((draft) => {
-                      const status = getStructuredDraftDisplayStatus(draft.id, draft.status);
-                      return (
-                        <div key={draft.id} className="p-2 bg-surface-700/50 rounded-lg">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="text-sm text-surface-200">{draft.characterLabel}</span>
-                            <span className="text-[11px] text-surface-500">
-                              {STRUCTURED_DRAFT_STATUS_LABEL[status]}
-                            </span>
-                          </div>
-                          <p className="text-[11px] text-primary mt-1">
-                            {draft.involvementType} · {draft.occurrences} 次
-                          </p>
-                          <p className="text-xs text-surface-400 mt-1">{draft.evidence}</p>
-                          <button
-                            onClick={() => void handleApplyInvolvementDraft(draft)}
-                            disabled={status === "applying" || status === "applied" || status === "rejected"}
-                            className="mt-2 px-2 py-1 text-[11px] bg-surface-800 text-surface-200 border border-surface-600 rounded hover:bg-surface-700 disabled:opacity-40 transition-colors"
-                          >
-                            确认入库
-                          </button>
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
-
-                <div className="space-y-2">
-                  <div className="text-[11px] text-surface-500">场景</div>
-                  {context.sceneDrafts.length === 0 ? (
-                    <p className="text-xs text-surface-500">未发现场景草案</p>
-                  ) : (
-                    context.sceneDrafts.slice(0, 4).map((draft) => {
-                      const status = getStructuredDraftDisplayStatus(draft.id, draft.status);
-                      return (
-                        <div key={draft.id} className="p-2 bg-surface-700/50 rounded-lg">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="text-sm text-surface-200">{draft.sceneLabel}</span>
-                            <span className="text-[11px] text-surface-500">
-                              {STRUCTURED_DRAFT_STATUS_LABEL[status]}
-                            </span>
-                          </div>
-                          <p className="text-[11px] text-primary mt-1">{draft.sceneType}</p>
-                          <p className="text-xs text-surface-400 mt-1">{draft.evidence}</p>
-                          <button
-                            onClick={() => void handleApplySceneDraft(draft)}
-                            disabled={status === "applying" || status === "applied" || status === "rejected"}
-                            className="mt-2 px-2 py-1 text-[11px] bg-surface-800 text-surface-200 border border-surface-600 rounded hover:bg-surface-700 disabled:opacity-40 transition-colors"
-                          >
-                            确认入库
-                          </button>
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
-              </div>
-
-              <div className="mt-3 pt-3 border-t border-surface-700">
-                <div className="text-xs text-surface-400">
-                  <div>目标字数: {context.chapter.targetWords.toLocaleString()}</div>
-                  <div>当前字数: {context.chapter.currentWords.toLocaleString()}</div>
-                  <div>状态: {context.chapter.status}</div>
-                  <div>状态账本摘要: {context.stateSummary.length}</div>
-                  {context.previousChapterSummary && (
-                    <div className="mt-2">
-                      <div className="text-surface-500 mb-1">前章摘要:</div>
-                      <div className="text-surface-400">{context.previousChapterSummary.slice(0, 100)}</div>
-                    </div>
-                  )}
-                  {context.stateSummary.length > 0 && (
-                    <div className="mt-2">
-                      <div className="text-surface-500 mb-1">最新状态:</div>
-                      {context.stateSummary.slice(0, 3).map((item, index) => (
-                        <div key={`${item.subjectType}:${item.subjectId}:${item.stateKind}:${index}`} className="text-surface-400">
-                          {item.subjectType}/{item.subjectId} · {item.stateKind}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </>
-          )}
-        </Card>
-      </div>
+      <EditorContextPanel
+        chapterId={chapterId}
+        context={context}
+        candidateStatus={candidateStatus}
+        getCandidateKey={getCandidateKey}
+        getCandidateActions={getCandidateActions}
+        getStructuredDraftDisplayStatus={getStructuredDraftDisplayStatus}
+        onApplyCandidate={handleApplyCandidate}
+        onApplyRelationshipDraft={handleApplyRelationshipDraft}
+        onApplyInvolvementDraft={handleApplyInvolvementDraft}
+        onApplySceneDraft={handleApplySceneDraft}
+      />
 
       <Modal open={showSnapshotModal} onClose={() => setShowSnapshotModal(false)} title="章节快照" width="lg">
         {!chapterId ? (

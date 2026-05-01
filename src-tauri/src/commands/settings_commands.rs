@@ -110,6 +110,10 @@ fn deprecated_source(source: Option<&str>) -> &str {
 fn log_deprecated_command(message: &str, command: &str, source: Option<&str>) {
     let src = deprecated_source(source);
     log::warn!("{} source={}", message, src);
+    crate::infra::logger::log_user_action(
+        "compatibility_bridge.used",
+        &format!("command={} source={}", command, src),
+    );
     crate::infra::logger::record_deprecated_command_usage(command, src);
 }
 

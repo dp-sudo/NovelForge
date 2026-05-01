@@ -38,6 +38,8 @@ test("持久化策略契约：pipeline 输入类型声明显式策略并保留 a
   assert.match(pipelineApi, /autoPersist\?: boolean;/);
   assert.match(pipelineApi, /persistMode\?: PersistMode;/);
   assert.match(pipelineApi, /automationTier\?: AutomationTier;/);
+  assert.match(pipelineApi, /legacyBridgeUsed/);
+  assert.match(pipelineApi, /PIPELINE\.LEGACY_POLICY_BRIDGE/);
 
   assert.match(moduleApi, /export interface RunModuleAiTaskInput/);
   assert.match(moduleApi, /persistMode\?: PersistMode;/);
