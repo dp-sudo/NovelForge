@@ -5,6 +5,7 @@ use uuid::Uuid;
 use crate::errors::AppErrorDto;
 use crate::infra::database::open_database;
 use crate::infra::time::now_iso;
+use crate::services::feedback_service::FeedbackService;
 use crate::services::project_service::get_project_id;
 use std::path::Path;
 
@@ -162,6 +163,7 @@ impl CharacterService {
         )
         .map_err(insert_character_error)?;
         insert_manual_provenance(&conn, &project_id, "character", &id)?;
+        FeedbackService::trigger_character_overflow_async(project_root.to_string());
         Ok(id)
     }
 
@@ -534,6 +536,7 @@ impl RelationshipService {
             "INSERT INTO character_relationships(id, project_id, source_character_id, target_character_id, relationship_type, description, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
             params![id, project_id, input.source_character_id, input.target_character_id, input.relationship_type, input.description, now, now],
         ).map_err(insert_relationship_error)?;
+        FeedbackService::trigger_relationship_complexity_async(project_root.to_string());
         Ok(id)
     }
 

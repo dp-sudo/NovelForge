@@ -149,13 +149,14 @@ export async function createChapter(input: ChapterInput, projectRoot: string): P
 export async function saveChapterContent(
   chapterId: string,
   content: string,
-  projectRoot: string
+  projectRoot: string,
+  reason?: string,
 ): Promise<SaveChapterOutput> {
   const requestId = createClientRequestId("save");
   logUI("SAVE.START", `requestId=${requestId} chapterId=${chapterId}`);
   try {
     const result = await invokeCommand<SaveChapterOutput>("save_chapter_content", {
-      input: { projectRoot, chapterId, content, requestId }
+      input: { projectRoot, chapterId, content, requestId, reason: reason || null }
     });
     logUI("SAVE.DONE", `requestId=${requestId} chapterId=${chapterId} version=${result.version}`);
     return result;

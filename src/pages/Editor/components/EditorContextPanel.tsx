@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Card } from "../../../components/cards/Card";
-import type { ChapterContext } from "../../../api/contextApi";
+import type { ChapterContext, ReviewTrailRecord } from "../../../api/contextApi";
 
 const ASSET_TYPE_LABEL: Record<string, string> = {
   character: "角色",
@@ -25,6 +25,12 @@ const STRUCTURED_DRAFT_STATUS_LABEL: Record<"pending" | "applying" | "applied" |
   error: "失败"
 };
 
+const REVIEW_ACTION_LABEL: Record<string, string> = {
+  approved: "采纳",
+  rejected: "否决",
+  edited: "人工修改",
+};
+
 export type EditorCandidateTargetKind = "character" | "world_rule" | "plot_node" | "glossary_term";
 
 export interface EditorCandidateAction {
@@ -35,6 +41,7 @@ export interface EditorCandidateAction {
 interface EditorContextPanelProps {
   chapterId: string | null;
   context: ChapterContext | null;
+  reviewTrail: ReviewTrailRecord[];
   candidateStatus: Record<string, "idle" | "applying" | "applied" | "error">;
   getCandidateKey: (assetType: string, label: string) => string;
   getCandidateActions: (assetType: string) => EditorCandidateAction[];
@@ -61,6 +68,7 @@ export function EditorContextPanel(props: EditorContextPanelProps) {
   const {
     chapterId,
     context,
+    reviewTrail,
     candidateStatus,
     getCandidateKey,
     getCandidateActions,
@@ -362,6 +370,39 @@ export function EditorContextPanel(props: EditorContextPanelProps) {
             </div>
 
             <div className="mt-3 pt-3 border-t border-surface-700">
+              <div className="flex items-center justify-between mb-2">
+                <div className="text-xs font-semibold text-surface-400 uppercase tracking-wider">
+                  审查轨迹
+                </div>
+                <span className="text-[11px] text-surface-500">
+                  {reviewTrail.length} 条
+                </span>
+              </div>
+              {reviewTrail.length === 0 ? (
+                <p className="text-xs text-surface-500">暂无审查记录</p>
+              ) : (
+                <div className="space-y-2 mb-3">
+                  {reviewTrail.slice(0, 8).map((item) => (
+                    <div key={item.id} className="p-2 bg-surface-700/50 rounded-lg">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs text-surface-200">
+                          {REVIEW_ACTION_LABEL[item.action] ?? item.action}
+                        </span>
+                        <span className="text-[11px] text-surface-500">
+                          {new Date(item.createdAt).toLocaleString("zh-CN")}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-surface-500 mt-1">
+                        {item.entityType} / {item.entityId}
+                      </p>
+                      {item.reason && (
+                        <p className="text-xs text-surface-400 mt-1">理由：{item.reason}</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
               <div className="text-xs text-surface-400">
                 <div>目标字数: {context.chapter.targetWords.toLocaleString()}</div>
                 <div>当前字数: {context.chapter.currentWords.toLocaleString()}</div>

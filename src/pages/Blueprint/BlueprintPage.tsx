@@ -92,6 +92,13 @@ const CERTAINTY_ZONE_LABELS = {
   exploratory: "探索区",
 };
 
+const CERTAINTY_ZONE_SUPPORTED_STEP_KEYS = new Set<BlueprintStepKey>([
+  "step-04-characters",
+  "step-05-world",
+  "step-07-plot",
+  "step-08-chapters",
+]);
+
 function parseErrorCode(message: string): string | undefined {
   const match = message.match(/^\[([A-Z0-9_]+)\]/);
   return match?.[1];
@@ -114,7 +121,11 @@ function formatPipelineBlockingTip(errorCode?: string, message?: string): string
   const normalizedMessage = (message ?? "").trim();
   if (errorCode === "PIPELINE_FREEZE_CONFLICT") {
     const base = normalizedMessage || "检测到冻结区冲突，已阻断本次执行。";
-    return `${base} 请到“蓝图 > 章节路线 > 确定性分区”调整冻结区，或修改指令避免改写冻结事实。`;
+    return `${base} 请到“蓝图 > 对应步骤 > 确定性分区”调整冻结区，或修改指令避免改写冻结事实。`;
+  }
+  if (errorCode === "PIPELINE_PROMISED_CONFLICT") {
+    const base = normalizedMessage || "检测到承诺区冲突，已阻断本次执行。";
+    return `${base} 请到“蓝图 > 对应步骤 > 确定性分区”调整承诺区，或修改指令确保承诺兑现。`;
   }
   if (errorCode === "BLUEPRINT_CERTAINTY_ZONES_OVERLAP") {
     const base = normalizedMessage || "确定性分区冲突：同一条目不能同时出现在多个分区。";
@@ -415,9 +426,10 @@ export function BlueprintPage() {
 
   const cur = STEPS[activeIdx];
   const status: StepStatus = (steps[activeIdx]?.status as StepStatus) ?? "not_started";
+  const certaintyZoneEnabled = CERTAINTY_ZONE_SUPPORTED_STEP_KEYS.has(cur.key);
   const certaintyZoneErrors = useMemo(
-    () => (cur.key === "step-08-chapters" ? validateCertaintyZones(certaintyZones) : []),
-    [cur.key, certaintyZones],
+    () => (certaintyZoneEnabled ? validateCertaintyZones(certaintyZones) : []),
+    [certaintyZoneEnabled, certaintyZones],
   );
   const hasCertaintyZoneConflict = certaintyZoneErrors.length > 0;
 
@@ -470,7 +482,7 @@ export function BlueprintPage() {
   useEffect(() => {
     const content = steps[activeIdx]?.content ?? "";
     setFormData(parseBlueprintContent(cur.key, content));
-    if (cur.key === "step-08-chapters") {
+    if (certaintyZoneEnabled) {
       const dtoZones = steps[activeIdx]?.certaintyZones;
       if (dtoZones && hasCertaintyZones(dtoZones)) {
         setCertaintyZones({
@@ -492,7 +504,7 @@ export function BlueprintPage() {
     if (Object.values(formData).some((v) => v.trim().length > 0)) {
       return true;
     }
-    return cur.key === "step-08-chapters" ? hasCertaintyZones(certaintyZones) : false;
+    return certaintyZoneEnabled ? hasCertaintyZones(certaintyZones) : false;
   }
 
   function statusDot(s: StepStatus) {
@@ -505,7 +517,7 @@ export function BlueprintPage() {
 
   function wordCount(): number {
     let sum = Object.values(formData).reduce((acc, value) => acc + value.replace(/\s/g, "").length, 0);
-    if (cur.key === "step-08-chapters") {
+    if (certaintyZoneEnabled) {
       sum += [...certaintyZones.frozen, ...certaintyZones.promised, ...certaintyZones.exploratory]
         .reduce((acc, value) => acc + value.replace(/\s/g, "").length, 0);
     }
@@ -564,7 +576,7 @@ export function BlueprintPage() {
 
   async function handlePromoteCurrentStep() {
     if (!projectRoot || promotionRunning) return;
-    if (cur.key === "step-08-chapters" && hasCertaintyZoneConflict) {
+    if (certaintyZoneEnabled && hasCertaintyZoneConflict) {
       setCertaintyValidationNotice("确定性分区存在冲突，已阻断晋升；请先修复冲突条目。");
       return;
     }
@@ -626,7 +638,7 @@ export function BlueprintPage() {
 
   async function handleSave() {
     if (!projectRoot) return;
-    if (cur.key === "step-08-chapters" && hasCertaintyZoneConflict) {
+    if (certaintyZoneEnabled && hasCertaintyZoneConflict) {
       setCertaintyValidationNotice("确定性分区存在冲突，已阻断保存；请先修复冲突条目。");
       return;
     }
@@ -638,7 +650,7 @@ export function BlueprintPage() {
         json,
         false,
         projectRoot,
-        cur.key === "step-08-chapters" ? certaintyZones : undefined,
+        certaintyZoneEnabled ? certaintyZones : undefined,
       );
       await Promise.all([load(), loadLoopData()]);
     } catch (error) {
@@ -651,7 +663,7 @@ export function BlueprintPage() {
 
   async function handleComplete() {
     if (!projectRoot) return;
-    if (cur.key === "step-08-chapters" && hasCertaintyZoneConflict) {
+    if (certaintyZoneEnabled && hasCertaintyZoneConflict) {
       setCertaintyValidationNotice("确定性分区存在冲突，已阻断“标记完成”；请先修复冲突条目。");
       return;
     }
@@ -663,7 +675,7 @@ export function BlueprintPage() {
           json,
           false,
           projectRoot,
-          cur.key === "step-08-chapters" ? certaintyZones : undefined,
+          certaintyZoneEnabled ? certaintyZones : undefined,
         );
       }
       await markBlueprintCompleted(cur.key, projectRoot);
@@ -694,7 +706,7 @@ export function BlueprintPage() {
         .filter(([, v]) => v.trim())
         .map(([k, v]) => `${(FIELD_LABELS[cur.key]?.[k] ?? k)}：${v}`)
         .join("\n");
-      const certaintySummary = cur.key === "step-08-chapters" && hasCertaintyZones(certaintyZones)
+      const certaintySummary = certaintyZoneEnabled && hasCertaintyZones(certaintyZones)
         ? [
             certaintyZones.frozen.length > 0 ? `冻结区：${certaintyZones.frozen.join("；")}` : "",
             certaintyZones.promised.length > 0 ? `承诺区：${certaintyZones.promised.join("；")}` : "",
@@ -722,7 +734,7 @@ export function BlueprintPage() {
   function handleApplyAiResult() {
     if (!aiResult) return;
     setFormData(parseBlueprintContent(cur.key, aiResult));
-    if (cur.key === "step-08-chapters") {
+    if (certaintyZoneEnabled) {
       setCertaintyZones(parseCertaintyZonesFromLegacyContent(aiResult));
     }
     setAiResult(null);
@@ -825,7 +837,7 @@ export function BlueprintPage() {
                   size="sm"
                   loading={saving}
                   onClick={() => void handleSave()}
-                  disabled={cur.key === "step-08-chapters" && hasCertaintyZoneConflict}
+                  disabled={certaintyZoneEnabled && hasCertaintyZoneConflict}
                 >
                   保存
                 </Button>
@@ -833,7 +845,7 @@ export function BlueprintPage() {
                   variant="primary"
                   size="sm"
                   onClick={() => void handleComplete()}
-                  disabled={cur.key === "step-08-chapters" && hasCertaintyZoneConflict}
+                  disabled={certaintyZoneEnabled && hasCertaintyZoneConflict}
                 >
                   {status === "completed" ? "已完成 ✓" : "标记完成"}
                 </Button>
@@ -843,7 +855,7 @@ export function BlueprintPage() {
                     size="sm"
                     loading={promotionRunning}
                     onClick={() => void handlePromoteCurrentStep()}
-                    disabled={cur.key === "step-08-chapters" && hasCertaintyZoneConflict}
+                    disabled={certaintyZoneEnabled && hasCertaintyZoneConflict}
                   >
                     确认并晋升
                   </Button>
@@ -888,7 +900,7 @@ export function BlueprintPage() {
             )}
 
             <StepForm stepKey={cur.key} data={formData} onChange={handleFormChange} />
-            {cur.key === "step-08-chapters" && (
+            {certaintyZoneEnabled && (
               <>
                 <CertaintyZonesEditor
                   zones={certaintyZones}

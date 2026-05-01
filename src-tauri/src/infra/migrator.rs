@@ -64,6 +64,14 @@ fn project_migrations() -> Vec<Migration> {
             version: "0008_pipeline_run_meta",
             sql: include_str!("../../migrations/project/0008_pipeline_run_meta.sql"),
         },
+        Migration {
+            version: "0009_user_review_actions",
+            sql: include_str!("../../migrations/project/0009_user_review_actions.sql"),
+        },
+        Migration {
+            version: "0010_feedback_events",
+            sql: include_str!("../../migrations/project/0010_feedback_events.sql"),
+        },
     ]
 }
 
@@ -85,6 +93,14 @@ fn app_migrations() -> Vec<Migration> {
         Migration {
             version: "0004_model_pools",
             sql: include_str!("../../migrations/app/0004_model_pools.sql"),
+        },
+        Migration {
+            version: "0005_promotion_policies",
+            sql: include_str!("../../migrations/app/0005_promotion_policies.sql"),
+        },
+        Migration {
+            version: "0006_feedback_rules",
+            sql: include_str!("../../migrations/app/0006_feedback_rules.sql"),
         },
     ]
 }
@@ -185,14 +201,30 @@ fn run_pending(
             label, migration.version
         );
 
-        conn.execute_batch(migration.sql).map_err(|e| {
-            AppErrorDto::new(
-                "MIGRATION_FAILED",
-                &format!("{}: migration '{}' failed", label, migration.version),
-                true,
-            )
-            .with_detail(e.to_string())
-        })?;
+        match conn.execute_batch(migration.sql) {
+            Ok(()) => {}
+            Err(err) => {
+                let detail = err.to_string();
+                let duplicate_column = detail
+                    .to_ascii_lowercase()
+                    .contains("duplicate column name");
+                if duplicate_column {
+                    warn!(
+                        "[MIGRATOR] {}: migration '{}' hit duplicate column, treat as already applied: {}",
+                        label, migration.version, detail
+                    );
+                } else {
+                    return Err(
+                        AppErrorDto::new(
+                            "MIGRATION_FAILED",
+                            &format!("{}: migration '{}' failed", label, migration.version),
+                            true,
+                        )
+                        .with_detail(detail),
+                    );
+                }
+            }
+        }
 
         mark_applied(conn, migration.version)?;
         applied.push(migration.version.to_string());
@@ -406,6 +438,48 @@ mod tests {
             )
             .expect("read pool id");
         assert_eq!(seeded_pool_id.as_deref(), Some("drafter"));
+    }
+
+    #[test]
+    fn app_feedback_rules_migration_tolerates_existing_post_tasks_column() {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        conn.execute_batch(include_str!("../../migrations/app/0001_init.sql"))
+            .expect("apply app 0001");
+        conn.execute_batch(include_str!("../../migrations/app/0002_skill_index.sql"))
+            .expect("apply app 0002");
+        conn.execute_batch(include_str!(
+            "../../migrations/app/0003_task_route_unique.sql"
+        ))
+        .expect("apply app 0003");
+        conn.execute_batch(include_str!("../../migrations/app/0004_model_pools.sql"))
+            .expect("apply app 0004");
+        conn.execute_batch(include_str!(
+            "../../migrations/app/0005_promotion_policies.sql"
+        ))
+        .expect("apply app 0005");
+        insert_migration_marker(&conn, "0001_init");
+        insert_migration_marker(&conn, "0002_skill_index");
+        insert_migration_marker(&conn, "0003_task_route_unique");
+        insert_migration_marker(&conn, "0004_model_pools");
+        insert_migration_marker(&conn, "0005_promotion_policies");
+
+        conn.execute(
+            "ALTER TABLE llm_task_routes ADD COLUMN post_tasks_json TEXT NOT NULL DEFAULT '[]'",
+            [],
+        )
+        .expect("manually add post_tasks_json to simulate compatibility patch");
+
+        run_app_pending(&conn).expect("apply app pending migrations");
+
+        let marker_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migrations WHERE version = '0006_feedback_rules'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query migration marker");
+        assert_eq!(marker_count, 1);
+        assert!(has_table(&conn, "feedback_rules"));
     }
 
     #[test]

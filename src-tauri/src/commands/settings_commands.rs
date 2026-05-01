@@ -7,6 +7,8 @@ use uuid::Uuid;
 use crate::adapters::llm_types::{ProviderConfig, TaskRoute};
 use crate::errors::AppErrorDto;
 use crate::infra::app_database;
+use crate::infra::app_database::PromotionPolicyRecord;
+use crate::services::promotion_service::PromotionService;
 use crate::services::settings_service::EditorSettings;
 use crate::services::task_routing;
 use crate::state::AppState;
@@ -380,6 +382,20 @@ pub async fn save_task_route(
         .as_ref()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty());
+    r.post_tasks = r
+        .post_tasks
+        .iter()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .fold(Vec::<String>::new(), |mut acc, value| {
+            if !acc
+                .iter()
+                .any(|existing: &String| existing.eq_ignore_ascii_case(value.as_str()))
+            {
+                acc.push(value);
+            }
+            acc
+        });
 
     if r.provider_id.is_empty() {
         return Err(invalid_input_error("供应商不能为空"));
@@ -441,6 +457,23 @@ pub async fn delete_task_route(
         app_database::delete_task_route(&conn, &delete_route_id)?;
     }
     Ok(())
+}
+
+// ── Promotion policy commands ──
+
+#[tauri::command]
+pub async fn list_promotion_policies(
+    _state: State<'_, AppState>,
+) -> Result<Vec<PromotionPolicyRecord>, AppErrorDto> {
+    PromotionService.list_policies()
+}
+
+#[tauri::command]
+pub async fn save_promotion_policy(
+    policy: PromotionPolicyRecord,
+    _state: State<'_, AppState>,
+) -> Result<PromotionPolicyRecord, AppErrorDto> {
+    PromotionService.save_policy(policy)
 }
 
 // ── Remote registry commands ──
@@ -536,6 +569,7 @@ mod tests {
             fallback_model_id: None,
             model_pool_id: None,
             fallback_model_pool_id: None,
+            post_tasks: Vec::new(),
             max_retries: 1,
             created_at: None,
             updated_at: None,

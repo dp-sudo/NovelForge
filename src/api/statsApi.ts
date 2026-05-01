@@ -20,6 +20,21 @@ export interface DashboardStats {
   recentChapters?: DashboardRecentChapter[];
 }
 
+export interface FeedbackEvent {
+  id: string;
+  projectId: string;
+  chapterId?: string | null;
+  eventType: string;
+  ruleType: string;
+  severity: string;
+  conditionSummary: string;
+  suggestedAction?: string | null;
+  context?: Record<string, unknown> | null;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export async function getDashboardStats(projectRoot: string): Promise<DashboardStats | null> {
   const raw = await invokeCommand<Omit<DashboardStats, "blueprintProgress">>("get_dashboard_stats", { projectRoot });
   const totalSteps = raw.totalBlueprintSteps > 0 ? raw.totalBlueprintSteps : 8;
@@ -28,4 +43,8 @@ export async function getDashboardStats(projectRoot: string): Promise<DashboardS
     ...raw,
     blueprintProgress,
   };
+}
+
+export async function getFeedbackEvents(projectRoot: string): Promise<FeedbackEvent[]> {
+  return invokeCommand<FeedbackEvent[]>("get_feedback_events", { projectRoot });
 }

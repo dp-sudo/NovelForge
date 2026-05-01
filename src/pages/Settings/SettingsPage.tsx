@@ -16,6 +16,8 @@ import {
   listTaskRoutes,
   saveTaskRoute,
   deleteTaskRoute,
+  listPromotionPolicies,
+  savePromotionPolicy,
   loadEditorSettings,
   saveEditorSettings,
   saveWritingStyle,
@@ -35,6 +37,7 @@ import {
   type LicenseStatus,
   type AppUpdateInfo,
   type TaskRoute,
+  type PromotionPolicy,
 } from "../../api/settingsApi";
 import {
   checkProjectIntegrity,
@@ -143,6 +146,8 @@ export function SettingsPage() {
   const [taskRoutes, setTaskRoutes] = useState<Record<string, TaskRouteFormState>>({});
   const [taskRouteMessage, setTaskRouteMessage] = useState<string | null>(null);
   const [taskRoutesLoading, setTaskRoutesLoading] = useState(true);
+  const [promotionPolicies, setPromotionPolicies] = useState<PromotionPolicy[]>([]);
+  const [promotionPolicyMessage, setPromotionPolicyMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   const projectRoot = useProjectStore((s) => s.currentProjectPath);
@@ -193,6 +198,7 @@ export function SettingsPage() {
       modelId: seed?.modelId || "",
       fallbackProviderId: "",
       fallbackModelId: "",
+      postTasks: [],
       maxRetries: 1,
     };
   }
@@ -535,7 +541,19 @@ export function SettingsPage() {
       ...route,
       fallbackProviderId: route.fallbackProviderId || "",
       fallbackModelId: route.fallbackModelId || "",
+      postTasks: route.postTasks || [],
       maxRetries: route.maxRetries || 1,
+    };
+  }
+
+  function normalizePromotionPolicy(policy: PromotionPolicy): PromotionPolicy {
+    return {
+      ...policy,
+      sourceKind: policy.sourceKind || "any",
+      policyMode: policy.policyMode || "allow",
+      requireReason: Boolean(policy.requireReason),
+      enabled: Boolean(policy.enabled),
+      notes: policy.notes || "",
     };
   }
 
@@ -575,9 +593,10 @@ export function SettingsPage() {
       setLoading(true);
       setTaskRoutesLoading(true);
       try {
-        const [configs, routes] = await Promise.all([
+        const [configs, routes, policies] = await Promise.all([
           listProviders(),
           listTaskRoutes(),
+          listPromotionPolicies().catch(() => [] as PromotionPolicy[]),
         ]);
         const configuredIds = configs.map((config) => config.id);
         setConfiguredProviderIds(configuredIds);
@@ -651,6 +670,7 @@ export function SettingsPage() {
 
         setVendors(map);
         setTaskRoutes(routeMap);
+        setPromotionPolicies(policies.map(normalizePromotionPolicy));
       } finally {
         setLoading(false);
         setTaskRoutesLoading(false);
@@ -1003,6 +1023,33 @@ export function SettingsPage() {
     }
   }
 
+  function updatePromotionPolicy(policyId: string, patch: Partial<PromotionPolicy>) {
+    setPromotionPolicies((prev) =>
+      prev.map((item) => (item.id === policyId ? { ...item, ...patch } : item)),
+    );
+    setPromotionPolicyMessage(null);
+  }
+
+  async function handleSavePromotionPolicy(policyId: string) {
+    const policy = promotionPolicies.find((item) => item.id === policyId);
+    if (!policy) return;
+    try {
+      const saved = await savePromotionPolicy({
+        ...policy,
+        targetType: policy.targetType.trim(),
+        sourceKind: policy.sourceKind.trim() || "any",
+        policyMode: policy.policyMode.trim() || "allow",
+        notes: policy.notes?.trim() || "",
+      });
+      setPromotionPolicies((prev) =>
+        prev.map((item) => (item.id === policyId ? normalizePromotionPolicy(saved) : item)),
+      );
+      setPromotionPolicyMessage(`已保存晋升策略：${saved.targetType}/${saved.sourceKind}`);
+    } catch (err: unknown) {
+      setPromotionPolicyMessage(`保存失败：${getErrorMessage(err, "未知错误")}`);
+    }
+  }
+
   function capabilityBadge(label: string) {
     return (
       <span key={label} className="inline-flex items-center px-2 py-0.5 text-xs rounded-full bg-primary/10 text-primary border border-primary/20">
@@ -1263,19 +1310,109 @@ export function SettingsPage() {
       )}
 
       {activeTab === "routing" && (
-        <ModelRoutingPanel
-          hasConfiguredProvidersForRouting={hasConfiguredProvidersForRouting}
-          taskRouteMessage={taskRouteMessage}
-          taskRoutesLoading={taskRoutesLoading}
-          taskRoutes={taskRoutes}
-          buildRouteProviderOptions={buildRouteProviderOptions}
-          buildRouteModelOptions={buildRouteModelOptions}
-          onTaskRouteProviderChange={handleTaskRouteProviderChange}
-          onTaskRouteFallbackProviderChange={handleTaskRouteFallbackProviderChange}
-          onUpdateTaskRoute={updateTaskRoute}
-          onSaveTaskRoute={handleSaveTaskRoute}
-          onDeleteTaskRoute={handleDeleteTaskRoute}
-        />
+        <div className="space-y-4">
+          <ModelRoutingPanel
+            hasConfiguredProvidersForRouting={hasConfiguredProvidersForRouting}
+            taskRouteMessage={taskRouteMessage}
+            taskRoutesLoading={taskRoutesLoading}
+            taskRoutes={taskRoutes}
+            buildRouteProviderOptions={buildRouteProviderOptions}
+            buildRouteModelOptions={buildRouteModelOptions}
+            onTaskRouteProviderChange={handleTaskRouteProviderChange}
+            onTaskRouteFallbackProviderChange={handleTaskRouteFallbackProviderChange}
+            onUpdateTaskRoute={updateTaskRoute}
+            onSaveTaskRoute={handleSaveTaskRoute}
+            onDeleteTaskRoute={handleDeleteTaskRoute}
+          />
+
+          <Card padding="lg" className="space-y-4">
+            <h2 className="text-base font-semibold text-surface-100">晋升策略</h2>
+            <p className="text-sm text-surface-400">
+              所有资产晋升统一经过该策略。可配置是否允许晋升、是否强制填写审核理由。
+            </p>
+            {promotionPolicyMessage && (
+              <div className="px-3 py-2 rounded-lg text-sm bg-info/10 text-info border border-info/20">
+                {promotionPolicyMessage}
+              </div>
+            )}
+            <div className="space-y-3">
+              {promotionPolicies.map((policy) => (
+                <div
+                  key={policy.id}
+                  className="border border-surface-700 rounded-lg p-3 bg-surface-800/40 space-y-3"
+                >
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <Input
+                      label="目标类型"
+                      value={policy.targetType}
+                      onChange={(e) =>
+                        updatePromotionPolicy(policy.id, { targetType: e.target.value })
+                      }
+                    />
+                    <Input
+                      label="来源类型"
+                      value={policy.sourceKind}
+                      onChange={(e) =>
+                        updatePromotionPolicy(policy.id, { sourceKind: e.target.value })
+                      }
+                    />
+                    <Select
+                      label="策略"
+                      value={policy.policyMode}
+                      onChange={(e) =>
+                        updatePromotionPolicy(policy.id, { policyMode: e.target.value })
+                      }
+                      options={[
+                        { value: "allow", label: "允许" },
+                        { value: "deny", label: "拒绝" },
+                      ]}
+                    />
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <Select
+                      label="是否启用"
+                      value={policy.enabled ? "enabled" : "disabled"}
+                      onChange={(e) =>
+                        updatePromotionPolicy(policy.id, { enabled: e.target.value === "enabled" })
+                      }
+                      options={[
+                        { value: "enabled", label: "启用" },
+                        { value: "disabled", label: "禁用" },
+                      ]}
+                    />
+                    <Select
+                      label="审核理由"
+                      value={policy.requireReason ? "required" : "optional"}
+                      onChange={(e) =>
+                        updatePromotionPolicy(policy.id, {
+                          requireReason: e.target.value === "required",
+                        })
+                      }
+                      options={[
+                        { value: "optional", label: "可选" },
+                        { value: "required", label: "必填" },
+                      ]}
+                    />
+                  </div>
+                  <Input
+                    label="备注"
+                    value={policy.notes || ""}
+                    onChange={(e) => updatePromotionPolicy(policy.id, { notes: e.target.value })}
+                  />
+                  <div className="flex justify-end">
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      onClick={() => void handleSavePromotionPolicy(policy.id)}
+                    >
+                      保存策略
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Card>
+        </div>
       )}
 
       {activeTab === "skills" && (

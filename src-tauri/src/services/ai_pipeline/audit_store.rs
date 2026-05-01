@@ -145,6 +145,28 @@ impl PipelineAuditStore {
             params![meta_json, request_id],
         );
     }
+
+    pub fn update_post_task_results(
+        &self,
+        project_root: &str,
+        request_id: &str,
+        post_task_results: &serde_json::Value,
+    ) {
+        let conn = match open_project_database(project_root) {
+            Ok(conn) => conn,
+            Err(_) => return,
+        };
+        let post_task_results_json = match serde_json::to_string(post_task_results) {
+            Ok(raw) => raw,
+            Err(_) => return,
+        };
+        let _ = conn.execute(
+            "UPDATE ai_pipeline_runs
+             SET post_task_results = ?1
+             WHERE id = ?2",
+            params![post_task_results_json, request_id],
+        );
+    }
 }
 
 #[cfg(test)]

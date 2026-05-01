@@ -9,6 +9,7 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use rusqlite::{params, Connection};
+use serde::{Deserialize, Serialize};
 
 use crate::adapters::llm_types::{
     ModelPoolEntry, ModelPoolRecord, ModelRecord, ProviderConfig, TaskRoute,
@@ -18,6 +19,32 @@ use crate::services::task_routing;
 use uuid::Uuid;
 
 use log::info;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PromotionPolicyRecord {
+    pub id: String,
+    pub target_type: String,
+    pub source_kind: String,
+    pub policy_mode: String,
+    pub require_reason: bool,
+    pub enabled: bool,
+    pub notes: Option<String>,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FeedbackRuleRecord {
+    pub id: String,
+    pub rule_type: String,
+    pub threshold_value: i64,
+    pub enabled: bool,
+    pub suggestion_template: String,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
+}
 
 /// Get the path to the app-level database.
 pub fn app_database_path() -> Result<PathBuf, AppErrorDto> {
@@ -148,6 +175,7 @@ fn ensure_default_task_routes_initialized(conn: &Connection) -> Result<(), AppEr
             fallback_model_id: None,
             model_pool_id: None,
             fallback_model_pool_id: None,
+            post_tasks: Vec::new(),
             max_retries: 1,
             created_at: Some(now.clone()),
             updated_at: Some(now.clone()),
@@ -493,6 +521,7 @@ pub fn load_task_routes(conn: &Connection) -> Result<Vec<TaskRoute>, AppErrorDto
         .prepare(
             "SELECT id, task_type, provider_id, model_id,
                 fallback_provider_id, fallback_model_id, model_pool_id, fallback_model_pool_id,
+                COALESCE(post_tasks_json, '[]'),
                 max_retries, created_at, updated_at
          FROM llm_task_routes ORDER BY task_type",
         )
@@ -511,9 +540,13 @@ pub fn load_task_routes(conn: &Connection) -> Result<Vec<TaskRoute>, AppErrorDto
                 fallback_model_id: row.get(5)?,
                 model_pool_id: row.get(6)?,
                 fallback_model_pool_id: row.get(7)?,
-                max_retries: row.get(8)?,
-                created_at: Some(row.get::<_, String>(9)?),
-                updated_at: Some(row.get::<_, String>(10)?),
+                post_tasks: serde_json::from_str::<Vec<String>>(
+                    row.get::<_, String>(8)?.as_str(),
+                )
+                .unwrap_or_default(),
+                max_retries: row.get(9)?,
+                created_at: Some(row.get::<_, String>(10)?),
+                updated_at: Some(row.get::<_, String>(11)?),
             })
         })
         .map_err(|e| {
@@ -531,17 +564,22 @@ pub fn upsert_task_route(
     route: &TaskRoute,
     now: &str,
 ) -> Result<(), AppErrorDto> {
+    let post_tasks_json = serde_json::to_string(&route.post_tasks).map_err(|e| {
+        AppErrorDto::new("DB_WRITE_FAILED", "无法序列化后置任务配置", true)
+            .with_detail(e.to_string())
+    })?;
     conn.execute(
         "INSERT INTO llm_task_routes (id, task_type, provider_id, model_id,
-         fallback_provider_id, fallback_model_id, model_pool_id, fallback_model_pool_id,
+         fallback_provider_id, fallback_model_id, model_pool_id, fallback_model_pool_id, post_tasks_json,
          max_retries, created_at, updated_at)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)
          ON CONFLICT(id) DO UPDATE SET
          task_type=excluded.task_type, provider_id=excluded.provider_id,
          model_id=excluded.model_id, fallback_provider_id=excluded.fallback_provider_id,
          fallback_model_id=excluded.fallback_model_id,
          model_pool_id=excluded.model_pool_id,
          fallback_model_pool_id=excluded.fallback_model_pool_id,
+         post_tasks_json=excluded.post_tasks_json,
          max_retries=excluded.max_retries,
          updated_at=excluded.updated_at",
         params![
@@ -553,6 +591,7 @@ pub fn upsert_task_route(
             route.fallback_model_id,
             route.model_pool_id,
             route.fallback_model_pool_id,
+            post_tasks_json,
             route.max_retries,
             now,
             now
@@ -574,6 +613,105 @@ pub fn delete_task_route(conn: &Connection, route_id: &str) -> Result<(), AppErr
         AppErrorDto::new("DB_DELETE_FAILED", "无法删除任务路由", true).with_detail(e.to_string())
     })?;
     Ok(())
+}
+
+pub fn load_promotion_policies(
+    conn: &Connection,
+) -> Result<Vec<PromotionPolicyRecord>, AppErrorDto> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, target_type, source_kind, policy_mode, require_reason, enabled, notes, created_at, updated_at
+             FROM promotion_policies
+             ORDER BY target_type, source_kind",
+        )
+        .map_err(|e| {
+            AppErrorDto::new("DB_READ_FAILED", "无法加载晋升策略", true).with_detail(e.to_string())
+        })?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(PromotionPolicyRecord {
+                id: row.get(0)?,
+                target_type: row.get(1)?,
+                source_kind: row.get(2)?,
+                policy_mode: row.get(3)?,
+                require_reason: row.get::<_, i64>(4)? != 0,
+                enabled: row.get::<_, i64>(5)? != 0,
+                notes: row.get(6)?,
+                created_at: Some(row.get::<_, String>(7)?),
+                updated_at: Some(row.get::<_, String>(8)?),
+            })
+        })
+        .map_err(|e| {
+            AppErrorDto::new("DB_READ_FAILED", "无法加载晋升策略", true).with_detail(e.to_string())
+        })?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(|e| {
+        AppErrorDto::new("DB_READ_FAILED", "读取晋升策略失败", true).with_detail(e.to_string())
+    })
+}
+
+pub fn upsert_promotion_policy(
+    conn: &Connection,
+    policy: &PromotionPolicyRecord,
+    now: &str,
+) -> Result<(), AppErrorDto> {
+    conn.execute(
+        "INSERT INTO promotion_policies(
+            id, target_type, source_kind, policy_mode, require_reason, enabled, notes, created_at, updated_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+         ON CONFLICT(id) DO UPDATE SET
+            target_type = excluded.target_type,
+            source_kind = excluded.source_kind,
+            policy_mode = excluded.policy_mode,
+            require_reason = excluded.require_reason,
+            enabled = excluded.enabled,
+            notes = excluded.notes,
+            updated_at = excluded.updated_at",
+        params![
+            policy.id,
+            policy.target_type,
+            policy.source_kind,
+            policy.policy_mode,
+            if policy.require_reason { 1_i64 } else { 0_i64 },
+            if policy.enabled { 1_i64 } else { 0_i64 },
+            policy.notes,
+            now,
+            now,
+        ],
+    )
+    .map_err(|e| {
+        AppErrorDto::new("DB_WRITE_FAILED", "无法保存晋升策略", true).with_detail(e.to_string())
+    })?;
+    Ok(())
+}
+
+pub fn load_feedback_rules(conn: &Connection) -> Result<Vec<FeedbackRuleRecord>, AppErrorDto> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, rule_type, threshold_value, enabled, suggestion_template, created_at, updated_at
+             FROM feedback_rules
+             ORDER BY rule_type",
+        )
+        .map_err(|e| {
+            AppErrorDto::new("DB_READ_FAILED", "无法加载回报规则", true).with_detail(e.to_string())
+        })?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(FeedbackRuleRecord {
+                id: row.get(0)?,
+                rule_type: row.get(1)?,
+                threshold_value: row.get(2)?,
+                enabled: row.get::<_, i64>(3)? != 0,
+                suggestion_template: row.get(4)?,
+                created_at: Some(row.get::<_, String>(5)?),
+                updated_at: Some(row.get::<_, String>(6)?),
+            })
+        })
+        .map_err(|e| {
+            AppErrorDto::new("DB_READ_FAILED", "无法加载回报规则", true).with_detail(e.to_string())
+        })?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(|e| {
+        AppErrorDto::new("DB_READ_FAILED", "读取回报规则失败", true).with_detail(e.to_string())
+    })
 }
 
 pub fn load_model_pools(conn: &Connection) -> Result<Vec<ModelPoolRecord>, AppErrorDto> {
@@ -776,6 +914,12 @@ fn ensure_schema_compatibility(conn: &Connection) -> Result<(), AppErrorDto> {
         "TEXT",
     )?;
     ensure_column(conn, "llm_model_registry_state", "error_code", "TEXT")?;
+    ensure_column(
+        conn,
+        "llm_task_routes",
+        "post_tasks_json",
+        "TEXT NOT NULL DEFAULT '[]'",
+    )?;
     Ok(())
 }
 
@@ -919,6 +1063,7 @@ mod tests {
             fallback_model_id: None,
             model_pool_id: None,
             fallback_model_pool_id: None,
+            post_tasks: Vec::new(),
             max_retries: 1,
             created_at: Some(now.clone()),
             updated_at: Some(now.clone()),

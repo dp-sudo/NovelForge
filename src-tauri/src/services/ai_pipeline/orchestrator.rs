@@ -9,18 +9,20 @@ use crate::services::ai_pipeline::continuity_pack::{
     assess_continuity_pack_completeness, ContinuityPackCompiler,
 };
 use crate::services::ai_pipeline::freeze_guard::{detect_freeze_conflict, freeze_conflict_error};
+use crate::services::ai_pipeline::post_task_executor::PostTaskExecutor;
 use crate::services::ai_pipeline::persist_policy::{
     infer_legacy_persist_mode, is_derived_review_task, parse_persist_mode,
     should_persist_task_output, PersistMode,
 };
 use crate::services::ai_pipeline::prompt_resolver::PromptResolver;
+use crate::services::ai_pipeline::scene_classifier::SceneClassifier;
 use crate::services::ai_pipeline::task_handlers::{RuntimeStateWriteOptions, TaskHandlers};
 use crate::services::ai_pipeline_service::{
     AiPipelineEvent, AiPipelineService, PersistedRecord, RunAiTaskPipelineInput,
 };
 use crate::services::ai_service::{AiService, TaskRouteResolution};
 use crate::services::blueprint_service::{
-    extract_certainty_zones_from_content, BlueprintCertaintyZones,
+    extract_certainty_zones_from_content, supports_certainty_zones_step, BlueprintCertaintyZones,
 };
 use crate::services::context_service::ContextService;
 use crate::services::project_service::{AiStrategyProfile, ProjectService};
@@ -34,7 +36,6 @@ pub const PHASE_GENERATE: &str = "generate";
 pub const PHASE_POSTPROCESS: &str = "postprocess";
 pub const PHASE_PERSIST: &str = "persist";
 pub const PHASE_DONE: &str = "done";
-const FREEZE_CONFLICT_CODE: &str = "PIPELINE_FREEZE_CONFLICT";
 
 #[derive(Debug)]
 pub struct StageError {
@@ -144,8 +145,12 @@ impl<'a> PipelineOrchestrator<'a> {
             })?;
         let strategy_profile = self.load_ai_strategy_profile();
         let certainty_zones = extract_certainty_zones(&context);
-        let freeze_conflict =
-            detect_freeze_conflict(self.input.user_instruction.as_str(), &certainty_zones);
+        let freeze_conflict = detect_freeze_conflict(
+            self.input.user_instruction.as_str(),
+            &certainty_zones,
+            &context.related_context.characters,
+            &context.related_context.world_rules,
+        );
         if let Some(conflict) = freeze_conflict.as_ref() {
             self.pipeline_service.emit_event(
                 self.app_handle,
@@ -154,11 +159,15 @@ impl<'a> PipelineOrchestrator<'a> {
                     phase: PHASE_CONTEXT.to_string(),
                     event_type: "progress".to_string(),
                     delta: None,
-                    error_code: Some(FREEZE_CONFLICT_CODE.to_string()),
-                    message: Some("freeze-zone conflict detected".to_string()),
+                    error_code: Some(conflict.conflict_type.error_code().to_string()),
+                    message: Some("certainty-zone conflict detected".to_string()),
                     recoverable: Some(true),
                     meta: Some(json!({
+                        "conflictType": conflict.conflict_type.as_str(),
                         "freezeConflict": conflict.matched_zone,
+                        "entityType": conflict.matched_entity_type,
+                        "entityId": conflict.matched_entity_id,
+                        "entityName": conflict.matched_entity_name,
                         "certaintyZones": {
                             "frozen": certainty_zones.frozen,
                             "promised": certainty_zones.promised,
@@ -240,6 +249,7 @@ impl<'a> PipelineOrchestrator<'a> {
                     "modelId": route.model_id.clone(),
                     "modelPoolId": route.model_pool_id.clone(),
                     "fallbackModelPoolId": route.fallback_model_pool_id.clone(),
+                    "postTasks": route.post_tasks.clone(),
                     "attempts": route.attempts.clone(),
                     "selectedSkills": {
                         "workflow": selected_skills.workflow_skills.len(),
@@ -269,6 +279,7 @@ impl<'a> PipelineOrchestrator<'a> {
                     "modelId": route.model_id.clone(),
                     "modelPoolId": route.model_pool_id.clone(),
                     "fallbackModelPoolId": route.fallback_model_pool_id.clone(),
+                    "postTasks": route.post_tasks.clone(),
                     "attempts": route.attempts.clone(),
                 },
                 "skillSelection": {
@@ -579,6 +590,46 @@ impl<'a> PipelineOrchestrator<'a> {
             );
         }
 
+        if self.canonical_task.starts_with("chapter.") {
+            let scene_classifier = SceneClassifier;
+            let scene_classification = scene_classifier.classify(
+                self.input.user_instruction.as_str(),
+                self.input.selected_text.as_deref(),
+                Some(normalized.as_str()),
+            );
+            let results = PostTaskExecutor.execute(
+                &self.input.project_root,
+                self.input.chapter_id.as_deref(),
+                scene_classification.scene_type.as_str(),
+                route.post_tasks.as_slice(),
+                normalized.as_str(),
+                self.context_service,
+            );
+            self.audit_store.update_post_task_results(
+                &self.input.project_root,
+                self.request_id,
+                &json!(results.clone()),
+            );
+            self.pipeline_service.emit_event(
+                self.app_handle,
+                AiPipelineEvent {
+                    request_id: self.request_id.to_string(),
+                    phase: PHASE_POSTPROCESS.to_string(),
+                    event_type: "progress".to_string(),
+                    delta: None,
+                    error_code: None,
+                    message: Some("post tasks executed".to_string()),
+                    recoverable: Some(true),
+                    meta: Some(json!({
+                        "sceneType": scene_classification.scene_type,
+                        "sceneConfidence": scene_classification.confidence,
+                        "matchedFeatures": scene_classification.matched_features,
+                        "postTaskResults": results,
+                    })),
+                },
+            );
+        }
+
         Ok(PipelineSuccess {
             output_text: normalized,
             route,
@@ -850,40 +901,70 @@ impl<'a> PipelineOrchestrator<'a> {
 
     fn infer_scene_tags(
         &self,
-        _context: &crate::services::context_service::CollectedContext,
+        context: &crate::services::context_service::CollectedContext,
     ) -> Vec<String> {
-        let mut tags = Vec::new();
-        let combined = format!(
-            "{}\n{}\n{}",
-            self.input.user_instruction,
-            self.input.selected_text.as_deref().unwrap_or(""),
-            self.input.chapter_content.as_deref().unwrap_or("")
+        let scene_classifier = SceneClassifier;
+        let context_features = format!(
+            "characters={}\nworld_rules={}\nplot_nodes={}",
+            context
+                .related_context
+                .characters
+                .iter()
+                .take(24)
+                .map(|item| item.name.as_str())
+                .collect::<Vec<_>>()
+                .join(" "),
+            context
+                .related_context
+                .world_rules
+                .iter()
+                .take(24)
+                .map(|item| item.title.as_str())
+                .collect::<Vec<_>>()
+                .join(" "),
+            context
+                .related_context
+                .plot_nodes
+                .iter()
+                .take(24)
+                .map(|item| item.title.as_str())
+                .collect::<Vec<_>>()
+                .join(" "),
         );
-        let lowered = combined.to_ascii_lowercase();
-        if lowered.contains("战斗")
-            || lowered.contains("厮杀")
-            || lowered.contains("决战")
-            || lowered.contains("打斗")
-            || lowered.contains("交手")
-        {
-            tags.push("battle".to_string());
-        }
-        if lowered.contains("对话")
-            || lowered.contains("争吵")
-            || lowered.contains("告白")
-            || lowered.contains("情绪")
-            || lowered.contains("心理")
-        {
-            tags.push("dialogue".to_string());
-            tags.push("emotion".to_string());
-        }
-        if lowered.contains("场景")
-            || lowered.contains("环境")
-            || lowered.contains("风景")
-            || lowered.contains("背景")
-            || lowered.contains("世界观")
-        {
-            tags.push("environment".to_string());
+        let chapter_material = format!(
+            "{}\n{}",
+            self.input.chapter_content.as_deref().unwrap_or(""),
+            context_features
+        );
+        let classification = scene_classifier.classify(
+            self.input.user_instruction.as_str(),
+            self.input.selected_text.as_deref(),
+            Some(chapter_material.as_str()),
+        );
+        let mut tags = vec![classification.scene_type.clone()];
+        match classification.scene_type.as_str() {
+            "dialogue" => {
+                tags.push("dialogue".to_string());
+                tags.push("emotion".to_string());
+            }
+            "action" => {
+                tags.push("action".to_string());
+            }
+            "exposition" => {
+                tags.push("exposition".to_string());
+                tags.push("environment".to_string());
+            }
+            "introspection" => {
+                tags.push("introspection".to_string());
+                tags.push("emotion".to_string());
+            }
+            "combat" => {
+                tags.push("combat".to_string());
+                tags.push("battle".to_string());
+                tags.push("action".to_string());
+                tags.push("emotion".to_string());
+            }
+            _ => {}
         }
         tags.sort();
         tags.dedup();
@@ -913,9 +994,15 @@ fn infer_scene_bundle_ids(scene_tags: &[String]) -> Vec<String> {
     for tag in scene_tags {
         match tag.trim().to_ascii_lowercase().as_str() {
             "dialogue" => bundles.push("bundle.character-expression".to_string()),
+            "introspection" => bundles.push("bundle.character-expression".to_string()),
             "emotion" => bundles.push("bundle.emotion-progression".to_string()),
-            "environment" => bundles.push("bundle.scene-environment".to_string()),
+            "environment" | "exposition" => bundles.push("bundle.scene-environment".to_string()),
+            "action" => bundles.push("bundle.scene-environment".to_string()),
             "battle" => {
+                bundles.push("bundle.scene-environment".to_string());
+                bundles.push("bundle.rule-fulfillment".to_string());
+            }
+            "combat" => {
                 bundles.push("bundle.scene-environment".to_string());
                 bundles.push("bundle.rule-fulfillment".to_string());
             }
@@ -954,25 +1041,49 @@ fn resolve_generation_workflow_stack(
 fn extract_certainty_zones(
     context: &crate::services::context_service::CollectedContext,
 ) -> CertaintyZones {
+    let mut merged = CertaintyZones::default();
     for step in &context.global_context.blueprint_summary {
-        if step.step_key != "step-08-chapters" {
+        if !supports_certainty_zones_step(step.step_key.as_str()) {
             continue;
         }
-        if let Some(zones) = step.certainty_zones.as_ref() {
+        let resolved = if let Some(zones) = step.certainty_zones.as_ref() {
             if zones.has_any() {
-                return zones.clone();
+                Some(zones.clone())
+            } else {
+                None
             }
-        }
-        if let Some(content) = step.content.as_deref() {
-            if let Some(zones) = extract_certainty_zones_from_content(content) {
-                if zones.has_any() {
-                    return zones;
-                }
-            }
+        } else if let Some(content) = step.content.as_deref() {
+            extract_certainty_zones_from_content(content).filter(|zones| zones.has_any())
+        } else {
+            None
+        };
+
+        if let Some(zones) = resolved {
+            merge_unique_zone_values(&mut merged.frozen, zones.frozen.as_slice());
+            merge_unique_zone_values(&mut merged.promised, zones.promised.as_slice());
+            merge_unique_zone_values(&mut merged.exploratory, zones.exploratory.as_slice());
         }
     }
 
-    CertaintyZones::default()
+    merged
+}
+
+fn merge_unique_zone_values(target: &mut Vec<String>, values: &[String]) {
+    for value in values {
+        let normalized = value.trim();
+        if normalized.is_empty() {
+            continue;
+        }
+        if !target
+            .iter()
+            .any(|existing| existing.eq_ignore_ascii_case(normalized))
+        {
+            target.push(normalized.to_string());
+        }
+        if target.len() >= 24 {
+            break;
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1060,6 +1171,59 @@ mod tests {
         assert_eq!(zones.frozen, vec!["终局真相".to_string()]);
         assert_eq!(zones.promised, vec!["主角将直面宗门审判".to_string()]);
         assert_eq!(zones.exploratory, vec!["支线人物立场可变化".to_string()]);
+    }
+
+    #[test]
+    fn extract_certainty_zones_merges_supported_steps() {
+        let context = CollectedContext {
+            global_context: GlobalContext {
+                project_name: "test".to_string(),
+                genre: "玄幻".to_string(),
+                narrative_pov: None,
+                writing_style: None,
+                locked_terms: Vec::new(),
+                banned_terms: Vec::new(),
+                blueprint_summary: vec![
+                    BlueprintStepSummary {
+                        step_key: "step-04-characters".to_string(),
+                        title: "角色".to_string(),
+                        status: "completed".to_string(),
+                        certainty_zones: Some(CertaintyZones {
+                            frozen: vec!["角色:林夜".to_string()],
+                            promised: vec![],
+                            exploratory: vec![],
+                        }),
+                        content: None,
+                    },
+                    BlueprintStepSummary {
+                        step_key: "step-05-world".to_string(),
+                        title: "世界".to_string(),
+                        status: "completed".to_string(),
+                        certainty_zones: Some(CertaintyZones {
+                            frozen: vec!["world_rule_id:wr-1".to_string()],
+                            promised: vec!["规则代价必须兑现".to_string()],
+                            exploratory: vec![],
+                        }),
+                        content: None,
+                    },
+                ],
+            },
+            related_context: RelatedContext {
+                chapter: None,
+                characters: Vec::new(),
+                world_rules: Vec::new(),
+                plot_nodes: Vec::new(),
+                relationship_edges: Vec::new(),
+                previous_chapter_summary: None,
+            },
+        };
+
+        let zones = extract_certainty_zones(&context);
+        assert_eq!(
+            zones.frozen,
+            vec!["角色:林夜".to_string(), "world_rule_id:wr-1".to_string()]
+        );
+        assert_eq!(zones.promised, vec!["规则代价必须兑现".to_string()]);
     }
 
     #[test]

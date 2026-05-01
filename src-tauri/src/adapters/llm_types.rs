@@ -322,6 +322,8 @@ pub struct TaskRoute {
     pub fallback_model_id: Option<String>,
     pub model_pool_id: Option<String>,
     pub fallback_model_pool_id: Option<String>,
+    #[serde(default)]
+    pub post_tasks: Vec<String>,
     pub max_retries: i64,
     pub created_at: Option<String>,
     pub updated_at: Option<String>,

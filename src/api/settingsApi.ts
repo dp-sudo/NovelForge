@@ -5,6 +5,7 @@ import type {
   RefreshResult,
   ModelRecord,
   RefreshLog,
+  PromotionPolicy,
   TaskRoute,
   WritingStyle,
 } from "../types/ai.js";
@@ -15,6 +16,7 @@ export type {
   RefreshResult,
   ModelRecord,
   RefreshLog,
+  PromotionPolicy,
   TaskRoute,
   WritingStyle,
 } from "../types/ai.js";
@@ -116,6 +118,14 @@ export async function saveTaskRoute(route: TaskRoute): Promise<TaskRoute> {
 
 export async function deleteTaskRoute(routeId: string): Promise<void> {
   await invokeCommand<void>("delete_task_route", { routeId });
+}
+
+export async function listPromotionPolicies(): Promise<PromotionPolicy[]> {
+  return invokeCommand<PromotionPolicy[]>("list_promotion_policies");
+}
+
+export async function savePromotionPolicy(policy: PromotionPolicy): Promise<PromotionPolicy> {
+  return invokeCommand<PromotionPolicy>("save_promotion_policy", { policy });
 }
 
 // ── Remote registry ──

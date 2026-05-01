@@ -5,6 +5,7 @@ use crate::services::context_service::{
     ApplyAssetCandidateInput, ApplyAssetCandidateResult, ApplyStructuredDraftInput,
     ApplyStructuredDraftResult, EditorContextPanel, RejectStructuredDraftResult,
 };
+use crate::services::review_trail_service::{ReviewTrailRecord, ReviewTrailService};
 use crate::state::AppState;
 
 #[tauri::command]
@@ -46,11 +47,12 @@ pub async fn apply_structured_draft(
     project_root: String,
     chapter_id: String,
     input: ApplyStructuredDraftInput,
+    reason: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<ApplyStructuredDraftResult, AppErrorDto> {
     state
         .context_service
-        .apply_structured_draft(&project_root, &chapter_id, input)
+        .apply_structured_draft_with_reason(&project_root, &chapter_id, input, reason.as_deref())
 }
 
 #[tauri::command]
@@ -58,9 +60,24 @@ pub async fn reject_structured_draft(
     project_root: String,
     chapter_id: String,
     draft_item_id: String,
+    reason: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<RejectStructuredDraftResult, AppErrorDto> {
     state
         .context_service
-        .reject_structured_draft(&project_root, &chapter_id, &draft_item_id)
+        .reject_structured_draft_with_reason(
+            &project_root,
+            &chapter_id,
+            &draft_item_id,
+            reason.as_deref(),
+        )
+}
+
+#[tauri::command]
+pub async fn get_review_trail(
+    project_root: String,
+    entity_type: String,
+    entity_id: String,
+) -> Result<Vec<ReviewTrailRecord>, AppErrorDto> {
+    ReviewTrailService.get_review_trail(&project_root, &entity_type, &entity_id)
 }

@@ -1,9 +1,9 @@
 # NovelForge API 集成文档（Frontend <-> Tauri <-> Rust）
 
 ## 1. 文档信息
-- 版本：v1.0
-- 状态：S21（全面文档维护：API 契约验证 + 命令注册完整性确认）
-- 最后更新：2026-05-01
+- 版本：v1.1
+- 状态：S22（阶段二：晋升策略、审查轨迹、回报机制、场景后置链）
+- 最后更新：2026-05-02
 - 代码基线：`src/api/*`、`src-tauri/src/commands/*`
 
 ## 2. 集成原则（当前）
@@ -36,12 +36,12 @@
 - `plotApi.ts`：`listPlotNodes`、`createPlotNode`、`reorderPlotNodes`、`aiGeneratePlotNode`
 - `narrativeApi.ts`：`listNarrativeObligations`、`createNarrativeObligation`、`updateObligationStatus`、`deleteNarrativeObligation`、`aiGenerateNarrativeObligation`
 - `consistencyApi.ts`：`scanChapterConsistency`、`scanFullConsistency`、`listConsistencyIssues`、`updateIssueStatus`、`aiScanConsistency`
-- `statsApi.ts`：`getDashboardStats`
-- `contextApi.ts`：`getChapterContext`、`materializeChapterStructuredDrafts`、`applyAssetCandidate`、`applyStructuredDraft`、`summarizeStateDeltaForFeedback`、`getSummaryFeedback`
+- `statsApi.ts`：`getDashboardStats`、`getFeedbackEvents`
+- `contextApi.ts`：`getChapterContext`、`materializeChapterStructuredDrafts`、`applyAssetCandidate`、`applyStructuredDraft`、`rejectStructuredDraft`、`getReviewTrail`、`summarizeStateDeltaForFeedback`、`getSummaryFeedback`
 - `pipelineApi.ts`：`runTaskPipeline`、`cancelTaskPipeline`、`streamTaskPipeline`
 - `moduleAiApi.ts`：`runModuleAiTask`
 - `exportApi.ts`：`exportChapter`、`exportBook`
-- `settingsApi.ts`：`listProviders`、`saveProvider`、`deleteProvider`、`testProviderConnection`、`refreshProviderModels`、`getProviderModels`、`getRefreshLogs`、`listTaskRoutes`、`saveTaskRoute`、`deleteTaskRoute`、`checkRemoteRegistry`、`applyRegistryUpdate`、`loadEditorSettings`、`saveEditorSettings`、`saveWritingStyle`、`getWritingStyle`、`saveAiStrategyProfile`、`getAiStrategyProfile`、`saveProjectAiStrategy`、`getProjectAiStrategy`、`initProjectRepository`、`getProjectRepositoryStatus`、`commitProjectSnapshot`、`listProjectHistory`、`getLicenseStatus`、`activateLicense`、`checkAppUpdate`、`installAppUpdate`、`getDeprecatedCommandUsageReport`
+- `settingsApi.ts`：`listProviders`、`saveProvider`、`deleteProvider`、`testProviderConnection`、`refreshProviderModels`、`getProviderModels`、`getRefreshLogs`、`listTaskRoutes`、`saveTaskRoute`、`deleteTaskRoute`、`listPromotionPolicies`、`savePromotionPolicy`、`checkRemoteRegistry`、`applyRegistryUpdate`、`loadEditorSettings`、`saveEditorSettings`、`saveWritingStyle`、`getWritingStyle`、`saveAiStrategyProfile`、`getAiStrategyProfile`、`saveProjectAiStrategy`、`getProjectAiStrategy`、`initProjectRepository`、`getProjectRepositoryStatus`、`commitProjectSnapshot`、`listProjectHistory`、`getLicenseStatus`、`activateLicense`、`checkAppUpdate`、`installAppUpdate`、`getDeprecatedCommandUsageReport`
 - `skillsApi.ts`：`listSkills`、`getSkill`、`getSkillContent`、`createSkill`、`updateSkill`、`deleteSkill`、`importSkillFile`、`resetBuiltinSkill`、`refreshSkills`
 
 ### 3.2 前端关键类型/接口清单（按文件）
@@ -56,8 +56,8 @@
 - `plotApi.ts`：`PlotRow`
 - `narrativeApi.ts`：`NarrativeObligation`、`CreateNarrativeObligationInput`
 - `consistencyApi.ts`：`ConsistencyIssueRow`、`AiConsistencyInput`
-- `statsApi.ts`：`DashboardRecentChapter`、`DashboardStats`
-- `contextApi.ts`：`ChapterContext`、`ApplyAssetCandidateInput`、`ApplyAssetCandidateResult`、`ApplyStructuredDraftInput`、`ApplyStructuredDraftResult`、`SummaryFeedbackData`
+- `statsApi.ts`：`DashboardRecentChapter`、`DashboardStats`、`FeedbackEvent`
+- `contextApi.ts`：`ChapterContext`、`ApplyAssetCandidateInput`、`ApplyAssetCandidateResult`、`ApplyStructuredDraftInput`、`ApplyStructuredDraftResult`、`RejectStructuredDraftResult`、`ReviewTrailRecord`、`SummaryFeedbackData`
 - `pipelineApi.ts`：`AiPipelinePhase`、`AiPipelineEventType`、`PersistMode`、`AutomationTier`、`RuntimeSkillSelectionInput`、`RunTaskPipelineInput`、`AiPipelineEvent`、`TaskPipelineStreamOptions`
 - `moduleAiApi.ts`：`RunModuleAiTaskInput`
 - `exportApi.ts`：`ExportOutput`、`ExportFormat`
@@ -93,6 +93,7 @@
 - `narrativeApi.ts`：`listNarrativeObligations -> list_narrative_obligations`、`createNarrativeObligation -> create_narrative_obligation`、`updateObligationStatus -> update_obligation_status`、`deleteNarrativeObligation -> delete_narrative_obligation`、`aiGenerateNarrativeObligation`（包装链路）
 - `consistencyApi.ts`：`scanChapterConsistency -> scan_chapter_consistency`、`scanFullConsistency -> scan_full_consistency`、`listConsistencyIssues -> list_consistency_issues`、`updateIssueStatus -> update_issue_status`、`aiScanConsistency`（包装链路）
 - `statsApi.ts`：`getDashboardStats -> get_dashboard_stats`
+- `statsApi.ts`：`getFeedbackEvents -> get_feedback_events`
 - `timelineApi.ts`：`listTimelineEntries -> list_timeline_entries`
 - `contextApi.ts`：
   - `getChapterContext -> get_chapter_context`
@@ -100,11 +101,13 @@
   - `applyAssetCandidate -> apply_asset_candidate`
   - `applyStructuredDraft -> apply_structured_draft`
   - `rejectStructuredDraft -> reject_structured_draft`
+  - `getReviewTrail -> get_review_trail`
   - `summarizeStateDeltaForFeedback`、`getSummaryFeedback`（前端本地反馈组装，不触发新增 command）
 - `exportApi.ts`：`exportChapter -> export_chapter`、`exportBook -> export_book`
 - `settingsApi.ts`：
   - Provider/模型：`listProviders -> list_providers`、`saveProvider -> save_provider`、`deleteProvider -> delete_provider`、`testProviderConnection -> test_provider_connection`、`refreshProviderModels -> refresh_provider_models`、`getProviderModels -> get_provider_models`、`getRefreshLogs -> get_refresh_logs`
   - 路由/注册表：`listTaskRoutes -> list_task_routes`、`saveTaskRoute -> save_task_route`、`deleteTaskRoute -> delete_task_route`、`checkRemoteRegistry -> check_remote_registry`、`applyRegistryUpdate -> apply_registry_update`
+  - 晋升策略：`listPromotionPolicies -> list_promotion_policies`、`savePromotionPolicy -> save_promotion_policy`
   - 编辑器/策略：`loadEditorSettings -> load_editor_settings`、`saveEditorSettings -> save_editor_settings`、`saveWritingStyle -> save_writing_style`、`getWritingStyle -> get_writing_style`、`saveAiStrategyProfile -> save_ai_strategy_profile`、`getAiStrategyProfile -> get_ai_strategy_profile`、`saveProjectAiStrategy -> save_ai_strategy_profile`、`getProjectAiStrategy -> get_ai_strategy_profile`
   - Git/授权/更新：`initProjectRepository -> init_project_repository`、`getProjectRepositoryStatus -> get_project_repository_status`、`commitProjectSnapshot -> commit_project_snapshot`、`listProjectHistory -> list_project_history`、`getLicenseStatus -> get_license_status`、`activateLicense -> activate_license`、`checkAppUpdate -> check_app_update`、`installAppUpdate -> install_app_update`
   - 兼容桥审计：`getDeprecatedCommandUsageReport -> get_deprecated_command_usage_report`
@@ -137,7 +140,7 @@
 - `list_chapters(projectRoot) -> ChapterRecord[]`
 - `reorder_chapters(projectRoot, orderedIds: string[]) -> void`
 - `create_chapter(input: { projectRoot, input: ChapterInput }) -> ChapterRecord`
-- `save_chapter_content(input: { projectRoot, chapterId, content }) -> SaveChapterOutput`
+- `save_chapter_content(input: { projectRoot, chapterId, content, requestId?, reason? }) -> SaveChapterOutput`
 - `autosave_draft(input: { projectRoot, chapterId, content }) -> string`
 - `recover_draft(input: { projectRoot, chapterId }) -> RecoverDraftResult`
 - 问题1修复：`read_chapter_content(projectRoot, chapterId) -> string`（切章与进入编辑器先加载正式正文）
@@ -161,7 +164,7 @@
   - `save_blueprint_step(projectRoot, input) -> BlueprintStep`
   - `mark_blueprint_completed(projectRoot, stepKey) -> void`
   - `reset_blueprint_step(projectRoot, stepKey) -> void`
-  - `BlueprintStep` 新增 `certaintyZones?: { frozen: string[]; promised: string[]; exploratory: string[] }`（当前用于 `step-08-chapters`）。
+  - `BlueprintStep` 新增 `certaintyZones?: { frozen: string[]; promised: string[]; exploratory: string[] }`（支持 `step-02/03/05/08` 对应关键步骤，含旧 key 兼容）。
   - `save_blueprint_step.input` 新增可选 `certaintyZones`，作为确定性分区显式 DTO（优先于旧文本分区解析）。
   - 分区校验规则：同一条目不可跨分区重叠；冲突时返回 `BLUEPRINT_CERTAINTY_ZONES_OVERLAP`。
 - Character + Relationship：
@@ -192,6 +195,7 @@
   - `update_issue_status(projectRoot, issueId, status) -> void`
 - Dashboard：
   - `get_dashboard_stats(projectRoot) -> DashboardStats`
+  - `get_feedback_events(projectRoot) -> FeedbackEventRecord[]`
 - Export：
   - `export_chapter(input: { projectRoot, chapterId, format, outputPath, options? }) -> { outputPath }`
   - `export_book(input: { projectRoot, format, outputPath, options? }) -> { outputPath }`
@@ -212,7 +216,7 @@
   - `list_task_routes()`
   - `save_task_route(route)`
   - `delete_task_route(routeId)`
-  - `route` 结构新增可选字段：`modelPoolId`、`fallbackModelPoolId`
+  - `route` 结构新增可选字段：`modelPoolId`、`fallbackModelPoolId`、`postTasks`
 - Registry：
   - `check_remote_registry(url)`
   - `apply_registry_update(url)`
@@ -261,6 +265,8 @@
     - `persistMode?: "none" | "formal" | "derived_review"`（显式持久化语义）
     - `automationTier?: "auto" | "supervised" | "confirm"`（显式自动化档位）
     - `skillSelection?: { explicitSkillIds, activeBundleIds, sceneTags, availableContexts, disableInferredSceneTags }`（请求级技能编排覆盖）
+  - route 扩展：
+    - `TaskRouteResolution.postTasks`：后置任务数组，来自任务路由 `post_tasks_json`。
   - 兼容规则：
     - 当 `persistMode` 存在时，以 `persistMode` 语义为准（覆盖 `autoPersist`）。
     - 当仅有 `autoPersist: true` 时，前端按任务类型推断 `persistMode`，默认 `automationTier = "supervised"`。
@@ -272,8 +278,9 @@
     - 若技能声明 `affectsLayers`，`orchestrator` 会按聚合后的 layer focus 对 `ContinuityPack` 进行裁剪（保留 constitution/lexicon 护栏层）。
     - 若技能命中 `route_override`，仅覆盖本次请求的 provider/model，不修改项目配置。
     - 默认路由支持 `task -> model pool -> provider/model` 兼容链路；路由解析结果会包含 `modelPoolId` 元信息。
+    - 场景后置链：`SceneClassifier` 判别场景类型后，由 `PostTaskExecutor` 执行 `review_continuity/extract_state/extract_assets`，结果写入 `ai_pipeline_runs.post_task_results`。
     - 若激活技能声明 `stateWrites`，后端会按项目级 `stateWritePolicy` 追加 `story_state` 记录，并写入 `skillIds/affectsLayers` 运行态元数据。
-    - 若检测到用户指令改写冻结区条目，后端返回 `PIPELINE_FREEZE_CONFLICT` 并阻断执行。
+    - 若检测到用户指令改写冻结区条目，后端返回 `PIPELINE_FREEZE_CONFLICT`；若违反承诺区，返回 `PIPELINE_PROMISED_CONFLICT`。
 - AI 功能任务（前端薄封装，统一走 pipeline）：
   - `generateBlueprintSuggestion` -> `runModuleAiTask(taskType="blueprint.generate_step")`
   - `aiGenerateCharacter` -> `runModuleAiTask(taskType="character.create")`
@@ -287,8 +294,9 @@
   - `get_chapter_context(projectRoot, chapterId) -> ChapterContext`
   - `materialize_chapter_structured_drafts(projectRoot, chapterId) -> ChapterContext`
   - `apply_asset_candidate(projectRoot, chapterId, input) -> ApplyAssetCandidateResult`
-  - `apply_structured_draft(projectRoot, chapterId, input) -> ApplyStructuredDraftResult`
-  - `reject_structured_draft(projectRoot, chapterId, draftItemId) -> RejectStructuredDraftResult`
+  - `apply_structured_draft(projectRoot, chapterId, input, reason?) -> ApplyStructuredDraftResult`
+  - `reject_structured_draft(projectRoot, chapterId, draftItemId, reason?) -> RejectStructuredDraftResult`
+  - `get_review_trail(projectRoot, entityType, entityId) -> ReviewTrailRecord[]`
 
 ## 5. Pipeline 事件协议（`ai:pipeline:event`）
 事件载荷（camelCase）：
@@ -320,6 +328,8 @@ interface AppErrorDto {
 - 问题4修复：compatibility-only 命令仅用于历史兼容，不作为官方接入路径。
 - 结构化抽取结果默认仅入草案池，需显式确认命令才落核心资产表。
 - 结构化草案状态机：`pending -> applied | rejected`；当批次内无 `pending` 时，`structured_draft_batches.status = completed`。
+- 审查轨迹：`apply/reject/save` 会写入 `user_review_actions`，支持 `chapter` 维度回放。
+- 回报机制：`create_character/create_relationship/save_chapter_content` 会触发异步规则检测并写入 `feedback_events`。
 - 项目级 AI 策略运行期真相源为 `project.sqlite.projects.ai_strategy_profile`（不走 `project.json` 日常双写）。
 
 ## 8. 最小回归链路
@@ -327,8 +337,10 @@ interface AppErrorDto {
 2. 编辑器 9 按钮任一任务可触发 pipeline 并收到 done/error。
 3. `get_chapter_context` 返回 `assetCandidates` 与三类 `*Drafts`。
 4. `apply_asset_candidate` 与 `apply_structured_draft/reject_structured_draft` 可成功执行并回写草案状态。
-5. 任务路由页面保存后，`list_task_routes` 回显 canonical 结果。
-6. `save_ai_strategy_profile/get_ai_strategy_profile` 可在 `project.sqlite.projects.ai_strategy_profile` 往返读写。
+5. `get_review_trail` 可回放章节审查动作（approved/rejected/edited）。
+6. 任务路由页面保存后，`list_task_routes` 回显 canonical 结果与 `postTasks`。
+7. `get_feedback_events` 可读取角色溢出/关系复杂度/伏笔未兑现回报事件。
+8. `save_ai_strategy_profile/get_ai_strategy_profile` 可在 `project.sqlite.projects.ai_strategy_profile` 往返读写。
 
 ## 9. 文档维护规则
 以下变化必须同步更新本文档：

@@ -63,6 +63,33 @@ enum CertaintyZoneKind {
     Exploratory,
 }
 
+const CERTAINTY_ZONE_SUPPORTED_STEPS: &[&str] = &[
+    "step-08-chapters",
+    "step-05-world",
+    "step-04-characters",
+    "step-07-plot",
+    // Backward-compatible aliases used by older blueprint drafts.
+    "step-02-world",
+    "step-03-characters",
+    "step-05-plot",
+];
+
+fn normalize_certainty_step_key(step_key: &str) -> String {
+    match step_key.trim().to_ascii_lowercase().as_str() {
+        "step-02-world" => "step-05-world".to_string(),
+        "step-03-characters" => "step-04-characters".to_string(),
+        "step-05-plot" => "step-07-plot".to_string(),
+        other => other.to_string(),
+    }
+}
+
+pub fn supports_certainty_zones_step(step_key: &str) -> bool {
+    let normalized = normalize_certainty_step_key(step_key);
+    CERTAINTY_ZONE_SUPPORTED_STEPS
+        .iter()
+        .any(|candidate| candidate.eq_ignore_ascii_case(normalized.as_str()))
+}
+
 fn normalize_zone_line(raw: &str) -> String {
     raw.trim()
         .trim_start_matches('-')
@@ -114,7 +141,7 @@ fn validate_certainty_zone_conflicts(
     step_key: &str,
     zones: &Option<BlueprintCertaintyZones>,
 ) -> Result<(), AppErrorDto> {
-    if step_key != "step-08-chapters" {
+    if !supports_certainty_zones_step(step_key) {
         return Ok(());
     }
     let Some(zones) = zones else {
@@ -353,7 +380,7 @@ impl BlueprintService {
             .as_ref()
             .cloned()
             .and_then(normalize_certainty_zones);
-        let normalized_certainty_zones = if input.step_key == "step-08-chapters" {
+        let normalized_certainty_zones = if supports_certainty_zones_step(&input.step_key) {
             if input.content.trim().is_empty() && !explicit_certainty_provided {
                 None
             } else if explicit_certainty_provided {
@@ -655,6 +682,64 @@ mod tests {
         assert_eq!(certainty.frozen, vec!["终局真相".to_string()]);
         assert_eq!(certainty.promised, vec!["主角将直面宗门审判".to_string()]);
         assert_eq!(certainty.exploratory, vec!["支线人物立场可变化".to_string()]);
+
+        remove_temp_workspace(&ws);
+    }
+
+    #[test]
+    fn save_step_supports_certainty_zones_for_world_and_character_steps() {
+        let ws = create_temp_workspace();
+        let ps = ProjectService;
+        let bs = BlueprintService;
+        let project = ps
+            .create_project(CreateProjectInput {
+                name: "蓝图多步骤确定性测试".into(),
+                author: None,
+                genre: "测试".into(),
+                target_words: None,
+                save_directory: ws.to_string_lossy().into(),
+            })
+            .expect("project created");
+
+        let world_saved = bs
+            .save_step(
+                &project.project_root,
+                SaveBlueprintStepInput {
+                    step_key: "step-05-world".into(),
+                    content: "{\"rules\":\"代价机制\"}".into(),
+                    ai_generated: None,
+                    certainty_zones: Some(BlueprintCertaintyZones {
+                        frozen: vec!["world_rule_id:wr-immutable-1".into()],
+                        promised: vec!["代价必须兑现".into()],
+                        exploratory: vec![],
+                    }),
+                },
+            )
+            .expect("save world certainty zones");
+        let world_zones = world_saved
+            .certainty_zones
+            .expect("world certainty zones should be persisted");
+        assert_eq!(world_zones.frozen, vec!["world_rule_id:wr-immutable-1"]);
+
+        let alias_saved = bs
+            .save_step(
+                &project.project_root,
+                SaveBlueprintStepInput {
+                    step_key: "step-03-characters".into(),
+                    content: "{\"protagonist\":\"林夜\"}".into(),
+                    ai_generated: None,
+                    certainty_zones: Some(BlueprintCertaintyZones {
+                        frozen: vec!["角色:林夜".into()],
+                        promised: vec![],
+                        exploratory: vec![],
+                    }),
+                },
+            )
+            .expect("save character certainty zones with legacy alias key");
+        let alias_zones = alias_saved
+            .certainty_zones
+            .expect("character certainty zones should be persisted");
+        assert_eq!(alias_zones.frozen, vec!["角色:林夜"]);
 
         remove_temp_workspace(&ws);
     }

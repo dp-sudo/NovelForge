@@ -156,6 +156,19 @@ export interface RejectStructuredDraftResult {
   batchStatus: string;
 }
 
+export interface ReviewTrailRecord {
+  id: string;
+  projectId: string;
+  chapterId: string | null;
+  entityType: string;
+  entityId: string;
+  draftItemId: string | null;
+  action: string;
+  reason: string | null;
+  detail: Record<string, unknown> | null;
+  createdAt: string;
+}
+
 export interface SummaryFeedbackData {
   keyVariableDelta: string[];
   driftWarnings: string[];
@@ -300,23 +313,39 @@ export async function applyAssetCandidate(
 export async function applyStructuredDraft(
   projectRoot: string,
   chapterId: string,
-  input: ApplyStructuredDraftInput
+  input: ApplyStructuredDraftInput,
+  reason?: string
 ): Promise<ApplyStructuredDraftResult> {
   return invokeCommand<ApplyStructuredDraftResult>("apply_structured_draft", {
     projectRoot,
     chapterId,
     input,
+    reason: reason || null,
   });
 }
 
 export async function rejectStructuredDraft(
   projectRoot: string,
   chapterId: string,
-  draftItemId: string
+  draftItemId: string,
+  reason?: string
 ): Promise<RejectStructuredDraftResult> {
   return invokeCommand<RejectStructuredDraftResult>("reject_structured_draft", {
     projectRoot,
     chapterId,
     draftItemId,
+    reason: reason || null,
+  });
+}
+
+export async function getReviewTrail(
+  projectRoot: string,
+  entityType: string,
+  entityId: string,
+): Promise<ReviewTrailRecord[]> {
+  return invokeCommand<ReviewTrailRecord[]>("get_review_trail", {
+    projectRoot,
+    entityType,
+    entityId,
   });
 }

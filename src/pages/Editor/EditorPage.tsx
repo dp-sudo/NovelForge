@@ -22,9 +22,11 @@ import {
 import {
   applyAssetCandidate,
   applyStructuredDraft,
+  getReviewTrail,
   getChapterContext,
   rejectStructuredDraft,
-  type ChapterContext
+  type ChapterContext,
+  type ReviewTrailRecord,
 } from "../../api/contextApi";
 import type { ChapterRecord } from "../../api/chapterApi";
 import { Modal } from "../../components/dialogs/Modal";
@@ -76,6 +78,7 @@ export function EditorPage() {
   const [editorNotice, setEditorNotice] = useState<string | null>(null);
   const [candidateStatus, setCandidateStatus] = useState<Record<string, "idle" | "applying" | "applied" | "error">>({});
   const [structuredDraftStatus, setStructuredDraftStatus] = useState<Record<string, "applying" | "error">>({});
+  const [reviewTrail, setReviewTrail] = useState<ReviewTrailRecord[]>([]);
 
   const chapterId = useEditorStore((s) => s.activeChapterId);
   const chapterTitle = useEditorStore((s) => s.activeChapterTitle);
@@ -117,11 +120,16 @@ export function EditorPage() {
 
   const refreshChapterContext = useCallback(async (root: string, cid: string): Promise<ChapterContext | null> => {
     try {
-      const ctx = await getChapterContext(root, cid);
+      const [ctx, trail] = await Promise.all([
+        getChapterContext(root, cid),
+        getReviewTrail(root, "chapter", cid).catch(() => [] as ReviewTrailRecord[]),
+      ]);
       setContext(ctx);
+      setReviewTrail(trail.slice(0, 20));
       return ctx;
     } catch {
       setContext(null);
+      setReviewTrail([]);
       return null;
     }
   }, []);
@@ -159,6 +167,7 @@ export function EditorPage() {
       setContext(null);
       setCandidateStatus({});
       setStructuredDraftStatus({});
+      setReviewTrail([]);
       return;
     }
     const cid: string = chapterId;
@@ -277,7 +286,12 @@ export function EditorPage() {
     store.setSaveStatus("saving");
     const previousStateSignature = JSON.stringify(context?.stateSummary ?? []);
     try {
-      const result = await saveChapterContent(chapterId, content, projectRoot);
+      const result = await saveChapterContent(
+        chapterId,
+        content,
+        projectRoot,
+        "用户手动保存正文",
+      );
       store.setSaveStatus("saved");
       store.setLastSavedAt(result.updatedAt);
       store.setIsDirty(false);
@@ -303,6 +317,7 @@ export function EditorPage() {
     store.setIsDirty(false);
     setCandidateStatus({});
     setStructuredDraftStatus({});
+    setReviewTrail([]);
     setShowRecovery(false);
     setShowAiPanel(false);
     store.resetAiPreview();
@@ -561,14 +576,19 @@ export function EditorPage() {
     if (!projectRoot || !chapterId) return;
     setStructuredDraftStatus((prev) => ({ ...prev, [draft.id]: "applying" }));
     try {
-      const result = await applyStructuredDraft(projectRoot, chapterId, {
-        draftItemId: normalizeDraftItemId(draft.id),
-        draftKind: "relationship",
-        sourceLabel: draft.sourceLabel,
-        targetLabel: draft.targetLabel,
-        relationshipType: draft.relationshipType,
-        evidence: draft.evidence,
-      });
+      const result = await applyStructuredDraft(
+        projectRoot,
+        chapterId,
+        {
+          draftItemId: normalizeDraftItemId(draft.id),
+          draftKind: "relationship",
+          sourceLabel: draft.sourceLabel,
+          targetLabel: draft.targetLabel,
+          relationshipType: draft.relationshipType,
+          evidence: draft.evidence,
+        },
+        "用户采纳关系草案",
+      );
       setStructuredDraftStatus((prev) => {
         const next = { ...prev };
         delete next[draft.id];
@@ -596,13 +616,18 @@ export function EditorPage() {
     if (!projectRoot || !chapterId) return;
     setStructuredDraftStatus((prev) => ({ ...prev, [draft.id]: "applying" }));
     try {
-      const result = await applyStructuredDraft(projectRoot, chapterId, {
-        draftItemId: normalizeDraftItemId(draft.id),
-        draftKind: "involvement",
-        sourceLabel: draft.characterLabel,
-        involvementType: draft.involvementType,
-        evidence: draft.evidence,
-      });
+      const result = await applyStructuredDraft(
+        projectRoot,
+        chapterId,
+        {
+          draftItemId: normalizeDraftItemId(draft.id),
+          draftKind: "involvement",
+          sourceLabel: draft.characterLabel,
+          involvementType: draft.involvementType,
+          evidence: draft.evidence,
+        },
+        "用户采纳戏份草案",
+      );
       setStructuredDraftStatus((prev) => {
         const next = { ...prev };
         delete next[draft.id];
@@ -630,13 +655,18 @@ export function EditorPage() {
     if (!projectRoot || !chapterId) return;
     setStructuredDraftStatus((prev) => ({ ...prev, [draft.id]: "applying" }));
     try {
-      const result = await applyStructuredDraft(projectRoot, chapterId, {
-        draftItemId: normalizeDraftItemId(draft.id),
-        draftKind: "scene",
-        sourceLabel: draft.sceneLabel,
-        sceneType: draft.sceneType,
-        evidence: draft.evidence,
-      });
+      const result = await applyStructuredDraft(
+        projectRoot,
+        chapterId,
+        {
+          draftItemId: normalizeDraftItemId(draft.id),
+          draftKind: "scene",
+          sourceLabel: draft.sceneLabel,
+          sceneType: draft.sceneType,
+          evidence: draft.evidence,
+        },
+        "用户采纳场景草案",
+      );
       setStructuredDraftStatus((prev) => {
         const next = { ...prev };
         delete next[draft.id];
@@ -661,9 +691,14 @@ export function EditorPage() {
       setEditorNotice("仅已持久化草案支持忽略");
       return;
     }
+    const reason = window.prompt("请输入否决理由（必填）", "与当前叙事方向不一致")?.trim() || "";
+    if (!reason) {
+      setEditorNotice("已取消：否决时需要填写理由");
+      return;
+    }
     setStructuredDraftStatus((prev) => ({ ...prev, [draft.id]: "applying" }));
     try {
-      await rejectStructuredDraft(projectRoot, chapterId, draftItemId);
+      await rejectStructuredDraft(projectRoot, chapterId, draftItemId, reason);
       setStructuredDraftStatus((prev) => {
         const next = { ...prev };
         delete next[draft.id];
@@ -897,6 +932,7 @@ export function EditorPage() {
       <EditorContextPanel
         chapterId={chapterId}
         context={context}
+        reviewTrail={reviewTrail}
         candidateStatus={candidateStatus}
         getCandidateKey={getCandidateKey}
         getCandidateActions={getCandidateActions}

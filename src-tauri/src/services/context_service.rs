@@ -14,7 +14,9 @@ use crate::infra::time::now_iso;
 use crate::services::blueprint_service::{parse_certainty_zones_json, BlueprintCertaintyZones};
 use crate::services::chapter_service::ChapterService;
 use crate::services::import_service::{extract_asset_candidates, AssetExtractionCandidate};
+use crate::services::promotion_service::PromotionService;
 use crate::services::project_service::{get_project_id, WritingStyle};
+use crate::services::review_trail_service::{RecordReviewActionInput, ReviewTrailService};
 use crate::services::story_state_service::{StoryStateInput, StoryStateService};
 
 #[derive(Debug, Clone, Serialize)]
@@ -1176,25 +1178,36 @@ impl ContextService {
         }
 
         let tx = conn.transaction().map_err(project_db_write_error)?;
-        let (target_id, action) = match target_type.as_str() {
-            "character" => self.find_or_create_character(&tx, &project_id, &label, &evidence)?,
-            "world_rule" => self.find_or_create_world_rule(
-                &tx,
-                &project_id,
-                &label,
-                &input.asset_type,
-                &evidence,
-            )?,
-            "plot_node" => self.find_or_create_plot_node(&tx, &project_id, &label, &evidence)?,
-            "glossary_term" => self.find_or_create_glossary_term(
-                &tx,
-                &project_id,
-                &label,
-                &input.asset_type,
-                &evidence,
-            )?,
-            _ => return Err(candidate_target_invalid_error("不支持的候选目标类型")),
+        let promotion_service = PromotionService;
+        let reason = if evidence.is_empty() {
+            None
+        } else {
+            Some(evidence.as_str())
         };
+        let (target_id, action) = promotion_service.promote(
+            &target_type,
+            "asset_candidate",
+            reason,
+            || match target_type.as_str() {
+                "character" => self.find_or_create_character(&tx, &project_id, &label, &evidence),
+                "world_rule" => self.find_or_create_world_rule(
+                    &tx,
+                    &project_id,
+                    &label,
+                    &input.asset_type,
+                    &evidence,
+                ),
+                "plot_node" => self.find_or_create_plot_node(&tx, &project_id, &label, &evidence),
+                "glossary_term" => self.find_or_create_glossary_term(
+                    &tx,
+                    &project_id,
+                    &label,
+                    &input.asset_type,
+                    &evidence,
+                ),
+                _ => Err(candidate_target_invalid_error("不支持的候选目标类型")),
+            },
+        )?;
 
         let link_created =
             self.ensure_chapter_link(&tx, &project_id, chapter_id, &target_type, &target_id)?;
@@ -1217,6 +1230,16 @@ impl ContextService {
         project_root: &str,
         chapter_id: &str,
         input: ApplyStructuredDraftInput,
+    ) -> Result<ApplyStructuredDraftResult, AppErrorDto> {
+        self.apply_structured_draft_with_reason(project_root, chapter_id, input, None)
+    }
+
+    pub fn apply_structured_draft_with_reason(
+        &self,
+        project_root: &str,
+        chapter_id: &str,
+        input: ApplyStructuredDraftInput,
+        review_reason: Option<&str>,
     ) -> Result<ApplyStructuredDraftResult, AppErrorDto> {
         let normalized_root = normalize_project_root(project_root)?;
         let mut conn = open_project_database(normalized_root)?;
@@ -1252,6 +1275,10 @@ impl ContextService {
             .filter(|value| !value.is_empty())
             .map(str::to_string);
         let mut evidence = input.evidence.unwrap_or_default().trim().to_string();
+        let reason = review_reason
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
         let draft_item_id = input
             .draft_item_id
             .as_deref()
@@ -1332,208 +1359,254 @@ impl ContextService {
             return Err(draft_invalid_error("草案内容为空"));
         }
 
+        let promotion_service = PromotionService;
         let result = match draft_kind.as_str() {
-            "relationship" => {
-                let target_label = target_label.clone().unwrap_or_default();
-                if target_label.is_empty() {
-                    return Err(draft_invalid_error("关系草案缺少目标角色"));
-                }
-                if source_label == target_label {
-                    return Err(draft_invalid_error("关系草案角色不能相同"));
-                }
-                let relationship_type = relationship_type
-                    .clone()
-                    .unwrap_or_else(|| "互动".to_string())
-                    .trim()
-                    .to_string();
-
-                let (source_id, _) =
-                    self.find_or_create_character(&tx, &project_id, &source_label, &evidence)?;
-                let (target_id, _) =
-                    self.find_or_create_character(&tx, &project_id, &target_label, &evidence)?;
-                let existing_relation_id = tx
-                    .query_row(
-                        "SELECT id FROM character_relationships WHERE project_id = ?1 AND relationship_type = ?2 AND ((source_character_id = ?3 AND target_character_id = ?4) OR (source_character_id = ?4 AND target_character_id = ?3)) LIMIT 1",
-                        params![&project_id, &relationship_type, &source_id, &target_id],
-                        |row| row.get::<_, String>(0),
-                    )
-                    .optional()
-                    .map_err(|err| draft_pool_query_error("查询角色关系失败", err))?;
-                let (relation_id, action) = if let Some(existing_id) = existing_relation_id {
-                    (existing_id, "reused".to_string())
-                } else {
-                    let relation_id = Uuid::new_v4().to_string();
-                    let now = now_iso();
-                    tx.execute(
-                        "INSERT INTO character_relationships(id, project_id, source_character_id, target_character_id, relationship_type, description, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
-                        params![&relation_id, &project_id, &source_id, &target_id, &relationship_type, if evidence.is_empty() { None::<String> } else { Some(evidence.clone()) }, &now, &now],
-                    )
-                    .map_err(|err| draft_pool_write_error("创建角色关系失败", err))?;
-                    (relation_id, "created".to_string())
-                };
-                let _ = self.ensure_chapter_link_with_relation(
-                    &tx,
-                    &project_id,
-                    chapter_id,
-                    "character",
-                    &source_id,
-                    "relationship_context",
-                )?;
-                let _ = self.ensure_chapter_link_with_relation(
-                    &tx,
-                    &project_id,
-                    chapter_id,
-                    "character",
-                    &target_id,
-                    "relationship_context",
-                )?;
-                let relation_state_now = now_iso();
-                StoryStateService::upsert_state_in_transaction(
-                    &tx,
-                    &project_id,
-                    StoryStateInput {
-                        subject_type: "relationship".to_string(),
-                        subject_id: relation_id.clone(),
-                        scope: "chapter".to_string(),
-                        state_kind: "relationship".to_string(),
-                        payload_json: serde_json::json!({
-                            "relationshipType": relationship_type,
-                            "sourceCharacterId": source_id,
-                            "sourceLabel": source_label,
-                            "targetCharacterId": target_id,
-                            "targetLabel": target_label,
-                            "evidence": evidence,
-                            "chapterId": chapter_id,
-                        }),
-                        source_chapter_id: Some(chapter_id.to_string()),
-                    },
-                    &relation_state_now,
-                )?;
-                ApplyStructuredDraftResult {
-                    action,
-                    draft_kind: "relationship".to_string(),
-                    draft_item_id: draft_item_id.clone(),
-                    draft_item_status: Some("applied".to_string()),
-                    primary_target_id: relation_id.clone(),
-                    secondary_target_id: Some(target_id),
-                }
-            }
-            "involvement" => {
-                let involvement_type = involvement_type
-                    .clone()
-                    .unwrap_or_else(|| "一般戏份".to_string())
-                    .trim()
-                    .to_string();
-                let (character_id, _) =
-                    self.find_or_create_character(&tx, &project_id, &source_label, &evidence)?;
-                let relation_type = format!("involvement:{}", involvement_type);
-                let link_created = self.ensure_chapter_link_with_relation(
-                    &tx,
-                    &project_id,
-                    chapter_id,
-                    "character",
-                    &character_id,
-                    &relation_type,
-                )?;
-                let involvement_state_now = now_iso();
-                StoryStateService::upsert_state_in_transaction(
-                    &tx,
-                    &project_id,
-                    StoryStateInput {
-                        subject_type: "character".to_string(),
-                        subject_id: character_id.clone(),
-                        scope: "chapter".to_string(),
-                        state_kind: "involvement".to_string(),
-                        payload_json: serde_json::json!({
-                            "characterLabel": source_label,
-                            "involvementType": involvement_type,
-                            "relationType": relation_type,
-                            "evidence": evidence,
-                            "chapterId": chapter_id,
-                        }),
-                        source_chapter_id: Some(chapter_id.to_string()),
-                    },
-                    &involvement_state_now,
-                )?;
-                ApplyStructuredDraftResult {
-                    action: if link_created { "created" } else { "reused" }.to_string(),
-                    draft_kind: "involvement".to_string(),
-                    draft_item_id: draft_item_id.clone(),
-                    draft_item_status: Some("applied".to_string()),
-                    primary_target_id: character_id,
-                    secondary_target_id: None,
-                }
-            }
-            "scene" => {
-                let scene_type = scene_type
-                    .clone()
-                    .unwrap_or_else(|| "地点场景".to_string())
-                    .trim()
-                    .to_string();
-                let existing_world_rule_id = tx
-                    .query_row(
-                        "SELECT id FROM world_rules WHERE project_id = ?1 AND title = ?2 AND is_deleted = 0 LIMIT 1",
-                        params![&project_id, &source_label],
-                        |row| row.get::<_, String>(0),
-                    )
-                    .optional()
-                    .map_err(|err| draft_pool_query_error("查询场景设定失败", err))?;
-                let world_rule_id = if let Some(existing_id) = existing_world_rule_id {
-                    existing_id
-                } else {
-                    let id = Uuid::new_v4().to_string();
-                    let now = now_iso();
-                    let description = if evidence.is_empty() {
-                        format!("场景草案：{}", source_label)
+            "relationship" => promotion_service.promote(
+                "character_relationship",
+                "structured_draft",
+                reason.as_deref().or_else(|| {
+                    if evidence.is_empty() {
+                        None
                     } else {
-                        format!("场景线索：{}", evidence)
+                        Some(evidence.as_str())
+                    }
+                }),
+                || {
+                    let target_label = target_label.clone().unwrap_or_default();
+                    if target_label.is_empty() {
+                        return Err(draft_invalid_error("关系草案缺少目标角色"));
+                    }
+                    if source_label == target_label {
+                        return Err(draft_invalid_error("关系草案角色不能相同"));
+                    }
+                    let relationship_type = relationship_type
+                        .clone()
+                        .unwrap_or_else(|| "互动".to_string())
+                        .trim()
+                        .to_string();
+
+                    let (source_id, _) = self.find_or_create_character(
+                        &tx,
+                        &project_id,
+                        &source_label,
+                        &evidence,
+                    )?;
+                    let (target_id, _) = self.find_or_create_character(
+                        &tx,
+                        &project_id,
+                        &target_label,
+                        &evidence,
+                    )?;
+                    let existing_relation_id = tx
+                        .query_row(
+                            "SELECT id FROM character_relationships WHERE project_id = ?1 AND relationship_type = ?2 AND ((source_character_id = ?3 AND target_character_id = ?4) OR (source_character_id = ?4 AND target_character_id = ?3)) LIMIT 1",
+                            params![&project_id, &relationship_type, &source_id, &target_id],
+                            |row| row.get::<_, String>(0),
+                        )
+                        .optional()
+                        .map_err(|err| draft_pool_query_error("查询角色关系失败", err))?;
+                    let (relation_id, action) = if let Some(existing_id) = existing_relation_id {
+                        (existing_id, "reused".to_string())
+                    } else {
+                        let relation_id = Uuid::new_v4().to_string();
+                        let now = now_iso();
+                        tx.execute(
+                            "INSERT INTO character_relationships(id, project_id, source_character_id, target_character_id, relationship_type, description, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+                            params![&relation_id, &project_id, &source_id, &target_id, &relationship_type, if evidence.is_empty() { None::<String> } else { Some(evidence.clone()) }, &now, &now],
+                        )
+                        .map_err(|err| draft_pool_write_error("创建角色关系失败", err))?;
+                        (relation_id, "created".to_string())
                     };
-                    tx.execute(
-                        "INSERT INTO world_rules(id, project_id, title, category, description, constraint_level, related_entities, examples, contradiction_policy, is_deleted, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,NULL,NULL,0,?8,?9)",
-                        params![&id, &project_id, &source_label, "场景", &description, "normal", "[]", &now, &now],
-                    )
-                    .map_err(|err| draft_pool_write_error("创建场景设定失败", err))?;
-                    id
-                };
-                let relation_type = format!("scene:{}", scene_type);
-                let link_created = self.ensure_chapter_link_with_relation(
-                    &tx,
-                    &project_id,
-                    chapter_id,
-                    "world_rule",
-                    &world_rule_id,
-                    &relation_type,
-                )?;
-                let scene_state_now = now_iso();
-                StoryStateService::upsert_state_in_transaction(
-                    &tx,
-                    &project_id,
-                    StoryStateInput {
-                        subject_type: "scene".to_string(),
-                        subject_id: world_rule_id.clone(),
-                        scope: "chapter".to_string(),
-                        state_kind: "scene".to_string(),
-                        payload_json: serde_json::json!({
-                            "sceneLabel": source_label,
-                            "sceneType": scene_type,
-                            "linkedWorldRuleId": world_rule_id,
-                            "relationType": relation_type,
-                            "evidence": evidence,
-                            "chapterId": chapter_id,
-                        }),
-                        source_chapter_id: Some(chapter_id.to_string()),
-                    },
-                    &scene_state_now,
-                )?;
-                ApplyStructuredDraftResult {
-                    action: if link_created { "created" } else { "reused" }.to_string(),
-                    draft_kind: "scene".to_string(),
-                    draft_item_id: draft_item_id.clone(),
-                    draft_item_status: Some("applied".to_string()),
-                    primary_target_id: world_rule_id,
-                    secondary_target_id: None,
-                }
-            }
+                    let _ = self.ensure_chapter_link_with_relation(
+                        &tx,
+                        &project_id,
+                        chapter_id,
+                        "character",
+                        &source_id,
+                        "relationship_context",
+                    )?;
+                    let _ = self.ensure_chapter_link_with_relation(
+                        &tx,
+                        &project_id,
+                        chapter_id,
+                        "character",
+                        &target_id,
+                        "relationship_context",
+                    )?;
+                    let relation_state_now = now_iso();
+                    StoryStateService::upsert_state_in_transaction(
+                        &tx,
+                        &project_id,
+                        StoryStateInput {
+                            subject_type: "relationship".to_string(),
+                            subject_id: relation_id.clone(),
+                            scope: "chapter".to_string(),
+                            state_kind: "relationship".to_string(),
+                            payload_json: serde_json::json!({
+                                "relationshipType": relationship_type,
+                                "sourceCharacterId": source_id,
+                                "sourceLabel": source_label,
+                                "targetCharacterId": target_id,
+                                "targetLabel": target_label,
+                                "evidence": evidence,
+                                "chapterId": chapter_id,
+                            }),
+                            source_chapter_id: Some(chapter_id.to_string()),
+                        },
+                        &relation_state_now,
+                    )?;
+                    Ok(ApplyStructuredDraftResult {
+                        action,
+                        draft_kind: "relationship".to_string(),
+                        draft_item_id: draft_item_id.clone(),
+                        draft_item_status: Some("applied".to_string()),
+                        primary_target_id: relation_id.clone(),
+                        secondary_target_id: Some(target_id),
+                    })
+                },
+            )?,
+            "involvement" => promotion_service.promote(
+                "involvement",
+                "structured_draft",
+                reason.as_deref().or_else(|| {
+                    if evidence.is_empty() {
+                        None
+                    } else {
+                        Some(evidence.as_str())
+                    }
+                }),
+                || {
+                    let involvement_type = involvement_type
+                        .clone()
+                        .unwrap_or_else(|| "一般戏份".to_string())
+                        .trim()
+                        .to_string();
+                    let (character_id, _) = self.find_or_create_character(
+                        &tx,
+                        &project_id,
+                        &source_label,
+                        &evidence,
+                    )?;
+                    let relation_type = format!("involvement:{}", involvement_type);
+                    let link_created = self.ensure_chapter_link_with_relation(
+                        &tx,
+                        &project_id,
+                        chapter_id,
+                        "character",
+                        &character_id,
+                        &relation_type,
+                    )?;
+                    let involvement_state_now = now_iso();
+                    StoryStateService::upsert_state_in_transaction(
+                        &tx,
+                        &project_id,
+                        StoryStateInput {
+                            subject_type: "character".to_string(),
+                            subject_id: character_id.clone(),
+                            scope: "chapter".to_string(),
+                            state_kind: "involvement".to_string(),
+                            payload_json: serde_json::json!({
+                                "characterLabel": source_label,
+                                "involvementType": involvement_type,
+                                "relationType": relation_type,
+                                "evidence": evidence,
+                                "chapterId": chapter_id,
+                            }),
+                            source_chapter_id: Some(chapter_id.to_string()),
+                        },
+                        &involvement_state_now,
+                    )?;
+                    Ok(ApplyStructuredDraftResult {
+                        action: if link_created { "created" } else { "reused" }.to_string(),
+                        draft_kind: "involvement".to_string(),
+                        draft_item_id: draft_item_id.clone(),
+                        draft_item_status: Some("applied".to_string()),
+                        primary_target_id: character_id,
+                        secondary_target_id: None,
+                    })
+                },
+            )?,
+            "scene" => promotion_service.promote(
+                "scene",
+                "structured_draft",
+                reason.as_deref().or_else(|| {
+                    if evidence.is_empty() {
+                        None
+                    } else {
+                        Some(evidence.as_str())
+                    }
+                }),
+                || {
+                    let scene_type = scene_type
+                        .clone()
+                        .unwrap_or_else(|| "地点场景".to_string())
+                        .trim()
+                        .to_string();
+                    let existing_world_rule_id = tx
+                        .query_row(
+                            "SELECT id FROM world_rules WHERE project_id = ?1 AND title = ?2 AND is_deleted = 0 LIMIT 1",
+                            params![&project_id, &source_label],
+                            |row| row.get::<_, String>(0),
+                        )
+                        .optional()
+                        .map_err(|err| draft_pool_query_error("查询场景设定失败", err))?;
+                    let world_rule_id = if let Some(existing_id) = existing_world_rule_id {
+                        existing_id
+                    } else {
+                        let id = Uuid::new_v4().to_string();
+                        let now = now_iso();
+                        let description = if evidence.is_empty() {
+                            format!("场景草案：{}", source_label)
+                        } else {
+                            format!("场景线索：{}", evidence)
+                        };
+                        tx.execute(
+                            "INSERT INTO world_rules(id, project_id, title, category, description, constraint_level, related_entities, examples, contradiction_policy, is_deleted, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,NULL,NULL,0,?8,?9)",
+                            params![&id, &project_id, &source_label, "场景", &description, "normal", "[]", &now, &now],
+                        )
+                        .map_err(|err| draft_pool_write_error("创建场景设定失败", err))?;
+                        id
+                    };
+                    let relation_type = format!("scene:{}", scene_type);
+                    let link_created = self.ensure_chapter_link_with_relation(
+                        &tx,
+                        &project_id,
+                        chapter_id,
+                        "world_rule",
+                        &world_rule_id,
+                        &relation_type,
+                    )?;
+                    let scene_state_now = now_iso();
+                    StoryStateService::upsert_state_in_transaction(
+                        &tx,
+                        &project_id,
+                        StoryStateInput {
+                            subject_type: "scene".to_string(),
+                            subject_id: world_rule_id.clone(),
+                            scope: "chapter".to_string(),
+                            state_kind: "scene".to_string(),
+                            payload_json: serde_json::json!({
+                                "sceneLabel": source_label,
+                                "sceneType": scene_type,
+                                "linkedWorldRuleId": world_rule_id,
+                                "relationType": relation_type,
+                                "evidence": evidence,
+                                "chapterId": chapter_id,
+                            }),
+                            source_chapter_id: Some(chapter_id.to_string()),
+                        },
+                        &scene_state_now,
+                    )?;
+                    Ok(ApplyStructuredDraftResult {
+                        action: if link_created { "created" } else { "reused" }.to_string(),
+                        draft_kind: "scene".to_string(),
+                        draft_item_id: draft_item_id.clone(),
+                        draft_item_status: Some("applied".to_string()),
+                        primary_target_id: world_rule_id,
+                        secondary_target_id: None,
+                    })
+                },
+            )?,
             _ => {
                 return Err(draft_pool_item_error(
                     "DRAFT_KIND_INVALID",
@@ -1584,6 +1657,60 @@ impl ContextService {
             Self::refresh_draft_batch_status_in_transaction(&tx, &batch_id, &now)?;
         }
 
+        let review_now = now_iso();
+        let review_entity_type = match result.draft_kind.as_str() {
+            "relationship" => "character_relationship",
+            "involvement" => "character",
+            "scene" => "world_rule",
+            _ => "structured_draft",
+        };
+        ReviewTrailService::record_action_in_transaction(
+            &tx,
+            &project_id,
+            RecordReviewActionInput {
+                chapter_id: Some(chapter_id.to_string()),
+                entity_type: review_entity_type.to_string(),
+                entity_id: result.primary_target_id.clone(),
+                draft_item_id: draft_item_id.clone(),
+                action: "approved".to_string(),
+                reason: reason.clone(),
+                detail: Some(serde_json::json!({
+                    "draftKind": result.draft_kind.clone(),
+                    "sourceLabel": source_label.clone(),
+                    "targetLabel": target_label.clone(),
+                    "relationshipType": relationship_type.clone(),
+                    "involvementType": involvement_type.clone(),
+                    "sceneType": scene_type.clone(),
+                    "evidence": evidence.clone(),
+                })),
+            },
+            &review_now,
+        )?;
+        ReviewTrailService::record_action_in_transaction(
+            &tx,
+            &project_id,
+            RecordReviewActionInput {
+                chapter_id: Some(chapter_id.to_string()),
+                entity_type: "chapter".to_string(),
+                entity_id: chapter_id.to_string(),
+                draft_item_id: draft_item_id.clone(),
+                action: "approved".to_string(),
+                reason: reason.clone(),
+                detail: Some(serde_json::json!({
+                    "draftKind": result.draft_kind.clone(),
+                    "sourceLabel": source_label,
+                    "targetLabel": target_label,
+                    "relationshipType": relationship_type,
+                    "involvementType": involvement_type,
+                    "sceneType": scene_type,
+                    "evidence": evidence,
+                    "targetEntityType": review_entity_type,
+                    "targetEntityId": result.primary_target_id.clone(),
+                })),
+            },
+            &review_now,
+        )?;
+
         tx.commit()
             .map_err(|err| draft_pool_write_error("保存结构化草案失败", err))?;
         Ok(result)
@@ -1594,6 +1721,16 @@ impl ContextService {
         project_root: &str,
         chapter_id: &str,
         draft_item_id: &str,
+    ) -> Result<RejectStructuredDraftResult, AppErrorDto> {
+        self.reject_structured_draft_with_reason(project_root, chapter_id, draft_item_id, None)
+    }
+
+    pub fn reject_structured_draft_with_reason(
+        &self,
+        project_root: &str,
+        chapter_id: &str,
+        draft_item_id: &str,
+        review_reason: Option<&str>,
     ) -> Result<RejectStructuredDraftResult, AppErrorDto> {
         let normalized_root = normalize_project_root(project_root)?;
         let mut conn = open_project_database(normalized_root)?;
@@ -1611,14 +1748,35 @@ impl ContextService {
         }
 
         let tx = conn.transaction().map_err(project_db_write_error)?;
-        let (current_status, batch_id): (String, String) = tx
+        let normalized_reason = review_reason
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+
+        let (current_status, batch_id, draft_kind, source_label, target_label, evidence_text): (
+            String,
+            String,
+            String,
+            String,
+            Option<String>,
+            Option<String>,
+        ) = tx
             .query_row(
-                "SELECT status, batch_id
+                "SELECT status, batch_id, draft_kind, source_label, target_label, evidence_text
                  FROM structured_draft_items
                  WHERE id = ?1 AND project_id = ?2 AND chapter_id = ?3
                  LIMIT 1",
                 params![normalized_item_id, &project_id, chapter_id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                    ))
+                },
             )
             .optional()
             .map_err(draft_pool_query_pool_error)?
@@ -1645,6 +1803,47 @@ impl ContextService {
         )
         .map_err(|err| draft_pool_write_error("回写草案项状态失败", err))?;
         let batch_status = Self::refresh_draft_batch_status_in_transaction(&tx, &batch_id, &now)?;
+
+        let rejected_entity_type = format!("{}_draft", draft_kind.trim().to_ascii_lowercase());
+        ReviewTrailService::record_action_in_transaction(
+            &tx,
+            &project_id,
+            RecordReviewActionInput {
+                chapter_id: Some(chapter_id.to_string()),
+                entity_type: rejected_entity_type,
+                entity_id: normalized_item_id.to_string(),
+                draft_item_id: Some(normalized_item_id.to_string()),
+                action: "rejected".to_string(),
+                reason: normalized_reason.clone(),
+                detail: Some(serde_json::json!({
+                    "draftKind": draft_kind.clone(),
+                    "sourceLabel": source_label.clone(),
+                    "targetLabel": target_label.clone(),
+                    "evidence": evidence_text.clone(),
+                })),
+            },
+            &now,
+        )?;
+        ReviewTrailService::record_action_in_transaction(
+            &tx,
+            &project_id,
+            RecordReviewActionInput {
+                chapter_id: Some(chapter_id.to_string()),
+                entity_type: "chapter".to_string(),
+                entity_id: chapter_id.to_string(),
+                draft_item_id: Some(normalized_item_id.to_string()),
+                action: "rejected".to_string(),
+                reason: normalized_reason,
+                detail: Some(serde_json::json!({
+                    "draftKind": draft_kind,
+                    "sourceLabel": source_label,
+                    "targetLabel": target_label,
+                    "evidence": evidence_text,
+                    "draftItemId": normalized_item_id,
+                })),
+            },
+            &now,
+        )?;
 
         tx.commit()
             .map_err(|err| draft_pool_write_error("保存草案拒绝结果失败", err))?;
@@ -3287,6 +3486,15 @@ mod tests {
             )
             .expect("relation count");
         assert_eq!(relation_count, 1);
+        let chapter_review_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM user_review_actions
+                 WHERE chapter_id = ?1 AND entity_type = 'chapter' AND action = 'approved'",
+                params![chapter.id],
+                |row| row.get(0),
+            )
+            .expect("chapter review action count");
+        assert_eq!(chapter_review_count, 2);
 
         remove_temp_workspace(&workspace);
     }
@@ -3370,6 +3578,90 @@ mod tests {
             .reject_structured_draft(&project.project_root, &chapter.id, &item_id)
             .expect_err("processed item should not be rejected again");
         assert_eq!(err.code, "DRAFT_ITEM_ALREADY_PROCESSED");
+
+        remove_temp_workspace(&workspace);
+    }
+
+    #[test]
+    fn reject_structured_draft_with_reason_records_review_trail() {
+        let workspace = create_temp_workspace();
+        let project_service = ProjectService;
+        let chapter_service = ChapterService;
+        let context_service = ContextService;
+
+        let project = project_service
+            .create_project(CreateProjectInput {
+                name: "草案忽略理由记录测试".to_string(),
+                author: None,
+                genre: "测试".to_string(),
+                target_words: None,
+                save_directory: workspace.to_string_lossy().to_string(),
+            })
+            .expect("project created");
+        let chapter = chapter_service
+            .create_chapter(
+                &project.project_root,
+                ChapterInput {
+                    title: "第一章".to_string(),
+                    summary: None,
+                    target_words: None,
+                    status: None,
+                },
+            )
+            .expect("chapter created");
+
+        let conn = open_database(std::path::Path::new(&project.project_root)).expect("open db");
+        let project_id: String = conn
+            .query_row("SELECT id FROM projects LIMIT 1", [], |row| row.get(0))
+            .expect("query project id");
+        let (run_id, batch_id) = seed_draft_batch(&conn, &project_id, &chapter.id, "chapter.draft");
+        let item_id = Uuid::new_v4().to_string();
+        seed_draft_item(
+            &conn,
+            &item_id,
+            &batch_id,
+            &run_id,
+            &project_id,
+            &chapter.id,
+            "scene",
+            "北城渡口",
+            None,
+            "scene:beichengdukou|location",
+            "{\"sceneType\":\"地点场景\"}",
+        );
+        drop(conn);
+
+        context_service
+            .reject_structured_draft_with_reason(
+                &project.project_root,
+                &chapter.id,
+                &item_id,
+                Some("与当前剧情推进冲突"),
+            )
+            .expect("reject structured draft with reason");
+
+        let conn = open_database(std::path::Path::new(&project.project_root)).expect("open db");
+        let reason: String = conn
+            .query_row(
+                "SELECT reason
+                 FROM user_review_actions
+                 WHERE draft_item_id = ?1 AND action = 'rejected'
+                 ORDER BY created_at DESC
+                 LIMIT 1",
+                params![&item_id],
+                |row| row.get(0),
+            )
+            .expect("query rejected reason");
+        assert_eq!(reason, "与当前剧情推进冲突");
+        let chapter_reject_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM user_review_actions
+                 WHERE chapter_id = ?1 AND entity_type = 'chapter' AND action = 'rejected'",
+                params![chapter.id],
+                |row| row.get(0),
+            )
+            .expect("query chapter rejected count");
+        assert_eq!(chapter_reject_count, 1);
 
         remove_temp_workspace(&workspace);
     }

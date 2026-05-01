@@ -210,6 +210,8 @@ pub fn run() {
             commands::settings_commands::list_task_routes,
             commands::settings_commands::save_task_route,
             commands::settings_commands::delete_task_route,
+            commands::settings_commands::list_promotion_policies,
+            commands::settings_commands::save_promotion_policy,
             commands::settings_commands::check_remote_registry,
             commands::settings_commands::apply_registry_update,
             // 问题6修复(兼容债务收敛): compatibility-only，计划 2026-07-31 后按外部依赖情况移除。
@@ -241,7 +243,9 @@ pub fn run() {
             commands::context_commands::apply_asset_candidate,
             commands::context_commands::apply_structured_draft,
             commands::context_commands::reject_structured_draft,
+            commands::context_commands::get_review_trail,
             commands::dashboard_commands::get_dashboard_stats,
+            commands::dashboard_commands::get_feedback_events,
             commands::search_commands::search_project,
             commands::search_commands::search_project_semantic,
             commands::search_commands::rebuild_search_index,

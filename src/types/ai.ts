@@ -105,7 +105,20 @@ export interface TaskRoute {
   fallbackModelId?: string;
   modelPoolId?: string;
   fallbackModelPoolId?: string;
+  postTasks?: string[];
   maxRetries: number;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface PromotionPolicy {
+  id: string;
+  targetType: string;
+  sourceKind: string;
+  policyMode: string;
+  requireReason: boolean;
+  enabled: boolean;
+  notes?: string;
   createdAt?: string;
   updatedAt?: string;
 }

@@ -34,6 +34,7 @@ pub struct TaskRouteResolution {
     pub model_id: String,
     pub model_pool_id: Option<String>,
     pub fallback_model_pool_id: Option<String>,
+    pub post_tasks: Vec<String>,
     pub attempts: Vec<TaskRouteAttempt>,
 }
 
@@ -92,12 +93,17 @@ impl AiService {
             .as_ref()
             .and_then(|item| item.fallback_model_pool_id.clone())
             .filter(|value| !value.trim().is_empty());
+        let post_tasks = route
+            .as_ref()
+            .map(|item| item.post_tasks.clone())
+            .unwrap_or_default();
         TaskRouteResolution {
             canonical_task_type,
             provider_id,
             model_id,
             model_pool_id,
             fallback_model_pool_id,
+            post_tasks,
             attempts,
         }
     }
@@ -518,6 +524,7 @@ impl AiService {
             fallback_model_id: None,
             model_pool_id: None,
             fallback_model_pool_id: None,
+            post_tasks: Vec::new(),
             max_retries: 1,
             created_at: None,
             updated_at: None,
@@ -820,6 +827,7 @@ mod tests {
             fallback_model_id: None,
             model_pool_id: Some("drafter".to_string()),
             fallback_model_pool_id: None,
+            post_tasks: Vec::new(),
             max_retries: 2,
             created_at: Some(now.clone()),
             updated_at: Some(now.clone()),

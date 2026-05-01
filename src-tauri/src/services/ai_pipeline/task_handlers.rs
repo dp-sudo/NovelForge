@@ -17,7 +17,8 @@ use crate::services::narrative_service::CreateObligationInput;
 use crate::services::project_service::get_project_id;
 use crate::services::{
     blueprint_service::{
-        extract_certainty_zones_from_content, BlueprintService, SaveBlueprintStepInput,
+        extract_certainty_zones_from_content, supports_certainty_zones_step, BlueprintService,
+        SaveBlueprintStepInput,
     },
     character_service::{
         CharacterService, CreateCharacterInput, CreateRelationshipInput, RelationshipService,
@@ -208,7 +209,7 @@ impl TaskHandlers {
                             normalized_output,
                         ),
                         ai_generated: Some(true),
-                        certainty_zones: if step_key == "step-08-chapters" {
+                        certainty_zones: if supports_certainty_zones_step(step_key) {
                             extract_certainty_zones_from_content(normalized_output)
                         } else {
                             None

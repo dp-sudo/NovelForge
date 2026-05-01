@@ -13,6 +13,7 @@ use crate::infra::path_utils::{
     chapter_file_name, resolve_project_relative_path, to_posix_relative,
 };
 use crate::infra::time::now_iso;
+use crate::services::feedback_service::FeedbackService;
 use crate::services::project_service::get_project_id;
 use crate::services::story_state_service::StoryStateService;
 
@@ -573,6 +574,10 @@ impl ChapterService {
             chapter_row.chapter_index,
             current_words,
         )?;
+        FeedbackService::trigger_foreshadow_unfulfilled_async(
+            project_root.to_string(),
+            chapter_id.to_string(),
+        );
 
         Ok(SaveChapterOutput {
             current_words,

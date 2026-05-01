@@ -31,6 +31,14 @@ interface ModelRoutingPanelProps {
   onDeleteTaskRoute: (taskType: string) => Promise<void>;
 }
 
+function parsePostTaskList(raw: string): string[] {
+  const values = raw
+    .split(/[\n,;，；]/)
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+  return Array.from(new Set(values));
+}
+
 export function ModelRoutingPanel(props: ModelRoutingPanelProps) {
   const {
     hasConfiguredProvidersForRouting,
@@ -137,6 +145,16 @@ export function ModelRoutingPanel(props: ModelRoutingPanelProps) {
                     max={8}
                     value={String(route.maxRetries || 1)}
                     onChange={(e) => onUpdateTaskRoute(task.value, { maxRetries: parseInt(e.target.value) || 1 })}
+                  />
+                  <Input
+                    label="后置任务（逗号分隔）"
+                    value={(route.postTasks || []).join(", ")}
+                    onChange={(e) =>
+                      onUpdateTaskRoute(task.value, {
+                        postTasks: parsePostTaskList(e.target.value),
+                      })
+                    }
+                    placeholder="review_continuity, extract_state, extract_assets"
                   />
                 </div>
                 {state.error && (

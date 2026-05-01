@@ -6,6 +6,7 @@ use crate::services::chapter_service::{
     AutosaveDraftInput, ChapterInput, ChapterRecord, CreateVolumeInput, RecoverDraftResult,
     SaveChapterOutput, TimelineEntryRecord,
 };
+use crate::services::review_trail_service::{RecordReviewActionInput, ReviewTrailService};
 use crate::state::AppState;
 
 #[derive(Debug, Deserialize)]
@@ -22,6 +23,7 @@ pub struct SaveChapterRequest {
     pub chapter_id: String,
     pub content: String,
     pub request_id: Option<String>,
+    pub reason: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -92,6 +94,30 @@ pub async fn save_chapter_content(
         &input.content,
     ) {
         Ok(result) => {
+            let manual_reason = input
+                .reason
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string);
+            if manual_reason.is_some() {
+                let _ = ReviewTrailService.record_action(
+                    &input.project_root,
+                    RecordReviewActionInput {
+                        chapter_id: Some(input.chapter_id.clone()),
+                        entity_type: "chapter".to_string(),
+                        entity_id: input.chapter_id.clone(),
+                        draft_item_id: None,
+                        action: "edited".to_string(),
+                        reason: manual_reason,
+                        detail: Some(serde_json::json!({
+                            "requestId": request_id,
+                            "wordCount": result.current_words,
+                            "version": result.version,
+                        })),
+                    },
+                );
+            }
             crate::infra::logger::log_user_action(
                 "save_chapter.done",
                 &format!(

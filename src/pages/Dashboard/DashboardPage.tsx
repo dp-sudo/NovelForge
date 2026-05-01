@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useProjectStore } from "../../stores/projectStore.js";
 import { useUiStore } from "../../stores/uiStore.js";
 import { Card } from "../../components/cards/Card.js";
@@ -8,6 +8,7 @@ import { Modal } from "../../components/dialogs/Modal.js";
 import { Textarea } from "../../components/forms/Textarea.js";
 import { useDashboardStats } from "../../hooks/useApi.js";
 import { runModuleAiTask } from "../../api/moduleAiApi.js";
+import { getFeedbackEvents, type FeedbackEvent } from "../../api/statsApi.js";
 
 export function DashboardPage() {
   const project = useProjectStore((s) => s.currentProject);
@@ -19,6 +20,31 @@ export function DashboardPage() {
   const [aiResult, setAiResult] = useState<string | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
+  const [feedbackEvents, setFeedbackEvents] = useState<FeedbackEvent[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!projectRoot) {
+      setFeedbackEvents([]);
+      return () => {
+        cancelled = true;
+      };
+    }
+    void getFeedbackEvents(projectRoot)
+      .then((events) => {
+        if (!cancelled) {
+          setFeedbackEvents(events.filter((event) => event.status === "open").slice(0, 6));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setFeedbackEvents([]);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectRoot]);
 
   const statCards = [
     { label: "总字数", value: stats?.totalWords.toLocaleString() ?? "0", color: "text-info" },
@@ -130,6 +156,27 @@ export function DashboardPage() {
           </div>
         </Card>
       )}
+
+      <Card padding="lg" className="mt-6">
+        <h2 className="text-sm font-semibold text-surface-200 mb-3">回报事件</h2>
+        {feedbackEvents.length === 0 ? (
+          <p className="text-xs text-surface-500">暂无未处理回报事件</p>
+        ) : (
+          <div className="space-y-2">
+            {feedbackEvents.map((event) => (
+              <div key={event.id} className="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2">
+                <div className="text-xs font-medium text-warning">
+                  {event.ruleType} · {event.severity}
+                </div>
+                <div className="mt-1 text-xs text-surface-200">{event.conditionSummary}</div>
+                {event.suggestedAction && (
+                  <div className="mt-1 text-xs text-surface-400">建议：{event.suggestedAction}</div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
 
       <Modal open={showAiReview} onClose={() => setShowAiReview(false)} title="AI 仪表盘诊断" width="lg">
         <div className="space-y-4">
