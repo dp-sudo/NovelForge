@@ -32,6 +32,14 @@ import {
   type BlueprintCertaintyZones,
 } from "../../domain/types.js";
 import type { BlueprintStepKey } from "../../domain/constants.js";
+import { BookPipelinePanel } from "./components/BookPipelinePanel.js";
+import { CertaintyZonesEditor } from "./components/CertaintyZonesEditor.js";
+import {
+  EMPTY_CERTAINTY_ZONES,
+  hasCertaintyZones,
+  parseCertaintyZonesFromLegacyContent,
+  validateCertaintyZones,
+} from "./utils/certaintyZones.js";
 
 interface StepDef {
   key: BlueprintStepKey;
@@ -78,60 +86,11 @@ const RHYTHM_OPTIONS = [
 
 type StepStatus = "not_started" | "in_progress" | "completed";
 
-const EMPTY_CERTAINTY_ZONES: BlueprintCertaintyZones = {
-  frozen: [],
-  promised: [],
-  exploratory: [],
+const CERTAINTY_ZONE_LABELS = {
+  frozen: "冻结区",
+  promised: "承诺区",
+  exploratory: "探索区",
 };
-
-function normalizeCertaintyItem(raw: string): string {
-  return raw
-    .trim()
-    .replace(/^[-*]\s*/, "")
-    .replace(/^\d+\.\s*/, "")
-    .trim();
-}
-
-function parseCertaintyZoneText(raw: string): string[] {
-  const lines = raw
-    .split(/\r?\n|[;；]/)
-    .map((line) => normalizeCertaintyItem(line))
-    .filter((line) => line.length > 0);
-  return Array.from(new Set(lines)).slice(0, 24);
-}
-
-function stringifyCertaintyZoneText(items: string[]): string {
-  return items.join("\n");
-}
-
-function hasCertaintyZones(zones: BlueprintCertaintyZones): boolean {
-  return zones.frozen.length > 0 || zones.promised.length > 0 || zones.exploratory.length > 0;
-}
-
-function validateCertaintyZones(zones: BlueprintCertaintyZones): string[] {
-  const ownership = new Map<string, string>();
-  const overlaps = new Set<string>();
-  const register = (zoneLabel: string, entries: string[]) => {
-    for (const entry of entries) {
-      const normalized = normalizeCertaintyItem(entry).toLowerCase();
-      if (!normalized) continue;
-      const existing = ownership.get(normalized);
-      if (!existing) {
-        ownership.set(normalized, zoneLabel);
-        continue;
-      }
-      if (existing !== zoneLabel) {
-        overlaps.add(`${entry}（${existing} / ${zoneLabel}）`);
-      }
-    }
-  };
-
-  register("冻结区", zones.frozen);
-  register("承诺区", zones.promised);
-  register("探索区", zones.exploratory);
-
-  return Array.from(overlaps).slice(0, 8);
-}
 
 function parseErrorCode(message: string): string | undefined {
   const match = message.match(/^\[([A-Z0-9_]+)\]/);
@@ -162,73 +121,6 @@ function formatPipelineBlockingTip(errorCode?: string, message?: string): string
     return `${base} 请将冲突条目只保留在一个分区后再保存。`;
   }
   return normalizedMessage || "编排执行失败";
-}
-
-function parseCertaintyZonesFromLegacyContent(content: string): BlueprintCertaintyZones {
-  if (!content.trim()) return { ...EMPTY_CERTAINTY_ZONES };
-  try {
-    const parsed = JSON.parse(content) as {
-      certaintyZones?: Partial<BlueprintCertaintyZones>;
-      certainty_zones?: Partial<BlueprintCertaintyZones>;
-      frozen?: string[] | string;
-      promised?: string[] | string;
-      exploratory?: string[] | string;
-    };
-    const candidate = parsed.certaintyZones ?? parsed.certainty_zones ?? parsed;
-    const list = (value: unknown): string[] => {
-      if (typeof value === "string") return parseCertaintyZoneText(value);
-      if (Array.isArray(value)) {
-        return Array.from(
-          new Set(
-            value
-              .filter((item): item is string => typeof item === "string")
-              .map((item) => normalizeCertaintyItem(item))
-              .filter((item) => item.length > 0),
-          ),
-        ).slice(0, 24);
-      }
-      return [];
-    };
-    const zones = {
-      frozen: list(candidate.frozen),
-      promised: list(candidate.promised),
-      exploratory: list(candidate.exploratory),
-    };
-    if (hasCertaintyZones(zones)) return zones;
-  } catch {
-    // fall through
-  }
-
-  enum Zone {
-    Frozen = "frozen",
-    Promised = "promised",
-    Exploratory = "exploratory",
-  }
-  const zones: BlueprintCertaintyZones = { ...EMPTY_CERTAINTY_ZONES };
-  let current: Zone | null = null;
-  for (const rawLine of content.split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (!line) continue;
-    if (line.includes("冻结区")) {
-      current = Zone.Frozen;
-      continue;
-    }
-    if (line.includes("承诺区")) {
-      current = Zone.Promised;
-      continue;
-    }
-    if (line.includes("探索区")) {
-      current = Zone.Exploratory;
-      continue;
-    }
-    if (!current) continue;
-    const normalized = normalizeCertaintyItem(line);
-    if (!normalized) continue;
-    if (!zones[current].includes(normalized) && zones[current].length < 24) {
-      zones[current].push(normalized);
-    }
-  }
-  return zones;
 }
 
 // ── Form field helpers ──
@@ -443,49 +335,6 @@ function ChaptersForm({ data, onChange }: { data: Record<string, string>; onChan
         placeholder="各章节的主要出场人物" />
       <TextField label="关联主线节点" value={data.plotNodes} onChange={set("plotNodes")}
         placeholder="章节与主线节点的对应关系" />
-    </div>
-  );
-}
-
-function CertaintyZonesEditor({
-  zones,
-  onChange,
-}: {
-  zones: BlueprintCertaintyZones;
-  onChange: (zones: BlueprintCertaintyZones) => void;
-}) {
-  const update = (key: keyof BlueprintCertaintyZones) => (value: string) =>
-    onChange({ ...zones, [key]: parseCertaintyZoneText(value) });
-
-  return (
-    <div className="mt-4 rounded-xl border border-surface-700 bg-surface-800/60 p-4">
-      <h3 className="text-sm font-semibold text-surface-200">确定性分区</h3>
-      <p className="mt-1 text-xs text-surface-400">
-        冻结区禁止改写，承诺区要求后续兑现，探索区允许继续探索和重构。
-      </p>
-      <div className="mt-3 grid grid-cols-1 gap-3 xl:grid-cols-3">
-        <Textarea
-          label="冻结区"
-          value={stringifyCertaintyZoneText(zones.frozen)}
-          onChange={(event) => update("frozen")(event.target.value)}
-          placeholder="每行一条，例如：终局真相不可改写"
-          helperText="命中冲突时将触发降级或审阅策略。"
-        />
-        <Textarea
-          label="承诺区"
-          value={stringifyCertaintyZoneText(zones.promised)}
-          onChange={(event) => update("promised")(event.target.value)}
-          placeholder="每行一条，例如：主角将直面宗门审判"
-          helperText="后续章节生成应优先兑现这些承诺。"
-        />
-        <Textarea
-          label="探索区"
-          value={stringifyCertaintyZoneText(zones.exploratory)}
-          onChange={(event) => update("exploratory")(event.target.value)}
-          placeholder="每行一条，例如：支线人物立场可变化"
-          helperText="用于保留可变空间，避免过早锁死。"
-        />
-      </div>
     </div>
   );
 }
@@ -1041,7 +890,11 @@ export function BlueprintPage() {
             <StepForm stepKey={cur.key} data={formData} onChange={handleFormChange} />
             {cur.key === "step-08-chapters" && (
               <>
-                <CertaintyZonesEditor zones={certaintyZones} onChange={setCertaintyZones} />
+                <CertaintyZonesEditor
+                  zones={certaintyZones}
+                  labels={CERTAINTY_ZONE_LABELS}
+                  onChange={setCertaintyZones}
+                />
                 {hasCertaintyZoneConflict && (
                   <div className="mt-3 rounded-lg border border-error/40 bg-error/10 px-3 py-2">
                     <p className="text-xs font-medium text-error">分区冲突（已阻断保存/完成/晋升）</p>
@@ -1170,48 +1023,18 @@ export function BlueprintPage() {
             </Button>
             {!projectRoot && <p className="text-xs text-warning mb-2">请先打开项目</p>}
           </Card>
-          <Card padding="md" className="mt-3">
-            <h3 className="text-sm font-semibold text-surface-200 mb-3">一键全书生成</h3>
-            <Textarea
-              label="创意提示词"
-              value={bookIdeaPrompt}
-              onChange={(e) => setBookIdeaPrompt(e.target.value)}
-              placeholder="输入核心创意，按阶段自动生成蓝图/角色/设定/剧情"
-            />
-            <div className="mt-3 flex gap-2">
-              <Button
-                variant="primary"
-                size="sm"
-                className="flex-1 justify-center"
-                loading={bookPipelineRunning}
-                onClick={() => void handleRunBookPipeline()}
-                disabled={!bookIdeaPrompt.trim()}
-              >
-                {bookPipelineRunning ? "编排中..." : "开始编排"}
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="justify-center"
-                onClick={handleCancelBookPipeline}
-                disabled={!bookPipelineRunning}
-              >
-                取消
-              </Button>
-            </div>
-            {bookPipelineStatus && (
-              <p className="mt-3 text-xs text-surface-300">{bookPipelineStatus}</p>
-            )}
-            {bookPipelineLogs.length > 0 && (
-              <div className="mt-3 max-h-28 overflow-y-auto rounded-lg border border-surface-700 bg-surface-800/80 p-2">
-                {bookPipelineLogs.map((log, idx) => (
-                  <p key={`${log}-${idx}`} className="text-[11px] text-surface-300">
-                    {log}
-                  </p>
-                ))}
-              </div>
-            )}
-          </Card>
+          <BookPipelinePanel
+            title="一键全书生成"
+            ideaPrompt={bookIdeaPrompt}
+            onIdeaPromptChange={setBookIdeaPrompt}
+            running={bookPipelineRunning}
+            status={bookPipelineStatus}
+            logs={bookPipelineLogs}
+            onRun={() => void handleRunBookPipeline()}
+            onCancel={handleCancelBookPipeline}
+            runDisabled={!bookIdeaPrompt.trim()}
+            projectReady={Boolean(projectRoot)}
+          />
         </div>
       </div>
     </div>
