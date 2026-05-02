@@ -691,14 +691,9 @@ export function EditorPage() {
       setEditorNotice("仅已持久化草案支持忽略");
       return;
     }
-    const reason = window.prompt("请输入否决理由（必填）", "与当前叙事方向不一致")?.trim() || "";
-    if (!reason) {
-      setEditorNotice("已取消：否决时需要填写理由");
-      return;
-    }
     setStructuredDraftStatus((prev) => ({ ...prev, [draft.id]: "applying" }));
     try {
-      await rejectStructuredDraft(projectRoot, chapterId, draftItemId, reason);
+      await rejectStructuredDraft(projectRoot, chapterId, draftItemId);
       setStructuredDraftStatus((prev) => {
         const next = { ...prev };
         delete next[draft.id];

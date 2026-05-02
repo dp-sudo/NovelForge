@@ -8,7 +8,13 @@ import { Modal } from "../../components/dialogs/Modal.js";
 import { Textarea } from "../../components/forms/Textarea.js";
 import { useDashboardStats } from "../../hooks/useApi.js";
 import { runModuleAiTask } from "../../api/moduleAiApi.js";
-import { getFeedbackEvents, type FeedbackEvent } from "../../api/statsApi.js";
+import {
+  acknowledgeFeedbackEvent,
+  getFeedbackEvents,
+  ignoreFeedbackEvent,
+  resolveFeedbackEvent,
+  type FeedbackEvent,
+} from "../../api/statsApi.js";
 
 export function DashboardPage() {
   const project = useProjectStore((s) => s.currentProject);
@@ -21,6 +27,23 @@ export function DashboardPage() {
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [feedbackEvents, setFeedbackEvents] = useState<FeedbackEvent[]>([]);
+  const [feedbackActionError, setFeedbackActionError] = useState<string | null>(null);
+  const [feedbackUpdatingId, setFeedbackUpdatingId] = useState<string | null>(null);
+  const [showResolvedIgnored, setShowResolvedIgnored] = useState(false);
+  const [feedbackActionTarget, setFeedbackActionTarget] = useState<{
+    eventId: string;
+    mode: "resolve" | "ignore";
+  } | null>(null);
+  const [feedbackActionNote, setFeedbackActionNote] = useState("");
+
+  async function loadFeedbackEvents() {
+    if (!projectRoot) {
+      setFeedbackEvents([]);
+      return;
+    }
+    const events = await getFeedbackEvents(projectRoot);
+    setFeedbackEvents(events);
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -33,7 +56,7 @@ export function DashboardPage() {
     void getFeedbackEvents(projectRoot)
       .then((events) => {
         if (!cancelled) {
-          setFeedbackEvents(events.filter((event) => event.status === "open").slice(0, 6));
+          setFeedbackEvents(events);
         }
       })
       .catch(() => {
@@ -45,6 +68,113 @@ export function DashboardPage() {
       cancelled = true;
     };
   }, [projectRoot]);
+
+  const openEvents = feedbackEvents.filter((event) => event.status === "open");
+  const acknowledgedEvents = feedbackEvents.filter((event) => event.status === "acknowledged");
+  const resolvedEvents = feedbackEvents.filter((event) => event.status === "resolved");
+  const ignoredEvents = feedbackEvents.filter((event) => event.status === "ignored");
+
+  async function handleAcknowledgeFeedbackEvent(eventId: string) {
+    if (!projectRoot) return;
+    setFeedbackActionError(null);
+    setFeedbackUpdatingId(eventId);
+    try {
+      await acknowledgeFeedbackEvent(projectRoot, eventId);
+      await loadFeedbackEvents();
+    } catch (error) {
+      setFeedbackActionError(error instanceof Error ? error.message : "确认回报事件失败");
+    } finally {
+      setFeedbackUpdatingId(null);
+    }
+  }
+
+  async function handleSubmitFeedbackAction() {
+    if (!projectRoot || !feedbackActionTarget) return;
+    const note = feedbackActionNote.trim();
+    if (!note) {
+      setFeedbackActionError(feedbackActionTarget.mode === "resolve" ? "请填写解决备注" : "请填写忽略原因");
+      return;
+    }
+    setFeedbackActionError(null);
+    setFeedbackUpdatingId(feedbackActionTarget.eventId);
+    try {
+      if (feedbackActionTarget.mode === "resolve") {
+        await resolveFeedbackEvent(projectRoot, feedbackActionTarget.eventId, note);
+      } else {
+        await ignoreFeedbackEvent(projectRoot, feedbackActionTarget.eventId, note);
+      }
+      setFeedbackActionTarget(null);
+      setFeedbackActionNote("");
+      await loadFeedbackEvents();
+    } catch (error) {
+      setFeedbackActionError(
+        error instanceof Error
+          ? error.message
+          : feedbackActionTarget.mode === "resolve"
+            ? "解决回报事件失败"
+            : "忽略回报事件失败",
+      );
+    } finally {
+      setFeedbackUpdatingId(null);
+    }
+  }
+
+  function renderFeedbackEvent(event: FeedbackEvent, options?: { actionable?: boolean }) {
+    const actionable = options?.actionable ?? false;
+    const isUpdating = feedbackUpdatingId === event.id;
+    return (
+      <div key={event.id} className="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2">
+        <div className="text-xs font-medium text-warning">
+          {event.ruleType} · {event.severity}
+        </div>
+        <div className="mt-1 text-xs text-surface-200">{event.conditionSummary}</div>
+        {event.suggestedAction && (
+          <div className="mt-1 text-xs text-surface-400">建议：{event.suggestedAction}</div>
+        )}
+        {event.resolutionNote && (
+          <div className="mt-1 text-xs text-surface-400">处理记录：{event.resolutionNote}</div>
+        )}
+        {actionable && (
+          <div className="mt-2 flex flex-wrap gap-2">
+            {event.status === "open" && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => void handleAcknowledgeFeedbackEvent(event.id)}
+                disabled={isUpdating}
+              >
+                {isUpdating ? "处理中..." : "确认"}
+              </Button>
+            )}
+            <Button
+              size="sm"
+              variant="primary"
+              onClick={() => {
+                setFeedbackActionError(null);
+                setFeedbackActionTarget({ eventId: event.id, mode: "resolve" });
+                setFeedbackActionNote("");
+              }}
+              disabled={isUpdating}
+            >
+              解决
+            </Button>
+            <Button
+              size="sm"
+              variant="danger"
+              onClick={() => {
+                setFeedbackActionError(null);
+                setFeedbackActionTarget({ eventId: event.id, mode: "ignore" });
+                setFeedbackActionNote("");
+              }}
+              disabled={isUpdating}
+            >
+              忽略
+            </Button>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   const statCards = [
     { label: "总字数", value: stats?.totalWords.toLocaleString() ?? "0", color: "text-info" },
@@ -160,23 +290,111 @@ export function DashboardPage() {
       <Card padding="lg" className="mt-6">
         <h2 className="text-sm font-semibold text-surface-200 mb-3">回报事件</h2>
         {feedbackEvents.length === 0 ? (
-          <p className="text-xs text-surface-500">暂无未处理回报事件</p>
+          <p className="text-xs text-surface-500">暂无回报事件</p>
         ) : (
-          <div className="space-y-2">
-            {feedbackEvents.map((event) => (
-              <div key={event.id} className="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2">
-                <div className="text-xs font-medium text-warning">
-                  {event.ruleType} · {event.severity}
-                </div>
-                <div className="mt-1 text-xs text-surface-200">{event.conditionSummary}</div>
-                {event.suggestedAction && (
-                  <div className="mt-1 text-xs text-surface-400">建议：{event.suggestedAction}</div>
-                )}
+          <div className="space-y-4">
+            <div>
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-xs text-surface-300">待处理（open）</span>
+                <Badge variant="default">{openEvents.length}</Badge>
               </div>
-            ))}
+              {openEvents.length === 0 ? (
+                <p className="text-xs text-surface-500">无待处理事件</p>
+              ) : (
+                <div className="space-y-2">{openEvents.map((event) => renderFeedbackEvent(event, { actionable: true }))}</div>
+              )}
+            </div>
+            <div>
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-xs text-surface-300">已确认（acknowledged）</span>
+                <Badge variant="info">{acknowledgedEvents.length}</Badge>
+              </div>
+              {acknowledgedEvents.length === 0 ? (
+                <p className="text-xs text-surface-500">无已确认事件</p>
+              ) : (
+                <div className="space-y-2">{acknowledgedEvents.map((event) => renderFeedbackEvent(event, { actionable: true }))}</div>
+              )}
+            </div>
+            <div>
+              <button
+                type="button"
+                className="text-xs text-primary hover:underline"
+                onClick={() => setShowResolvedIgnored((prev) => !prev)}
+              >
+                {showResolvedIgnored ? "收起已解决/已忽略" : "展开已解决/已忽略"}
+              </button>
+              {showResolvedIgnored && (
+                <div className="mt-2 space-y-3">
+                  <div>
+                    <div className="mb-1 flex items-center justify-between">
+                      <span className="text-xs text-surface-300">已解决（resolved）</span>
+                      <Badge variant="success">{resolvedEvents.length}</Badge>
+                    </div>
+                    {resolvedEvents.length === 0 ? (
+                      <p className="text-xs text-surface-500">无已解决事件</p>
+                    ) : (
+                      <div className="space-y-2">{resolvedEvents.map((event) => renderFeedbackEvent(event))}</div>
+                    )}
+                  </div>
+                  <div>
+                    <div className="mb-1 flex items-center justify-between">
+                      <span className="text-xs text-surface-300">已忽略（ignored）</span>
+                      <Badge variant="warning">{ignoredEvents.length}</Badge>
+                    </div>
+                    {ignoredEvents.length === 0 ? (
+                      <p className="text-xs text-surface-500">无已忽略事件</p>
+                    ) : (
+                      <div className="space-y-2">{ignoredEvents.map((event) => renderFeedbackEvent(event))}</div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+            {feedbackActionError && (
+              <div className="px-3 py-2 rounded-lg text-xs bg-error/10 text-error border border-error/20">
+                {feedbackActionError}
+              </div>
+            )}
           </div>
         )}
       </Card>
+
+      <Modal
+        open={Boolean(feedbackActionTarget)}
+        onClose={() => {
+          setFeedbackActionTarget(null);
+          setFeedbackActionNote("");
+        }}
+        title={feedbackActionTarget?.mode === "resolve" ? "解决回报事件" : "忽略回报事件"}
+        width="md"
+      >
+        <div className="space-y-4">
+          <Textarea
+            label={feedbackActionTarget?.mode === "resolve" ? "解决备注" : "忽略原因"}
+            value={feedbackActionNote}
+            onChange={(e) => setFeedbackActionNote(e.target.value)}
+            className="min-h-[100px]"
+          />
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setFeedbackActionTarget(null);
+                setFeedbackActionNote("");
+              }}
+            >
+              取消
+            </Button>
+            <Button
+              variant="primary"
+              onClick={() => void handleSubmitFeedbackAction()}
+              disabled={!feedbackActionTarget}
+            >
+              提交
+            </Button>
+          </div>
+        </div>
+      </Modal>
 
       <Modal open={showAiReview} onClose={() => setShowAiReview(false)} title="AI 仪表盘诊断" width="lg">
         <div className="space-y-4">

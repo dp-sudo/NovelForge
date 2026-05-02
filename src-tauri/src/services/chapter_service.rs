@@ -944,6 +944,63 @@ fn load_chapter_links_for_frontmatter(
     Ok((plot_nodes, characters, world_rules))
 }
 
+/// Quote a string for safe embedding in YAML frontmatter.
+/// Strings containing YAML special characters (:, #, etc.),
+/// leading/trailing whitespace, or newlines are double-quoted.
+fn yaml_safe_string(value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return "\"\"".to_string();
+    }
+    // Quick check: if the value looks safe (no special chars, no leading/trailing ws),
+    // return it as-is to keep the generated YAML readable.
+    if value == trimmed
+        && !value.contains('\n')
+        && !value.contains(':')
+        && !value.contains('#')
+        && !value.contains('{')
+        && !value.contains('}')
+        && !value.contains('[')
+        && !value.contains(']')
+        && !value.contains(',')
+        && !value.contains('&')
+        && !value.contains('*')
+        && !value.contains('?')
+        && !value.contains('|')
+        && !value.contains('>')
+        && !value.contains('!')
+        && !value.contains('%')
+        && !value.contains('@')
+        && !value.contains('`')
+        && !value.contains('\'')
+        && !value.contains('"')
+        && !value.starts_with('-')
+        && !value.starts_with('=')
+    {
+        // Also reject bare booleans / null / numeric literals that YAML parsers
+        // might interpret as non-string scalars.
+        let lower = value.to_ascii_lowercase();
+        if lower == "true"
+            || lower == "false"
+            || lower == "null"
+            || lower == "yes"
+            || lower == "no"
+            || lower == "on"
+            || lower == "off"
+            || lower == "~"
+            || lower.parse::<f64>().is_ok()
+        {
+            return format!("\"{}\"", value);
+        }
+        return value.to_string();
+    }
+    // Double-quote and escape backslash / double-quote characters.
+    let escaped = trimmed
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"");
+    format!("\"{}\"", escaped)
+}
+
 fn build_chapter_markdown(input: ChapterMarkdownInput<'_>) -> String {
     let content = if input.content.trim().is_empty() {
         "正文从这里开始。".to_string()
@@ -955,9 +1012,9 @@ fn build_chapter_markdown(input: ChapterMarkdownInput<'_>) -> String {
         "---".to_string(),
         format!("id: {}", input.id),
         format!("index: {}", input.index),
-        format!("title: {}", input.title),
-        format!("status: {}", input.status),
-        format!("summary: {}", input.summary),
+        format!("title: {}", yaml_safe_string(input.title)),
+        format!("status: {}", yaml_safe_string(input.status)),
+        format!("summary: {}", yaml_safe_string(input.summary)),
         format!("wordCount: {}", input.word_count),
         format!("createdAt: {}", input.created_at),
         format!("updatedAt: {}", input.updated_at),

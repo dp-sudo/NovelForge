@@ -48,6 +48,7 @@ pnpm-debug.log*
 .env
 .env.*
 !.env.example
+.kiro
 
 # Windows Credential Manager (do not track)
 # API keys stored in Windows Credential Manager - never commit

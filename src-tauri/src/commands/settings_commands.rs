@@ -5,6 +5,7 @@ use tauri_plugin_updater::UpdaterExt;
 use uuid::Uuid;
 
 use crate::adapters::llm_types::{ModelPoolEntry, ModelPoolRecord, ProviderConfig, TaskRoute};
+use crate::domain::routing_strategy::RoutingStrategyTemplate;
 use crate::errors::AppErrorDto;
 use crate::infra::app_database;
 use crate::infra::app_database::PromotionPolicyRecord;
@@ -378,6 +379,52 @@ pub async fn delete_model_pool(
     _state: State<'_, AppState>,
 ) -> Result<(), AppErrorDto> {
     crate::services::ai_service::AiService::delete_model_pool(&pool_id)
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecommendRoutingStrategyInput {
+    pub project_root: String,
+    pub project_stage: Option<String>,
+    pub task_type: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApplyRoutingStrategyTemplateInput {
+    pub project_root: String,
+    pub strategy_id: String,
+}
+
+#[tauri::command]
+pub async fn recommend_routing_strategy(
+    input: RecommendRoutingStrategyInput,
+    _state: State<'_, AppState>,
+) -> Result<Vec<RoutingStrategyTemplate>, AppErrorDto> {
+    crate::services::ai_service::AiService::recommend_routing_strategy(
+        &input.project_root,
+        input.project_stage.as_deref(),
+        input.task_type.as_deref(),
+    )
+}
+
+#[tauri::command]
+pub async fn apply_routing_strategy_template(
+    input: ApplyRoutingStrategyTemplateInput,
+    _state: State<'_, AppState>,
+) -> Result<Vec<TaskRoute>, AppErrorDto> {
+    crate::services::ai_service::AiService::apply_routing_strategy_template(
+        &input.project_root,
+        &input.strategy_id,
+    )
+}
+
+#[tauri::command]
+pub async fn get_project_routing_strategy(
+    project_root: String,
+    _state: State<'_, AppState>,
+) -> Result<Option<String>, AppErrorDto> {
+    crate::services::ai_service::AiService::get_project_routing_strategy_id(&project_root)
 }
 
 // ── Task route commands ──

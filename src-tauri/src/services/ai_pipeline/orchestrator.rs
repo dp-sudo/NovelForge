@@ -36,6 +36,7 @@ pub const PHASE_GENERATE: &str = "generate";
 pub const PHASE_POSTPROCESS: &str = "postprocess";
 pub const PHASE_PERSIST: &str = "persist";
 pub const PHASE_DONE: &str = "done";
+const PIPELINE_FREEZE_CONFLICT: &str = "PIPELINE_FREEZE_CONFLICT";
 
 #[derive(Debug)]
 pub struct StageError {
@@ -152,6 +153,7 @@ impl<'a> PipelineOrchestrator<'a> {
             &context.related_context.world_rules,
         );
         if let Some(conflict) = freeze_conflict.as_ref() {
+            let conflict_error_code = conflict.conflict_type.error_code();
             self.pipeline_service.emit_event(
                 self.app_handle,
                 AiPipelineEvent {
@@ -159,7 +161,14 @@ impl<'a> PipelineOrchestrator<'a> {
                     phase: PHASE_CONTEXT.to_string(),
                     event_type: "progress".to_string(),
                     delta: None,
-                    error_code: Some(conflict.conflict_type.error_code().to_string()),
+                    error_code: Some(
+                        if conflict_error_code.is_empty() {
+                            PIPELINE_FREEZE_CONFLICT
+                        } else {
+                            conflict_error_code
+                        }
+                        .to_string(),
+                    ),
                     message: Some("certainty-zone conflict detected".to_string()),
                     recoverable: Some(true),
                     meta: Some(json!({

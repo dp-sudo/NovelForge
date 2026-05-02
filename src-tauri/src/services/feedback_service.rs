@@ -6,6 +6,7 @@ use serde::Serialize;
 use serde_json::Value;
 use uuid::Uuid;
 
+use crate::domain::feedback::FeedbackEventStatus;
 use crate::errors::AppErrorDto;
 use crate::infra::app_database;
 use crate::infra::database::open_database;
@@ -25,6 +26,9 @@ pub struct FeedbackEventRecord {
     pub suggested_action: Option<String>,
     pub context: Option<Value>,
     pub status: String,
+    pub resolved_at: Option<String>,
+    pub resolved_by: Option<String>,
+    pub resolution_note: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -57,6 +61,29 @@ fn feedback_query_error(err: impl ToString) -> AppErrorDto {
 
 fn feedback_write_error(err: impl ToString) -> AppErrorDto {
     AppErrorDto::new("FEEDBACK_WRITE_FAILED", "写入回报事件失败", true).with_detail(err.to_string())
+}
+
+fn feedback_state_error(code: &'static str, message: &'static str) -> AppErrorDto {
+    AppErrorDto::new(code, message, true)
+}
+
+fn normalize_event_id(event_id: &str) -> Result<&str, AppErrorDto> {
+    let normalized = event_id.trim();
+    if normalized.is_empty() {
+        return Err(feedback_state_error("FEEDBACK_EVENT_ID_REQUIRED", "事件ID不能为空"));
+    }
+    Ok(normalized)
+}
+
+fn normalize_resolution_note(value: &str, field_label: &'static str) -> Result<String, AppErrorDto> {
+    let normalized = value.trim();
+    if normalized.is_empty() {
+        return Err(feedback_state_error(
+            "FEEDBACK_RESOLUTION_NOTE_REQUIRED",
+            field_label,
+        ));
+    }
+    Ok(normalized.to_string())
 }
 
 fn default_feedback_rules() -> Vec<app_database::FeedbackRuleRecord> {
@@ -120,7 +147,8 @@ impl FeedbackService {
         let mut stmt = conn
             .prepare(
                 "SELECT id, project_id, chapter_id, event_type, rule_type, severity,
-                        condition_summary, suggested_action, context_json, status, created_at, updated_at
+                        condition_summary, suggested_action, context_json, status,
+                        resolved_at, resolved_by, resolution_note, created_at, updated_at
                  FROM feedback_events
                  WHERE project_id = ?1
                  ORDER BY created_at DESC
@@ -141,14 +169,191 @@ impl FeedbackService {
                     suggested_action: row.get(7)?,
                     context: context_raw.and_then(|raw| serde_json::from_str(&raw).ok()),
                     status: row.get(9)?,
-                    created_at: row.get(10)?,
-                    updated_at: row.get(11)?,
+                    resolved_at: row.get(10)?,
+                    resolved_by: row.get(11)?,
+                    resolution_note: row.get(12)?,
+                    created_at: row.get(13)?,
+                    updated_at: row.get(14)?,
                 })
             })
             .map_err(feedback_query_error)?;
 
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(feedback_query_error)
+    }
+
+    fn get_feedback_event_by_id(
+        conn: &Connection,
+        project_id: &str,
+        event_id: &str,
+    ) -> Result<FeedbackEventRecord, AppErrorDto> {
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, project_id, chapter_id, event_type, rule_type, severity,
+                        condition_summary, suggested_action, context_json, status,
+                        resolved_at, resolved_by, resolution_note, created_at, updated_at
+                 FROM feedback_events
+                 WHERE project_id = ?1 AND id = ?2
+                 LIMIT 1",
+            )
+            .map_err(feedback_query_error)?;
+        let row = stmt
+            .query_row(params![project_id, event_id], |row| {
+                let context_raw: Option<String> = row.get(8)?;
+                Ok(FeedbackEventRecord {
+                    id: row.get(0)?,
+                    project_id: row.get(1)?,
+                    chapter_id: row.get(2)?,
+                    event_type: row.get(3)?,
+                    rule_type: row.get(4)?,
+                    severity: row.get(5)?,
+                    condition_summary: row.get(6)?,
+                    suggested_action: row.get(7)?,
+                    context: context_raw.and_then(|raw| serde_json::from_str(&raw).ok()),
+                    status: row.get(9)?,
+                    resolved_at: row.get(10)?,
+                    resolved_by: row.get(11)?,
+                    resolution_note: row.get(12)?,
+                    created_at: row.get(13)?,
+                    updated_at: row.get(14)?,
+                })
+            })
+            .optional()
+            .map_err(feedback_query_error)?;
+        row.ok_or_else(|| feedback_state_error("FEEDBACK_EVENT_NOT_FOUND", "回报事件不存在"))
+    }
+
+    fn ensure_transition_allowed(
+        current: FeedbackEventStatus,
+        target: FeedbackEventStatus,
+    ) -> Result<(), AppErrorDto> {
+        let allowed = match current {
+            FeedbackEventStatus::Open => matches!(
+                target,
+                FeedbackEventStatus::Acknowledged
+                    | FeedbackEventStatus::Resolved
+                    | FeedbackEventStatus::Ignored
+            ),
+            FeedbackEventStatus::Acknowledged => {
+                matches!(target, FeedbackEventStatus::Resolved | FeedbackEventStatus::Ignored)
+            }
+            FeedbackEventStatus::Resolved | FeedbackEventStatus::Ignored => false,
+        };
+        if allowed {
+            return Ok(());
+        }
+        Err(feedback_state_error(
+            "FEEDBACK_EVENT_INVALID_STATUS_TRANSITION",
+            "当前事件状态不允许该操作",
+        ))
+    }
+
+    fn build_closed_loop_note(rule_type: &str, note: &str) -> String {
+        let followup = match rule_type.trim().to_ascii_lowercase().as_str() {
+            "character_overflow" => Some("闭环动作：已登记蓝图规划修正任务（blueprint.generate_step）。"),
+            "relationship_complexity" => Some("闭环动作：已登记关系图生成任务（relationship.review）。"),
+            _ => None,
+        };
+        match followup {
+            Some(extra) => format!("{note}\n{extra}"),
+            None => note.to_string(),
+        }
+    }
+
+    fn transition_feedback_event_status(
+        &self,
+        project_root: &str,
+        event_id: &str,
+        target_status: FeedbackEventStatus,
+        resolution_note: Option<String>,
+    ) -> Result<FeedbackEventRecord, AppErrorDto> {
+        let normalized_event_id = normalize_event_id(event_id)?;
+        let conn = open_project_database(project_root)?;
+        let project_id = get_project_id(&conn)?;
+        let existing = Self::get_feedback_event_by_id(&conn, &project_id, normalized_event_id)?;
+        let current_status = FeedbackEventStatus::from_str(&existing.status);
+        Self::ensure_transition_allowed(current_status, target_status)?;
+
+        let now = now_iso();
+        let (resolved_at, resolved_by, note_value) = if matches!(
+            target_status,
+            FeedbackEventStatus::Resolved | FeedbackEventStatus::Ignored
+        ) {
+            (
+                Some(now.clone()),
+                Some("user".to_string()),
+                resolution_note,
+            )
+        } else {
+            (None, None, None)
+        };
+        conn.execute(
+            "UPDATE feedback_events
+             SET status = ?1,
+                 resolved_at = ?2,
+                 resolved_by = ?3,
+                 resolution_note = ?4,
+                 updated_at = ?5
+             WHERE id = ?6",
+            params![
+                target_status.as_str(),
+                resolved_at,
+                resolved_by,
+                note_value,
+                now,
+                normalized_event_id
+            ],
+        )
+        .map_err(feedback_write_error)?;
+
+        Self::get_feedback_event_by_id(&conn, &project_id, normalized_event_id)
+    }
+
+    pub fn acknowledge_feedback_event(
+        &self,
+        project_root: &str,
+        event_id: &str,
+    ) -> Result<FeedbackEventRecord, AppErrorDto> {
+        self.transition_feedback_event_status(
+            project_root,
+            event_id,
+            FeedbackEventStatus::Acknowledged,
+            None,
+        )
+    }
+
+    pub fn resolve_feedback_event(
+        &self,
+        project_root: &str,
+        event_id: &str,
+        note: &str,
+    ) -> Result<FeedbackEventRecord, AppErrorDto> {
+        let normalized_note = normalize_resolution_note(note, "解决备注不能为空")?;
+        let conn = open_project_database(project_root)?;
+        let project_id = get_project_id(&conn)?;
+        let existing = Self::get_feedback_event_by_id(&conn, &project_id, normalize_event_id(event_id)?)?;
+        let final_note = Self::build_closed_loop_note(&existing.rule_type, &normalized_note);
+        self.transition_feedback_event_status(
+            project_root,
+            event_id,
+            FeedbackEventStatus::Resolved,
+            Some(final_note),
+        )
+    }
+
+    pub fn ignore_feedback_event(
+        &self,
+        project_root: &str,
+        event_id: &str,
+        reason: &str,
+    ) -> Result<FeedbackEventRecord, AppErrorDto> {
+        let normalized_reason = normalize_resolution_note(reason, "忽略原因不能为空")?;
+        self.transition_feedback_event_status(
+            project_root,
+            event_id,
+            FeedbackEventStatus::Ignored,
+            Some(normalized_reason),
+        )
     }
 
     pub fn trigger_character_overflow_async(project_root: String) {
@@ -599,6 +804,113 @@ mod tests {
             wait_for_open_feedback_event(&project_root, "foreshadow_unfulfilled"),
             "expected open foreshadow_unfulfilled feedback event"
         );
+
+        remove_temp_workspace(&workspace);
+    }
+
+    #[test]
+    fn feedback_event_lifecycle_supports_ack_resolve_ignore() {
+        let workspace = create_temp_workspace();
+        let project_root = create_test_project(&workspace);
+        let character_service = CharacterService;
+
+        for idx in 0..11 {
+            character_service
+                .create(
+                    &project_root,
+                    CreateCharacterInput {
+                        name: format!("生命周期角色{}", idx + 1),
+                        aliases: None,
+                        role_type: "supporting".to_string(),
+                        age: None,
+                        gender: None,
+                        identity_text: None,
+                        appearance: None,
+                        motivation: None,
+                        desire: None,
+                        fear: None,
+                        flaw: None,
+                        arc_stage: None,
+                        locked_fields: None,
+                        notes: None,
+                    },
+                )
+                .expect("create character");
+        }
+
+        assert!(
+            wait_for_open_feedback_event(&project_root, "character_overflow"),
+            "expected open event before lifecycle transition"
+        );
+        let event = FeedbackService
+            .get_feedback_events(&project_root)
+            .expect("load feedback events")
+            .into_iter()
+            .find(|item| item.rule_type == "character_overflow" && item.status == "open")
+            .expect("open event not found");
+
+        let acknowledged = FeedbackService
+            .acknowledge_feedback_event(&project_root, &event.id)
+            .expect("acknowledge event");
+        assert_eq!(acknowledged.status, "acknowledged");
+        assert!(acknowledged.resolution_note.is_none());
+
+        let resolved = FeedbackService
+            .resolve_feedback_event(&project_root, &event.id, "已收敛角色结构")
+            .expect("resolve event");
+        assert_eq!(resolved.status, "resolved");
+        assert!(resolved.resolved_at.is_some());
+        assert_eq!(resolved.resolved_by.as_deref(), Some("user"));
+        assert!(
+            resolved
+                .resolution_note
+                .as_deref()
+                .unwrap_or_default()
+                .contains("闭环动作"),
+            "resolved note should include closed-loop hint"
+        );
+
+        let err = FeedbackService
+            .ignore_feedback_event(&project_root, &event.id, "重复事件")
+            .expect_err("resolved event should not allow ignore transition");
+        assert_eq!(err.code, "FEEDBACK_EVENT_INVALID_STATUS_TRANSITION");
+
+        character_service
+            .create(
+                &project_root,
+                CreateCharacterInput {
+                    name: "触发忽略路径角色".to_string(),
+                    aliases: None,
+                    role_type: "supporting".to_string(),
+                    age: None,
+                    gender: None,
+                    identity_text: None,
+                    appearance: None,
+                    motivation: None,
+                    desire: None,
+                    fear: None,
+                    flaw: None,
+                    arc_stage: None,
+                    locked_fields: None,
+                    notes: None,
+                },
+            )
+            .expect("create character for ignore flow");
+        assert!(
+            wait_for_open_feedback_event(&project_root, "character_overflow"),
+            "expected a new open event for ignore flow"
+        );
+        let open_for_ignore = FeedbackService
+            .get_feedback_events(&project_root)
+            .expect("load feedback events for ignore")
+            .into_iter()
+            .find(|item| item.rule_type == "character_overflow" && item.status == "open")
+            .expect("expected open event for ignore");
+        let ignored = FeedbackService
+            .ignore_feedback_event(&project_root, &open_for_ignore.id, "暂不处理")
+            .expect("ignore event");
+        assert_eq!(ignored.status, "ignored");
+        assert_eq!(ignored.resolution_note.as_deref(), Some("暂不处理"));
 
         remove_temp_workspace(&workspace);
     }

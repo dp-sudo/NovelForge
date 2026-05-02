@@ -36,12 +36,12 @@
 - `plotApi.ts`：`listPlotNodes`、`createPlotNode`、`reorderPlotNodes`、`aiGeneratePlotNode`
 - `narrativeApi.ts`：`listNarrativeObligations`、`createNarrativeObligation`、`updateObligationStatus`、`deleteNarrativeObligation`、`aiGenerateNarrativeObligation`
 - `consistencyApi.ts`：`scanChapterConsistency`、`scanFullConsistency`、`listConsistencyIssues`、`updateIssueStatus`、`aiScanConsistency`
-- `statsApi.ts`：`getDashboardStats`、`getFeedbackEvents`
+- `statsApi.ts`：`getDashboardStats`、`getFeedbackEvents`、`acknowledgeFeedbackEvent`、`resolveFeedbackEvent`、`ignoreFeedbackEvent`
 - `contextApi.ts`：`getChapterContext`、`materializeChapterStructuredDrafts`、`applyAssetCandidate`、`applyStructuredDraft`、`rejectStructuredDraft`、`getReviewTrail`、`summarizeStateDeltaForFeedback`、`getSummaryFeedback`
 - `pipelineApi.ts`：`runTaskPipeline`、`cancelTaskPipeline`、`streamTaskPipeline`
 - `moduleAiApi.ts`：`runModuleAiTask`
 - `exportApi.ts`：`exportChapter`、`exportBook`
-- `settingsApi.ts`：`listProviders`、`saveProvider`、`deleteProvider`、`testProviderConnection`、`refreshProviderModels`、`getProviderModels`、`getRefreshLogs`、`listTaskRoutes`、`saveTaskRoute`、`deleteTaskRoute`、`listPromotionPolicies`、`savePromotionPolicy`、`checkRemoteRegistry`、`applyRegistryUpdate`、`loadEditorSettings`、`saveEditorSettings`、`saveWritingStyle`、`getWritingStyle`、`saveAiStrategyProfile`、`getAiStrategyProfile`、`saveProjectAiStrategy`、`getProjectAiStrategy`、`initProjectRepository`、`getProjectRepositoryStatus`、`commitProjectSnapshot`、`listProjectHistory`、`getLicenseStatus`、`activateLicense`、`checkAppUpdate`、`installAppUpdate`、`getDeprecatedCommandUsageReport`
+- `settingsApi.ts`：`listProviders`、`saveProvider`、`deleteProvider`、`testProviderConnection`、`refreshProviderModels`、`getProviderModels`、`getRefreshLogs`、`listTaskRoutes`、`saveTaskRoute`、`deleteTaskRoute`、`recommendRoutingStrategy`、`applyRoutingStrategyTemplate`、`getProjectRoutingStrategy`、`listPromotionPolicies`、`savePromotionPolicy`、`checkRemoteRegistry`、`applyRegistryUpdate`、`loadEditorSettings`、`saveEditorSettings`、`saveWritingStyle`、`getWritingStyle`、`saveAiStrategyProfile`、`getAiStrategyProfile`、`saveProjectAiStrategy`、`getProjectAiStrategy`、`initProjectRepository`、`getProjectRepositoryStatus`、`commitProjectSnapshot`、`listProjectHistory`、`getLicenseStatus`、`activateLicense`、`checkAppUpdate`、`installAppUpdate`、`getDeprecatedCommandUsageReport`
 - `modelPoolApi.ts`：`listModelPools`、`createModelPool`、`updateModelPool`、`deleteModelPool`
 - `skillsApi.ts`：`listSkills`、`getSkill`、`getSkillContent`、`createSkill`、`updateSkill`、`deleteSkill`、`importSkillFile`、`resetBuiltinSkill`、`refreshSkills`
 
@@ -95,6 +95,9 @@
 - `consistencyApi.ts`：`scanChapterConsistency -> scan_chapter_consistency`、`scanFullConsistency -> scan_full_consistency`、`listConsistencyIssues -> list_consistency_issues`、`updateIssueStatus -> update_issue_status`、`aiScanConsistency`（包装链路）
 - `statsApi.ts`：`getDashboardStats -> get_dashboard_stats`
 - `statsApi.ts`：`getFeedbackEvents -> get_feedback_events`
+- `statsApi.ts`：`acknowledgeFeedbackEvent -> acknowledge_feedback_event`
+- `statsApi.ts`：`resolveFeedbackEvent -> resolve_feedback_event`
+- `statsApi.ts`：`ignoreFeedbackEvent -> ignore_feedback_event`
 - `timelineApi.ts`：`listTimelineEntries -> list_timeline_entries`
 - `contextApi.ts`：
   - `getChapterContext -> get_chapter_context`
@@ -107,7 +110,7 @@
 - `exportApi.ts`：`exportChapter -> export_chapter`、`exportBook -> export_book`
 - `settingsApi.ts`：
   - Provider/模型：`listProviders -> list_providers`、`saveProvider -> save_provider`、`deleteProvider -> delete_provider`、`testProviderConnection -> test_provider_connection`、`refreshProviderModels -> refresh_provider_models`、`getProviderModels -> get_provider_models`、`getRefreshLogs -> get_refresh_logs`
-  - 路由/注册表：`listTaskRoutes -> list_task_routes`、`saveTaskRoute -> save_task_route`、`deleteTaskRoute -> delete_task_route`、`checkRemoteRegistry -> check_remote_registry`、`applyRegistryUpdate -> apply_registry_update`
+  - 路由/注册表：`listTaskRoutes -> list_task_routes`、`saveTaskRoute -> save_task_route`、`deleteTaskRoute -> delete_task_route`、`recommendRoutingStrategy -> recommend_routing_strategy`、`applyRoutingStrategyTemplate -> apply_routing_strategy_template`、`getProjectRoutingStrategy -> get_project_routing_strategy`、`checkRemoteRegistry -> check_remote_registry`、`applyRegistryUpdate -> apply_registry_update`
   - 晋升策略：`listPromotionPolicies -> list_promotion_policies`、`savePromotionPolicy -> save_promotion_policy`
   - 编辑器/策略：`loadEditorSettings -> load_editor_settings`、`saveEditorSettings -> save_editor_settings`、`saveWritingStyle -> save_writing_style`、`getWritingStyle -> get_writing_style`、`saveAiStrategyProfile -> save_ai_strategy_profile`、`getAiStrategyProfile -> get_ai_strategy_profile`、`saveProjectAiStrategy -> save_ai_strategy_profile`、`getProjectAiStrategy -> get_ai_strategy_profile`
   - Git/授权/更新：`initProjectRepository -> init_project_repository`、`getProjectRepositoryStatus -> get_project_repository_status`、`commitProjectSnapshot -> commit_project_snapshot`、`listProjectHistory -> list_project_history`、`getLicenseStatus -> get_license_status`、`activateLicense -> activate_license`、`checkAppUpdate -> check_app_update`、`installAppUpdate -> install_app_update`
@@ -202,6 +205,9 @@
 - Dashboard：
   - `get_dashboard_stats(projectRoot) -> DashboardStats`
   - `get_feedback_events(projectRoot) -> FeedbackEventRecord[]`
+  - `acknowledge_feedback_event(projectRoot, eventId) -> FeedbackEventRecord`
+  - `resolve_feedback_event(projectRoot, eventId, note) -> FeedbackEventRecord`
+  - `ignore_feedback_event(projectRoot, eventId, reason) -> FeedbackEventRecord`
 - Export：
   - `export_chapter(input: { projectRoot, chapterId, format, outputPath, options? }) -> { outputPath }`
   - `export_book(input: { projectRoot, format, outputPath, options? }) -> { outputPath }`
@@ -222,6 +228,9 @@
   - `list_task_routes()`
   - `save_task_route(route)`
   - `delete_task_route(routeId)`
+  - `recommend_routing_strategy(input: { projectRoot, projectStage?, taskType? }) -> RoutingStrategyTemplate[]`
+  - `apply_routing_strategy_template(input: { projectRoot, strategyId }) -> TaskRoute[]`
+  - `get_project_routing_strategy(projectRoot) -> string | null`
   - `route` 结构新增可选字段：`modelPoolId`、`fallbackModelPoolId`、`postTasks`
 - 模型池：
   - `list_model_pools() -> ModelPoolConfig[]`

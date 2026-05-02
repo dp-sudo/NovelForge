@@ -27,11 +27,23 @@ interface ModelRoutingPanelProps {
   buildFallbackPoolOptions: (currentPoolId: string) => SelectOption[];
   buildRouteProviderOptions: (currentProviderId: string) => SelectOption[];
   buildRouteModelOptions: (providerId: string, currentModelId: string) => SelectOption[];
+  routingStrategyTemplates: Array<{
+    id: string;
+    name: string;
+    description: string;
+    projectStage: string;
+    taskRiskLevel: string;
+    recommendedPools: Record<string, string>;
+  }>;
+  routingStrategyLoading: boolean;
+  selectedRoutingStrategyId: string | null;
   onTaskRouteProviderChange: (taskType: string, providerId: string) => void;
   onTaskRouteFallbackProviderChange: (taskType: string, providerId: string) => void;
   onUpdateTaskRoute: (taskType: string, patch: Partial<TaskRoute>) => void;
   onSaveTaskRoute: (taskType: string) => Promise<void>;
   onDeleteTaskRoute: (taskType: string) => Promise<void>;
+  onRecommendRoutingStrategy: () => Promise<void>;
+  onApplyRoutingStrategy: (strategyId: string) => Promise<void>;
 }
 
 function parsePostTaskList(raw: string): string[] {
@@ -53,11 +65,16 @@ export function ModelRoutingPanel(props: ModelRoutingPanelProps) {
     buildFallbackPoolOptions,
     buildRouteProviderOptions,
     buildRouteModelOptions,
+    routingStrategyTemplates,
+    routingStrategyLoading,
+    selectedRoutingStrategyId,
     onTaskRouteProviderChange,
     onTaskRouteFallbackProviderChange,
     onUpdateTaskRoute,
     onSaveTaskRoute,
     onDeleteTaskRoute,
+    onRecommendRoutingStrategy,
+    onApplyRoutingStrategy,
   } = props;
 
   return (
@@ -79,6 +96,57 @@ export function ModelRoutingPanel(props: ModelRoutingPanelProps) {
           {taskRouteMessage}
         </div>
       )}
+      <div className="rounded-lg border border-surface-700 bg-surface-800/40 p-3 space-y-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-sm font-semibold text-surface-100">推荐策略</h3>
+            <p className="text-xs text-surface-400">按项目阶段与任务风险推荐池级路由模板，可应用后再手动调整。</p>
+          </div>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => void onRecommendRoutingStrategy()}
+            disabled={routingStrategyLoading}
+          >
+            {routingStrategyLoading ? "加载中..." : "获取推荐"}
+          </Button>
+        </div>
+        {routingStrategyTemplates.length === 0 ? (
+          <p className="text-xs text-surface-500">尚未加载推荐策略</p>
+        ) : (
+          <div className="space-y-2">
+            {routingStrategyTemplates.map((template) => {
+              const recommendedPairs = Object.entries(template.recommendedPools || {}).slice(0, 3);
+              return (
+                <div key={template.id} className="rounded border border-surface-700 bg-surface-900/40 px-3 py-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <p className="text-sm text-surface-100">{template.name}</p>
+                      <p className="text-xs text-surface-400">
+                        {template.projectStage} / {template.taskRiskLevel} · {template.description}
+                      </p>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant={selectedRoutingStrategyId === template.id ? "primary" : "ghost"}
+                      onClick={() => void onApplyRoutingStrategy(template.id)}
+                      disabled={routingStrategyLoading}
+                    >
+                      {selectedRoutingStrategyId === template.id ? "已应用" : "应用"}
+                    </Button>
+                  </div>
+                  {recommendedPairs.length > 0 && (
+                    <div className="mt-1 text-[11px] text-surface-400">
+                      示例映射：
+                      {recommendedPairs.map(([taskType, poolId]) => `${taskType}→${poolId}`).join(" / ")}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
       {taskRoutesLoading ? (
         <p className="text-sm text-surface-400">路由加载中...</p>
       ) : (

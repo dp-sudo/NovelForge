@@ -18,3 +18,29 @@ pub async fn get_feedback_events(
 ) -> Result<Vec<FeedbackEventRecord>, AppErrorDto> {
     FeedbackService.get_feedback_events(&project_root)
 }
+
+#[tauri::command]
+pub async fn acknowledge_feedback_event(
+    project_root: String,
+    event_id: String,
+) -> Result<FeedbackEventRecord, AppErrorDto> {
+    FeedbackService.acknowledge_feedback_event(&project_root, &event_id)
+}
+
+#[tauri::command]
+pub async fn resolve_feedback_event(
+    project_root: String,
+    event_id: String,
+    note: String,
+) -> Result<FeedbackEventRecord, AppErrorDto> {
+    FeedbackService.resolve_feedback_event(&project_root, &event_id, &note)
+}
+
+#[tauri::command]
+pub async fn ignore_feedback_event(
+    project_root: String,
+    event_id: String,
+    reason: String,
+) -> Result<FeedbackEventRecord, AppErrorDto> {
+    FeedbackService.ignore_feedback_event(&project_root, &event_id, &reason)
+}

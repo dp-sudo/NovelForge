@@ -6,7 +6,6 @@ use serde_json::{json, Value};
 use uuid::Uuid;
 
 use crate::errors::AppErrorDto;
-use crate::domain::story_state::StateCategory;
 use crate::infra::database::open_database;
 use crate::infra::time::now_iso;
 use crate::services::project_service::get_project_id;
@@ -14,7 +13,34 @@ use crate::services::project_service::get_project_id;
 const ACTIVE_STATUS: &str = "active";
 const SUPERSEDED_STATUS: &str = "superseded";
 
-pub type StoryStateTaxonomy = StateCategory;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StoryStateTaxonomy {
+    Emotion,
+    SceneEnvironment,
+    RelationshipTemperature,
+    CharacterAction,
+    CharacterAppearance,
+    CharacterKnowledge,
+    SceneDangerLevel,
+    SceneSpatialConstraint,
+    Generic,
+}
+
+impl StoryStateTaxonomy {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Emotion => "emotion",
+            Self::SceneEnvironment => "scene_environment",
+            Self::RelationshipTemperature => "relationship_temperature",
+            Self::CharacterAction => "character_action",
+            Self::CharacterAppearance => "character_appearance",
+            Self::CharacterKnowledge => "character_knowledge",
+            Self::SceneDangerLevel => "scene_danger_level",
+            Self::SceneSpatialConstraint => "scene_spatial_constraint",
+            Self::Generic => "generic",
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]

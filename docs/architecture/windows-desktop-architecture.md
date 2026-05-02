@@ -1,8 +1,8 @@
 # NovelForge Windows 桌面端技术架构文档
 
 ## 1. 文档信息
-- 版本：v0.11
-- 状态：S23（阶段三：模型池管理、扩展状态 taxonomy、场景感知编排闭环）
+- 版本：v0.12
+- 状态：S24（阶段四：反馈生命周期闭环、池级路由策略推荐、场景分类离线回归）
 - 最后更新：2026-05-02
 - 代码基线：`src/` + `src-tauri/src/`
 
@@ -50,8 +50,9 @@
 - 重点新增面：
   - AI Pipeline：`run_ai_task_pipeline`, `cancel_ai_task_pipeline`。
   - 结构化确认：`apply_asset_candidate`, `apply_structured_draft`, `reject_structured_draft`, `get_review_trail`。
-  - 回报查询：`get_feedback_events`。
+  - 回报查询与流转：`get_feedback_events`、`acknowledge_feedback_event`、`resolve_feedback_event`、`ignore_feedback_event`。
   - 模型池管理：`list_model_pools`, `create_model_pool`, `update_model_pool`, `delete_model_pool`。
+  - 路由策略推荐：`recommend_routing_strategy`、`apply_routing_strategy_template`、`get_project_routing_strategy`。
   - 晋升策略：`list_promotion_policies`, `save_promotion_policy`。
   - 写作风格：`save_writing_style`, `get_writing_style`。
   - 项目级 AI 策略：`save_ai_strategy_profile`, `get_ai_strategy_profile`。
@@ -72,7 +73,7 @@
   - `StoryStateService`（状态账本管理，在 `ChapterService`、`ContextService`、`AiPipelineService` 中直接实例化使用）
   - `PromotionService`（统一晋升策略校验与晋升执行入口）
   - `ReviewTrailService`（用户审查动作查询/写入）
-  - `FeedbackService`（回报规则检测与事件落库）
+  - `FeedbackService`（回报规则检测、事件状态机与闭环备注回写）
 
 ### 4.5 Infra 层（`src-tauri/src/infra/*`）
 - `migrator.rs` + `migrations/*`：项目库/应用库迁移管理。
@@ -118,6 +119,8 @@
   - `project/0008_pipeline_run_meta.sql`（Pipeline run 元数据 `meta_json`）
   - `project/0009_user_review_actions.sql`（审查轨迹事件表）
   - `project/0010_feedback_events.sql`（回报事件 + `ai_pipeline_runs.post_task_results`）
+  - `project/0011_feedback_event_lifecycle.sql`（回报生命周期字段：`resolved_at/resolved_by/resolution_note`）
+  - `project/0012_project_routing_strategy.sql`（项目级路由策略 ID：`projects.routing_strategy_id`）
 - 兼容补列：
   - `database.rs::ensure_compatible_schema()` 在打开/初始化时补齐 `projects.writing_style`、`projects.ai_strategy_profile` 等历史缺列。
 
@@ -196,8 +199,9 @@
 - Chapter：章节 CRUD、重排、自动保存/恢复、快照、卷管理。
 - AI：pipeline run/cancel，模块化 AI 任务通过前端 API 薄封装统一转发到 pipeline（legacy stream 命令已移除）。
 - Context：上下文聚合、资产候选采纳、结构化草案确认/否决、审查轨迹查询。
-- Dashboard：统计总览 + 回报事件面板（`feedback_events`）。
+- Dashboard：统计总览 + 回报事件生命周期面板（open/acknowledged/resolved/ignored + 操作闭环）。
 - Settings：Provider/模型/模型池/路由/registry、编辑器设置、授权、更新。
+- Settings 路由页支持“推荐策略 -> 应用模板 -> 手动覆盖”的池级协同链路。
 - Skills：技能列表/详情/内容读取、创建、编辑、删除、导入、重置、重载。
 - Search/Integrity：关键字+语义检索、索引重建、项目完整性检查。
 

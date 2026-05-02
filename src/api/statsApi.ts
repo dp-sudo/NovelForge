@@ -31,6 +31,9 @@ export interface FeedbackEvent {
   suggestedAction?: string | null;
   context?: Record<string, unknown> | null;
   status: string;
+  resolvedAt?: string | null;
+  resolvedBy?: string | null;
+  resolutionNote?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -47,4 +50,27 @@ export async function getDashboardStats(projectRoot: string): Promise<DashboardS
 
 export async function getFeedbackEvents(projectRoot: string): Promise<FeedbackEvent[]> {
   return invokeCommand<FeedbackEvent[]>("get_feedback_events", { projectRoot });
+}
+
+export async function acknowledgeFeedbackEvent(
+  projectRoot: string,
+  eventId: string,
+): Promise<FeedbackEvent> {
+  return invokeCommand<FeedbackEvent>("acknowledge_feedback_event", { projectRoot, eventId });
+}
+
+export async function resolveFeedbackEvent(
+  projectRoot: string,
+  eventId: string,
+  note: string,
+): Promise<FeedbackEvent> {
+  return invokeCommand<FeedbackEvent>("resolve_feedback_event", { projectRoot, eventId, note });
+}
+
+export async function ignoreFeedbackEvent(
+  projectRoot: string,
+  eventId: string,
+  reason: string,
+): Promise<FeedbackEvent> {
+  return invokeCommand<FeedbackEvent>("ignore_feedback_event", { projectRoot, eventId, reason });
 }

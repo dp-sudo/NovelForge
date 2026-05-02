@@ -66,11 +66,15 @@ fn ensure_compatible_schema(conn: &Connection) -> SqlResult<()> {
     ensure_column(conn, "projects", "narrative_pov", "TEXT")?;
     ensure_column(conn, "projects", "writing_style", "TEXT")?;
     ensure_column(conn, "projects", "ai_strategy_profile", "TEXT")?;
+    ensure_column(conn, "projects", "routing_strategy_id", "TEXT")?;
     ensure_column(conn, "chapters", "target_words", "INTEGER DEFAULT 0")?;
     ensure_column(conn, "chapters", "current_words", "INTEGER DEFAULT 0")?;
     ensure_column(conn, "chapters", "version", "INTEGER NOT NULL DEFAULT 1")?;
     ensure_column(conn, "chapters", "is_deleted", "INTEGER NOT NULL DEFAULT 0")?;
     ensure_column(conn, "chapters", "volume_id", "TEXT")?;
+    ensure_column(conn, "feedback_events", "resolved_at", "TEXT")?;
+    ensure_column(conn, "feedback_events", "resolved_by", "TEXT")?;
+    ensure_column(conn, "feedback_events", "resolution_note", "TEXT")?;
     Ok(())
 }
 
@@ -192,11 +196,15 @@ mod tests {
         assert!(column_exists(&upgraded, "projects", "narrative_pov"));
         assert!(column_exists(&upgraded, "projects", "writing_style"));
         assert!(column_exists(&upgraded, "projects", "ai_strategy_profile"));
+        assert!(column_exists(&upgraded, "projects", "routing_strategy_id"));
         assert!(column_exists(&upgraded, "chapters", "target_words"));
         assert!(column_exists(&upgraded, "chapters", "current_words"));
         assert!(column_exists(&upgraded, "chapters", "version"));
         assert!(column_exists(&upgraded, "chapters", "is_deleted"));
         assert!(column_exists(&upgraded, "chapters", "volume_id"));
+        assert!(column_exists(&upgraded, "feedback_events", "resolved_at"));
+        assert!(column_exists(&upgraded, "feedback_events", "resolved_by"));
+        assert!(column_exists(&upgraded, "feedback_events", "resolution_note"));
 
         remove_temp_workspace(&workspace);
     }

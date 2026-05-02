@@ -6,6 +6,7 @@ import type {
   ModelRecord,
   RefreshLog,
   PromotionPolicy,
+  RoutingStrategyTemplate,
   TaskRoute,
   WritingStyle,
 } from "../types/ai.js";
@@ -17,6 +18,7 @@ export type {
   ModelRecord,
   RefreshLog,
   PromotionPolicy,
+  RoutingStrategyTemplate,
   TaskRoute,
   WritingStyle,
 } from "../types/ai.js";
@@ -126,6 +128,25 @@ export async function listPromotionPolicies(): Promise<PromotionPolicy[]> {
 
 export async function savePromotionPolicy(policy: PromotionPolicy): Promise<PromotionPolicy> {
   return invokeCommand<PromotionPolicy>("save_promotion_policy", { policy });
+}
+
+export async function recommendRoutingStrategy(input: {
+  projectRoot: string;
+  projectStage?: string;
+  taskType?: string;
+}): Promise<RoutingStrategyTemplate[]> {
+  return invokeCommand<RoutingStrategyTemplate[]>("recommend_routing_strategy", { input });
+}
+
+export async function applyRoutingStrategyTemplate(input: {
+  projectRoot: string;
+  strategyId: string;
+}): Promise<TaskRoute[]> {
+  return invokeCommand<TaskRoute[]>("apply_routing_strategy_template", { input });
+}
+
+export async function getProjectRoutingStrategy(projectRoot: string): Promise<string | null> {
+  return invokeCommand<string | null>("get_project_routing_strategy", { projectRoot });
 }
 
 // ── Remote registry ──

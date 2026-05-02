@@ -1,8 +1,8 @@
 # NovelForge 运行流程文档（Main / Renderer / API / Service）
 
 ## 1. 文档信息
-- 版本：v1.1
-- 状态：S23（阶段三：模型池管理 + 扩展状态 taxonomy + 场景感知后置链）
+- 版本：v1.2
+- 状态：S24（阶段四：反馈事件生命周期 + 路由推荐 + 场景分类离线评估）
 - 最后更新：2026-05-02
 
 ## 2. 运行时角色
@@ -118,6 +118,22 @@
 - 路由写入：
   - `save_task_route` 做 canonical、字段 trim、重试次数边界控制（1..8）。
   - 路由对象新增可选字段：`modelPoolId` / `fallbackModelPoolId` / `postTasks`（兼容旧 provider/model 路由）。
+- 路由策略推荐：
+  - `recommend_routing_strategy`：按项目阶段与任务风险返回模板列表。
+  - `apply_routing_strategy_template`：批量应用模板映射并持久化 `projects.routing_strategy_id`。
+  - `get_project_routing_strategy`：读取项目当前已选策略 ID，用于重开项目自动回放策略。
+
+### 4.9 回报事件生命周期
+1. `FeedbackService` 在角色/关系/章节保存链路触发检测并写入 `feedback_events(status=open)`。
+2. Dashboard 可执行 `acknowledge_feedback_event` / `resolve_feedback_event` / `ignore_feedback_event`。
+3. 状态流转约束：`open -> acknowledged/resolved/ignored`，`acknowledged -> resolved/ignored`，终态不可再次迁移。
+4. `resolve/ignore` 记录 `resolved_at`、`resolved_by`、`resolution_note`，并在高优先规则写入闭环动作备注。
+
+### 4.10 场景分类离线评估
+1. 基准集：`tests/fixtures/scene_classification_benchmark.json`（5 类场景，50 条样本）。
+2. 回归评估：`tests/scene_classification_evaluation.test.ts` 输出准确率、混淆矩阵、各类召回率。
+3. 阈值：准确率 `>= 0.85`，且相对基线回退不超过 `5%`（`tests/fixtures/scene_classification_baseline.json`）。
+4. CI：`.github/workflows/scene-classification-regression.yml` 在 PR 中自动运行该评估。
 
 ### 4.7 设置、备份与发布能力
 - Settings 前端已拆分：

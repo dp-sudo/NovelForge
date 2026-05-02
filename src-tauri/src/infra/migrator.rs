@@ -72,6 +72,14 @@ fn project_migrations() -> Vec<Migration> {
             version: "0010_feedback_events",
             sql: include_str!("../../migrations/project/0010_feedback_events.sql"),
         },
+        Migration {
+            version: "0011_feedback_event_lifecycle",
+            sql: include_str!("../../migrations/project/0011_feedback_event_lifecycle.sql"),
+        },
+        Migration {
+            version: "0012_project_routing_strategy",
+            sql: include_str!("../../migrations/project/0012_project_routing_strategy.sql"),
+        },
     ]
 }
 
@@ -600,6 +608,12 @@ mod tests {
         assert!(has_table(&conn, "structured_draft_batches"));
         assert!(has_table(&conn, "structured_draft_items"));
         assert!(has_table(&conn, "story_state"));
+        assert!(has_table(&conn, "feedback_events"));
+        assert!(has_column(&conn, "feedback_events", "status"));
+        assert!(has_column(&conn, "feedback_events", "resolved_at"));
+        assert!(has_column(&conn, "feedback_events", "resolved_by"));
+        assert!(has_column(&conn, "feedback_events", "resolution_note"));
+        assert!(has_column(&conn, "projects", "routing_strategy_id"));
         assert!(has_index(
             &conn,
             "structured_draft_items",

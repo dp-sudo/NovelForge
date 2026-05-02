@@ -16,6 +16,9 @@ import {
   listTaskRoutes,
   saveTaskRoute,
   deleteTaskRoute,
+  recommendRoutingStrategy,
+  applyRoutingStrategyTemplate,
+  getProjectRoutingStrategy,
   listPromotionPolicies,
   savePromotionPolicy,
   loadEditorSettings,
@@ -37,6 +40,7 @@ import {
   type LicenseStatus,
   type AppUpdateInfo,
   type TaskRoute,
+  type RoutingStrategyTemplate,
   type PromotionPolicy,
 } from "../../api/settingsApi";
 import {
@@ -158,6 +162,9 @@ export function SettingsPage() {
   const [modelPools, setModelPools] = useState<ModelPool[]>([]);
   const [modelPoolsLoading, setModelPoolsLoading] = useState(true);
   const [modelPoolMessage, setModelPoolMessage] = useState<string | null>(null);
+  const [routingStrategyTemplates, setRoutingStrategyTemplates] = useState<RoutingStrategyTemplate[]>([]);
+  const [routingStrategyLoading, setRoutingStrategyLoading] = useState(false);
+  const [selectedRoutingStrategyId, setSelectedRoutingStrategyId] = useState<string | null>(null);
   const [promotionPolicies, setPromotionPolicies] = useState<PromotionPolicy[]>([]);
   const [promotionPolicyMessage, setPromotionPolicyMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -603,6 +610,25 @@ export function SettingsPage() {
     return null;
   }
 
+  function buildTaskRouteStateFromRoutes(
+    routes: TaskRoute[],
+    primaryRouteSeed?: { providerId: string; modelId: string } | null,
+  ): Record<string, TaskRouteFormState> {
+    const routeMap: Record<string, TaskRouteFormState> = {};
+    for (const task of TASK_ROUTE_OPTIONS) {
+      const existingRoute = routes.find((route) => canonicalTaskType(route.taskType) === task.value);
+      routeMap[task.value] = {
+        route: existingRoute
+          ? normalizeRoute({ ...existingRoute, taskType: task.value })
+          : createEmptyTaskRoute(task.value, primaryRouteSeed || undefined),
+        saving: false,
+        deleting: false,
+        error: null,
+      };
+    }
+    return routeMap;
+  }
+
   function collectProviderModelChoices(providerId: string): string[] {
     const provider = vendors[providerId];
     if (!provider) return [];
@@ -684,19 +710,13 @@ export function SettingsPage() {
           };
         }
 
-        const routeMap: Record<string, TaskRouteFormState> = {};
-        for (const task of TASK_ROUTE_OPTIONS) {
-          const existingRoute = routes.find(
-            (route) => canonicalTaskType(route.taskType) === task.value
-          );
-          routeMap[task.value] = {
-            route: existingRoute
-              ? normalizeRoute({ ...existingRoute, taskType: task.value })
-              : createEmptyTaskRoute(task.value, primaryRouteSeed || undefined),
-            saving: false,
-            deleting: false,
-            error: null,
-          };
+        const routeMap = buildTaskRouteStateFromRoutes(routes, primaryRouteSeed);
+
+        if (projectRoot) {
+          const strategyId = await getProjectRoutingStrategy(projectRoot).catch(() => null);
+          setSelectedRoutingStrategyId(strategyId);
+        } else {
+          setSelectedRoutingStrategyId(null);
         }
 
         setVendors(map);
@@ -1090,6 +1110,49 @@ export function SettingsPage() {
     }
   }
 
+  async function handleRecommendRoutingStrategy() {
+    if (!projectRoot) {
+      setTaskRouteMessage("请先打开项目，再获取推荐策略");
+      return;
+    }
+    setRoutingStrategyLoading(true);
+    try {
+      const templates = await recommendRoutingStrategy({ projectRoot });
+      setRoutingStrategyTemplates(templates);
+      if (templates.length > 0) {
+        setTaskRouteMessage(`已生成 ${templates.length} 个推荐策略`);
+      } else {
+        setTaskRouteMessage("暂无可用推荐策略");
+      }
+    } catch (err: unknown) {
+      setTaskRouteMessage(getErrorMessage(err, "获取推荐策略失败"));
+      setRoutingStrategyTemplates([]);
+    } finally {
+      setRoutingStrategyLoading(false);
+    }
+  }
+
+  async function handleApplyRoutingStrategy(strategyId: string) {
+    if (!projectRoot) {
+      setTaskRouteMessage("请先打开项目，再应用推荐策略");
+      return;
+    }
+    setRoutingStrategyLoading(true);
+    try {
+      const savedRoutes = await applyRoutingStrategyTemplate({ projectRoot, strategyId });
+      const primaryRouteSeed = pickPrimaryRouteSeed(
+        Object.values(vendors).map((item) => item.config),
+      );
+      setTaskRoutes(buildTaskRouteStateFromRoutes(savedRoutes, primaryRouteSeed));
+      setSelectedRoutingStrategyId(strategyId);
+      setTaskRouteMessage(`已应用推荐策略：${strategyId}`);
+    } catch (err: unknown) {
+      setTaskRouteMessage(getErrorMessage(err, "应用推荐策略失败"));
+    } finally {
+      setRoutingStrategyLoading(false);
+    }
+  }
+
   async function refreshModelPools(message?: string) {
     setModelPoolsLoading(true);
     try {
@@ -1451,11 +1514,16 @@ export function SettingsPage() {
             buildFallbackPoolOptions={buildFallbackPoolOptions}
             buildRouteProviderOptions={buildRouteProviderOptions}
             buildRouteModelOptions={buildRouteModelOptions}
+            routingStrategyTemplates={routingStrategyTemplates}
+            routingStrategyLoading={routingStrategyLoading}
+            selectedRoutingStrategyId={selectedRoutingStrategyId}
             onTaskRouteProviderChange={handleTaskRouteProviderChange}
             onTaskRouteFallbackProviderChange={handleTaskRouteFallbackProviderChange}
             onUpdateTaskRoute={updateTaskRoute}
             onSaveTaskRoute={handleSaveTaskRoute}
             onDeleteTaskRoute={handleDeleteTaskRoute}
+            onRecommendRoutingStrategy={handleRecommendRoutingStrategy}
+            onApplyRoutingStrategy={handleApplyRoutingStrategy}
           />
 
           <Card padding="lg" className="space-y-4">
