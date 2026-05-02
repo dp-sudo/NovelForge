@@ -67,7 +67,7 @@ pub fn open_database(project_root: &Path) -> SqlResult<Connection> {
 
 fn configure_connection(conn: &Connection) -> SqlResult<()> {
     conn.busy_timeout(Duration::from_secs(5))?;
-    conn.execute_batch("PRAGMA foreign_keys = ON;")
+    conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA journal_mode=WAL;")
 }
 
 fn ensure_compatible_schema(conn: &Connection) -> SqlResult<()> {
@@ -86,7 +86,20 @@ fn ensure_compatible_schema(conn: &Connection) -> SqlResult<()> {
     Ok(())
 }
 
+/// Validate a SQL identifier (table/column name) to prevent injection via format!().
+/// SQLite identifiers must be alphanumeric + underscore.
+fn validate_safe_ident(name: &str) -> SqlResult<()> {
+    if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+        return Err(rusqlite::Error::InvalidParameterName(format!(
+            "Unsafe SQL identifier: {name}"
+        )));
+    }
+    Ok(())
+}
+
 fn ensure_column(conn: &Connection, table: &str, column: &str, definition: &str) -> SqlResult<()> {
+    validate_safe_ident(table)?;
+    validate_safe_ident(column)?;
     if table_has_column(conn, table, column)? {
         return Ok(());
     }
@@ -262,5 +275,31 @@ mod tests {
         assert!(busy_timeout_ms >= 5_000);
 
         remove_temp_workspace(&workspace);
+    }
+
+    #[test]
+    fn open_database_configures_wal_mode() {
+        let workspace = create_temp_workspace();
+        initialize_database(&workspace).expect("initialize database");
+
+        let conn = open_database(&workspace).expect("open database");
+        let journal_mode: String = conn
+            .query_row("PRAGMA journal_mode", [], |row| row.get(0))
+            .expect("query journal_mode pragma");
+        assert_eq!(journal_mode.to_lowercase(), "wal");
+
+        remove_temp_workspace(&workspace);
+    }
+
+    #[test]
+    fn validate_safe_ident_rejects_unsafe_names() {
+        use super::validate_safe_ident;
+        assert!(validate_safe_ident("projects").is_ok());
+        assert!(validate_safe_ident("chapters").is_ok());
+        assert!(validate_safe_ident("feedback_events").is_ok());
+        assert!(validate_safe_ident("").is_err());
+        assert!(validate_safe_ident("projects; DROP TABLE").is_err());
+        assert!(validate_safe_ident("../secrets").is_err());
+        assert!(validate_safe_ident("a b").is_err());
     }
 }

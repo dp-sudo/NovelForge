@@ -82,9 +82,9 @@ fn configure_connection(conn: &Connection) -> Result<(), AppErrorDto> {
         AppErrorDto::new("APP_DB_OPEN_FAILED", "无法配置应用数据库等待锁策略", false)
             .with_detail(e.to_string())
     })?;
-    conn.execute_batch("PRAGMA foreign_keys = ON;")
+    conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA journal_mode=WAL;")
         .map_err(|e| {
-            AppErrorDto::new("APP_DB_OPEN_FAILED", "无法启用应用数据库外键约束", false)
+            AppErrorDto::new("APP_DB_OPEN_FAILED", "无法配置应用数据库", false)
                 .with_detail(e.to_string())
         })
 }
@@ -826,12 +826,26 @@ fn ensure_schema_compatibility(conn: &Connection) -> Result<(), AppErrorDto> {
     Ok(())
 }
 
+/// Validate a SQL identifier (table/column name) to prevent injection via format!().
+fn validate_safe_ident(name: &str) -> Result<(), AppErrorDto> {
+    if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+        return Err(AppErrorDto::new(
+            "APP_DB_UNSAFE_IDENTIFIER",
+            &format!("Unsafe SQL identifier: {name}"),
+            false,
+        ));
+    }
+    Ok(())
+}
+
 fn ensure_column(
     conn: &Connection,
     table: &str,
     column: &str,
     ddl: &str,
 ) -> Result<(), AppErrorDto> {
+    validate_safe_ident(table)?;
+    validate_safe_ident(column)?;
     let pragma = format!("PRAGMA table_info({})", table);
     let mut stmt = conn.prepare(&pragma).map_err(|e| {
         AppErrorDto::new("APP_DB_SCHEMA_READ_FAILED", "无法读取应用数据库结构", false)
@@ -967,6 +981,35 @@ mod tests {
             .query_row("PRAGMA busy_timeout", [], |row| row.get(0))
             .expect("query busy_timeout pragma");
         assert!(busy_timeout_ms >= 5_000);
+    }
+
+    #[test]
+    fn app_db_configures_wal_mode_on_file_database() {
+        let tmp = std::env::temp_dir().join(format!("novelforge-wal-test-{}", Uuid::new_v4()));
+        let conn = Connection::open(&tmp).expect("open file db");
+        configure_connection(&conn).expect("configure connection");
+        let journal_mode: String = conn
+            .query_row("PRAGMA journal_mode", [], |row| row.get(0))
+            .expect("query journal_mode pragma");
+        assert_eq!(journal_mode.to_lowercase(), "wal");
+        drop(conn);
+        // 清理可能存在的 WAL sidecar 文件（WAL 文件首次写入后才会创建）
+        let _ = std::fs::remove_file(&tmp);
+        let tmp_wal = format!("{}-wal", tmp.to_string_lossy());
+        let tmp_shm = format!("{}-shm", tmp.to_string_lossy());
+        let _ = std::fs::remove_file(Path::new(&tmp_wal));
+        let _ = std::fs::remove_file(Path::new(&tmp_shm));
+    }
+
+    #[test]
+    fn app_validate_safe_ident_rejects_unsafe_names() {
+        use super::validate_safe_ident;
+        assert!(validate_safe_ident("llm_models").is_ok());
+        assert!(validate_safe_ident("llm_task_routes").is_ok());
+        assert!(validate_safe_ident("").is_err());
+        assert!(validate_safe_ident("tbl; DROP TABLE").is_err());
+        assert!(validate_safe_ident("../config").is_err());
+        assert!(validate_safe_ident("col name").is_err());
     }
 
     #[test]

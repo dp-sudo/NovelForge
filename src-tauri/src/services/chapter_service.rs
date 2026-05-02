@@ -487,7 +487,7 @@ impl ChapterService {
         content: &str,
     ) -> Result<SaveChapterOutput, AppErrorDto> {
         let project_root_path = Path::new(project_root);
-        let conn = open_database(project_root_path).map_err(|err| {
+        let mut conn = open_database(project_root_path).map_err(|err| {
             AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false)
                 .with_detail(err.to_string())
                 .with_suggested_action("请检查 database/project.sqlite 是否存在并可读写")
@@ -551,7 +551,14 @@ impl ChapterService {
                 .with_suggested_action("请检查章节文件写入权限")
         })?;
 
-        conn.execute(
+        // 事务边界：DB 元数据更新 + draft 清理为原子操作
+        let tx = conn.transaction().map_err(|err| {
+            AppErrorDto::new("CHAPTER_SAVE_FAILED", "保存章节失败", true)
+                .with_detail(err.to_string())
+                .with_suggested_action("请检查数据库事务状态")
+        })?;
+
+        tx.execute(
             "
         UPDATE chapters
         SET current_words = ?1, version = version + 1, updated_at = ?2
@@ -568,6 +575,12 @@ impl ChapterService {
         let draft_path = draft_path_from_content(project_root_path, &chapter_row.content_path)?;
         let _ = fs::remove_file(draft_path);
 
+        tx.commit().map_err(|err| {
+            AppErrorDto::new("CHAPTER_SAVE_FAILED", "保存章节失败", true)
+                .with_detail(err.to_string())
+                .with_suggested_action("请检查数据库事务状态")
+        })?;
+
         if let Err(err) = StoryStateService.record_window_progress(
             project_root,
             chapter_id,
@@ -581,6 +594,8 @@ impl ChapterService {
                 err.detail
             );
         }
+
+        // trigger_foreshadow_unfulfilled_async 内部已使用 std::thread::spawn（真正异步）
         FeedbackService::trigger_foreshadow_unfulfilled_async(
             project_root.to_string(),
             chapter_id.to_string(),
