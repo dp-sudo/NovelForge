@@ -246,6 +246,7 @@
 - 项目级 AI 策略：
   - `save_ai_strategy_profile(input: { projectRoot, profile }) -> void`
   - `get_ai_strategy_profile(input: { projectRoot }) -> AiStrategyProfile`
+  - `AiStrategyProfile` 关键字段：`stateWritePolicy`、`continuityPackDepth`、`enforceContextCompleteness`、`chapterGenerationMode`、`windowPlanningHorizon`
 - 兼容命令：
   - 问题4修复：`load_provider_config`, `save_provider_config`（compatibility-only，已标注 deprecated）
 - 授权：
@@ -268,7 +269,7 @@
 - `get_skill_content(id) -> string`
 - `create_skill(input) -> SkillManifest`
 - `update_skill(input: { id, body?, manifest? }) -> SkillManifest`
-  - `manifest` 为可选 patch，支持更新 `skillClass/bundleIds/alwaysOn/triggerConditions/requiredContexts/stateWrites/automationTier/sceneTags/affectsLayers` 等元数据
+  - `manifest` 为可选 patch，支持更新 `skillClass/bundleIds/alwaysOn/triggerConditions/requiredContexts/stateWrites/workflowStages/postTasks/automationTier/sceneTags/affectsLayers` 等元数据
 - `delete_skill(id) -> void`
 - `import_skill_file(filePath) -> SkillManifest`
 - `reset_builtin_skill(id) -> SkillManifest`
@@ -293,13 +294,15 @@
     - 当仅走 `autoPersist` 推导路径时，前端会记录 `PIPELINE.LEGACY_POLICY_BRIDGE` 诊断日志。
   - 运行时行为：
     - `prompt` 前会编译 `ContinuityPack`，并注入技能选择结果。
-    - 章节关键任务会强制最小上下文深度为 `deep`；若关键层缺失，将发出 `warning` 事件（`errorCode=PIPELINE_CONTEXT_INCOMPLETE`，`meta.warningCode=context_incomplete`）。
+    - 章节关键任务会强制最小上下文深度为 `deep`；若关键层缺失会先发 `warning`（`PIPELINE_CONTEXT_INCOMPLETE`），并在关键任务或策略启用硬门禁时返回 `PIPELINE_CONTEXT_INCOMPLETE_BLOCKED`。
     - 技能选择不再只看 `taskType`；还会同时应用项目级 `alwaysOnPolicySkills/defaultCapabilityBundles`，以及技能元数据 `sceneTags/requiredContexts/automationTier`。
+    - `availableContexts` 由 `ContinuityPack.get_available_context_keys()` 推断；若请求级 `skillSelection.availableContexts` 覆盖，会发 `PIPELINE_AVAILABLE_CONTEXTS_OVERRIDDEN` 事件。
+    - 被过滤技能会记录 `filteredSkills[{ id, skillClass, reason, missingContexts? }]`；关键 workflow/policy 技能因上下文不足被过滤时会发 `PIPELINE_SKILL_CONTEXT_FILTERED`。
     - 若技能声明 `affectsLayers`，`orchestrator` 会按聚合后的 layer focus 对 `ContinuityPack` 进行裁剪（保留 constitution/lexicon 护栏层）。
     - 若技能命中 `route_override`，仅覆盖本次请求的 provider/model，不修改项目配置。
     - 默认路由支持 `task -> model pool -> provider/model` 兼容链路；路由解析结果会包含 `modelPoolId` 元信息。
-    - 场景后置链：`SceneClassifier` 判别场景类型后，由 `PostTaskExecutor` 执行 `review_continuity/extract_state/extract_assets`，结果写入 `ai_pipeline_runs.post_task_results`。
-    - 若激活技能声明 `stateWrites`，后端会按项目级 `stateWritePolicy` 追加 `story_state` 记录，并写入 `skillIds/affectsLayers` 运行态元数据。
+    - 场景后置链：`SceneClassifier` 判别场景类型后，由 `PostTaskExecutor` 执行 `review_continuity/extract_state/extract_assets`；后置任务优先来自技能 `postTasks`（无声明时回退路由 `post_tasks`），并写入 `postTaskSources[{ task, sourceSkillId }]`。
+    - 若激活技能声明 `stateWrites`，后端会按优先级 `workflow > extractor > capability > policy > review` 去重回写 `story_state`，并写入 `skillIds/affectsLayers/sourceSkillId` 运行态元数据。
     - 若检测到用户指令改写冻结区条目，后端返回 `PIPELINE_FREEZE_CONFLICT`；若违反承诺区，返回 `PIPELINE_PROMISED_CONFLICT`。
 - AI 功能任务（前端薄封装，统一走 pipeline）：
   - `generateBlueprintSuggestion` -> `runModuleAiTask(taskType="blueprint.generate_step")`

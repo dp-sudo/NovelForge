@@ -45,6 +45,7 @@ pub fn build_runtime_story_state_input(
     persist_mode: &str,
     records: &[PersistedRecord],
     state_write_key: &str,
+    source_skill_id: Option<&str>,
     active_skill_ids: &[String],
     affects_layers: &[String],
 ) -> Option<StoryStateInput> {
@@ -102,6 +103,7 @@ pub fn build_runtime_story_state_input(
             "persistMode": persist_mode.trim(),
             "automationTier": input.automation_tier.as_deref().map(str::trim).filter(|value| !value.is_empty()),
             "chapterId": input.chapter_id.as_deref().map(str::trim).filter(|value| !value.is_empty()),
+            "sourceSkillId": source_skill_id.map(str::trim).filter(|value| !value.is_empty()),
             "skillIds": active_skill_ids,
             "affectsLayers": affects_layers,
             "recordRefs": record_refs,
@@ -307,6 +309,7 @@ mod tests {
             "formal",
             &[],
             "character.emotion",
+            Some("workflow.chapter.draft"),
             &["bundle.emotion-progression".to_string()],
             &["state".to_string()],
         )
@@ -319,6 +322,13 @@ mod tests {
                 .get("category")
                 .and_then(|value| value.as_str()),
             Some("emotion")
+        );
+        assert_eq!(
+            state_input
+                .payload_json
+                .get("sourceSkillId")
+                .and_then(|value| value.as_str()),
+            Some("workflow.chapter.draft")
         );
         assert_eq!(
             state_input
@@ -352,6 +362,7 @@ mod tests {
             "formal",
             &[],
             "scene.environment",
+            None,
             &[],
             &[],
         )
@@ -372,6 +383,7 @@ mod tests {
             "derived_review",
             &[relationship_record],
             "relationship.temperature",
+            Some("extractor.relationship"),
             &[],
             &[],
         )
@@ -402,6 +414,7 @@ mod tests {
             "formal",
             &[],
             "character.action",
+            None,
             &[],
             &[],
         )
@@ -422,6 +435,7 @@ mod tests {
             "formal",
             &[],
             "character.knowledge",
+            None,
             &[],
             &[],
         )
@@ -442,6 +456,7 @@ mod tests {
             "formal",
             &[],
             "scene.danger_level",
+            None,
             &[],
             &[],
         )

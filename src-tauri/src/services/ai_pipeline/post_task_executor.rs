@@ -3,12 +3,15 @@ use serde_json::json;
 
 use crate::services::ai_pipeline::scene_classifier::SceneClassifier;
 use crate::services::context_service::ContextService;
+use crate::services::skill_registry::PostTaskSource;
 use crate::services::story_state_service::{StoryStateInput, StoryStateService};
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PostTaskResult {
     pub task_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_skill_id: Option<String>,
     pub status: String,
     pub summary: String,
     pub error: Option<String>,
@@ -105,12 +108,13 @@ impl PostTaskExecutor {
         project_root: &str,
         chapter_id: Option<&str>,
         scene_type: &str,
-        route_post_tasks: &[String],
+        configured_post_tasks: &[String],
+        post_task_sources: &[PostTaskSource],
         normalized_output: &str,
         context_service: &ContextService,
     ) -> Vec<PostTaskResult> {
         let mut merged = SceneClassifier::default_post_tasks(scene_type);
-        for task in route_post_tasks {
+        for task in configured_post_tasks {
             let normalized = task.trim().to_ascii_lowercase();
             if normalized.is_empty() {
                 continue;
@@ -125,7 +129,11 @@ impl PostTaskExecutor {
 
         let mut results = Vec::new();
         for task in merged {
-            let result = match task.as_str() {
+            let source_skill_id = post_task_sources
+                .iter()
+                .find(|source| source.task.eq_ignore_ascii_case(task.as_str()))
+                .map(|source| source.source_skill_id.clone());
+            let mut result = match task.as_str() {
                 "review_continuity" => {
                     self.review_continuity(project_root, chapter_id, context_service)
                 }
@@ -135,12 +143,16 @@ impl PostTaskExecutor {
                 }
                 _ => PostTaskResult {
                     task_type: task.clone(),
+                    source_skill_id: source_skill_id.clone(),
                     status: "skipped".to_string(),
                     summary: "unsupported post task".to_string(),
                     error: None,
                     meta: None,
                 },
             };
+            if result.source_skill_id.is_none() {
+                result.source_skill_id = source_skill_id;
+            }
             results.push(result);
         }
         results
@@ -155,6 +167,7 @@ impl PostTaskExecutor {
         let Some(chapter_id) = chapter_id.map(str::trim).filter(|value| !value.is_empty()) else {
             return PostTaskResult {
                 task_type: "review_continuity".to_string(),
+                source_skill_id: None,
                 status: "skipped".to_string(),
                 summary: "chapter_id missing".to_string(),
                 error: None,
@@ -165,6 +178,7 @@ impl PostTaskExecutor {
         match context_service.get_recent_continuity(project_root, Some(chapter_id)) {
             Ok(lines) => PostTaskResult {
                 task_type: "review_continuity".to_string(),
+                source_skill_id: None,
                 status: "succeeded".to_string(),
                 summary: format!("reviewed {} continuity entries", lines.len()),
                 error: None,
@@ -175,6 +189,7 @@ impl PostTaskExecutor {
             },
             Err(err) => PostTaskResult {
                 task_type: "review_continuity".to_string(),
+                source_skill_id: None,
                 status: "failed".to_string(),
                 summary: "continuity review failed".to_string(),
                 error: Some(format!("{}: {}", err.code, err.message)),
@@ -192,6 +207,7 @@ impl PostTaskExecutor {
         let Some(chapter_id) = chapter_id.map(str::trim).filter(|value| !value.is_empty()) else {
             return PostTaskResult {
                 task_type: "extract_assets".to_string(),
+                source_skill_id: None,
                 status: "skipped".to_string(),
                 summary: "chapter_id missing".to_string(),
                 error: None,
@@ -202,6 +218,7 @@ impl PostTaskExecutor {
         match context_service.extract_and_persist_structured_drafts(project_root, chapter_id) {
             Ok(()) => PostTaskResult {
                 task_type: "extract_assets".to_string(),
+                source_skill_id: None,
                 status: "succeeded".to_string(),
                 summary: "structured drafts refreshed".to_string(),
                 error: None,
@@ -209,6 +226,7 @@ impl PostTaskExecutor {
             },
             Err(err) => PostTaskResult {
                 task_type: "extract_assets".to_string(),
+                source_skill_id: None,
                 status: "failed".to_string(),
                 summary: "asset extraction failed".to_string(),
                 error: Some(format!("{}: {}", err.code, err.message)),
@@ -227,6 +245,7 @@ impl PostTaskExecutor {
         let Some(chapter_id) = chapter_id.map(str::trim).filter(|value| !value.is_empty()) else {
             return PostTaskResult {
                 task_type: "extract_state".to_string(),
+                source_skill_id: None,
                 status: "skipped".to_string(),
                 summary: "chapter_id missing".to_string(),
                 error: None,
@@ -265,6 +284,7 @@ impl PostTaskExecutor {
         match save_result {
             Ok(_) => PostTaskResult {
                 task_type: "extract_state".to_string(),
+                source_skill_id: None,
                 status: "succeeded".to_string(),
                 summary: "state snapshot extracted".to_string(),
                 error: None,
@@ -307,6 +327,7 @@ impl PostTaskExecutor {
             },
             Err(err) => PostTaskResult {
                 task_type: "extract_state".to_string(),
+                source_skill_id: None,
                 status: "failed".to_string(),
                 summary: "state extraction failed".to_string(),
                 error: Some(format!("{}: {}", err.code, err.message)),
@@ -320,6 +341,7 @@ impl PostTaskExecutor {
 mod tests {
     use super::PostTaskExecutor;
     use crate::services::context_service::ContextService;
+    use crate::services::skill_registry::PostTaskSource;
 
     #[test]
     fn execute_merges_scene_defaults_with_route_post_tasks() {
@@ -334,6 +356,7 @@ mod tests {
                 "review_continuity".to_string(),
                 "unknown_task".to_string(),
             ],
+            &[],
             "战斗中主角受伤流血",
             &context_service,
         );
@@ -362,6 +385,7 @@ mod tests {
             Some("chapter-1"),
             "combat",
             &[],
+            &[],
             "战斗中主角受伤流血",
             &context_service,
         );
@@ -381,6 +405,7 @@ mod tests {
             "unused-project-root",
             Some("chapter-1"),
             "combat",
+            &[],
             &[],
             "密室内遭遇伏击，战况高危，主角受伤流血。",
             &context_service,
@@ -405,6 +430,32 @@ mod tests {
                 .and_then(|value| value.get("spatialConstraint"))
                 .and_then(|value| value.as_str()),
             Some("closed")
+        );
+    }
+
+    #[test]
+    fn execute_records_post_task_source_skill_id() {
+        let executor = PostTaskExecutor;
+        let context_service = ContextService;
+        let results = executor.execute(
+            "unused-project-root",
+            Some("chapter-1"),
+            "dialogue",
+            &["extract_state".to_string()],
+            &[PostTaskSource {
+                task: "extract_state".to_string(),
+                source_skill_id: "extractor.emotion".to_string(),
+            }],
+            "角色紧张不安，情绪压抑。",
+            &context_service,
+        );
+        let extract_state = results
+            .iter()
+            .find(|item| item.task_type == "extract_state")
+            .expect("extract_state result");
+        assert_eq!(
+            extract_state.source_skill_id.as_deref(),
+            Some("extractor.emotion")
         );
     }
 }

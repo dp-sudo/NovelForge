@@ -97,6 +97,8 @@ pub async fn create_skill(
         trigger_conditions: Vec::new(),
         required_contexts: Vec::new(),
         state_writes: Vec::new(),
+        workflow_stages: Vec::new(),
+        post_tasks: Vec::new(),
         automation_tier: None,
         scene_tags: Vec::new(),
         affects_layers: Vec::new(),

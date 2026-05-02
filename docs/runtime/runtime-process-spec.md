@@ -68,22 +68,24 @@
    - 命中冻结区改写冲突时，后端返回 `PIPELINE_FREEZE_CONFLICT` 并阻断执行（不再仅做持久化降级）。
 7. 用户可触发 `cancel_ai_task_pipeline` 取消进行中的任务。
 8. 章节任务在 `route` 阶段会解析并记录池级决策（`modelPoolId` / `fallbackModelPoolId` / resolved provider-model）。
-9. 章节任务在 `done` 前会执行“场景判别 + 后置任务链”，并将结果写入 `ai_pipeline_runs.post_task_results` 与 `ai_pipeline_runs.meta_json`。
+9. 章节任务在 `done` 前会执行“场景判别 + 后置任务链”，并将结果写入 `ai_pipeline_runs.post_task_results` 与 `ai_pipeline_runs.meta_json`（含 `postTaskSources` 来源映射）。
 
 #### 4.3.1 章节链路（Task 10 对齐）
 1. 编译 `Continuity Pack`（Constitution/Canon/Lexicon Policy/State/Promise/Window/Recent）。
    - 章节关键任务（`chapter.draft` / `chapter.continue` / `chapter.rewrite` / `prose.naturalize`）会强制最小深度为 `deep`（即使项目策略配置为 `standard/minimal`）。
-   - 若编排后缺失必需上下文层，后端会在 `ai:pipeline:event` 发出 `type="warning"`、`errorCode="PIPELINE_CONTEXT_INCOMPLETE"`，并在 `meta.warningCode = "context_incomplete"` 中返回缺失层清单。
+   - 若编排后缺失必需上下文层，后端会先发 `PIPELINE_CONTEXT_INCOMPLETE` warning；对关键任务（`chapter.draft/chapter.continue`）或策略开启硬门禁时，返回 `PIPELINE_CONTEXT_INCOMPLETE_BLOCKED` 阻断执行。
 2. 装配技能栈（workflow/capability/extractor/policy/review），运行时会同时应用：
    - 项目级 `alwaysOnPolicySkills`
    - 项目级 `defaultCapabilityBundles`
    - 请求级 `skillSelection`（显式 skill/bundle/scene/context + 可关闭推断场景标签）
    - 技能元数据 `sceneTags/requiredContexts/automationTier`
    - 可选 `route override`
+   - `availableContexts` 优先由 `ContinuityPack.get_available_context_keys()` 推断；若请求级覆盖 `skillSelection.availableContexts`，会发 `PIPELINE_AVAILABLE_CONTEXTS_OVERRIDDEN`。
+   - 被过滤技能会写入 `filteredSkills`（含过滤原因与缺失上下文）；关键 workflow/policy 技能因上下文不足被过滤会发 `PIPELINE_SKILL_CONTEXT_FILTERED`。
 3. 生成章节计划/草稿/改写等任务输出。
-4. 场景感知编排：`SceneClassifier` 基于语义特征（对话占比、动作密度、战斗信号、信息密度）判别 `dialogue/action/exposition/introspection/combat`，并按路由 `postTasks` + 默认映射合并后置任务。
-5. 后置任务执行：`PostTaskExecutor` 执行 `review_continuity` / `extract_state` / `extract_assets`，后置失败不阻断主任务，结果按任务项记录 `ok/error`。
-6. 写后回写 `Canon + State`：正式资产入库并写 `entity_provenance`，章节保存后回写 `story_state`；若激活技能声明了 `stateWrites`，会按项目级 `stateWritePolicy` 追加运行时状态写入（含 `character.action/appearance/knowledge` 与 `scene.danger_level/spatial_constraint`），并附带 `skillIds/affectsLayers` 元数据。
+4. 场景感知编排：`SceneClassifier` 基于语义特征（对话占比、动作密度、战斗信号、信息密度）判别 `dialogue/action/exposition/introspection/combat`，并按“技能声明 `postTasks`（优先）/路由 `postTasks`（回退）+ 默认映射”合并后置任务。
+5. 后置任务执行：`PostTaskExecutor` 执行 `review_continuity` / `extract_state` / `extract_assets`，后置失败不阻断主任务，结果按任务项记录 `ok/error`，并带 `sourceSkillId`（若来自技能声明）。
+6. 写后回写 `Canon + State`：正式资产入库并写 `entity_provenance`，章节保存后回写 `story_state`；若激活技能声明了 `stateWrites`，会按 `workflow > extractor > capability > policy > review` 去重后回写运行时状态（含 `character.action/appearance/knowledge` 与 `scene.danger_level/spatial_constraint`），并附带 `skillIds/affectsLayers/sourceSkillId` 元数据。
 
 ### 4.4 编辑器 9 按钮任务映射（canonical）
 - `chapter.continue`（续写章节）

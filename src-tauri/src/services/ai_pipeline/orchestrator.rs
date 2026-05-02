@@ -6,7 +6,7 @@ use crate::adapters::llm_types::{ContentBlock, Message, UnifiedGenerateRequest};
 use crate::errors::AppErrorDto;
 use crate::services::ai_pipeline::audit_store::PipelineAuditStore;
 use crate::services::ai_pipeline::continuity_pack::{
-    assess_continuity_pack_completeness, ContinuityPackCompiler,
+    assess_continuity_pack_completeness, ContinuityPack, ContinuityPackCompiler,
 };
 use crate::services::ai_pipeline::freeze_guard::{detect_freeze_conflict, freeze_conflict_error};
 use crate::services::ai_pipeline::persist_policy::{
@@ -190,8 +190,27 @@ impl<'a> PipelineOrchestrator<'a> {
                 error: freeze_conflict_error(conflict),
             });
         }
-        let selection_context =
-            self.build_skill_selection_context(&strategy_profile, &context, &certainty_zones);
+        let continuity_depth = strategy_profile.continuity_pack_depth.clone();
+        let preselection_continuity_pack = ContinuityPackCompiler.compile(
+            &self.input.project_root,
+            self.canonical_task,
+            &continuity_depth,
+            &context,
+            self.context_service,
+            self.input.chapter_id.as_deref(),
+            &[],
+            strategy_profile.window_planning_horizon,
+        );
+        let inferred_available_contexts = self.collect_available_contexts(
+            &preselection_continuity_pack,
+            &context,
+            &certainty_zones,
+        );
+        let selection_context = self.build_skill_selection_context(
+            &strategy_profile,
+            &context,
+            inferred_available_contexts.as_slice(),
+        );
 
         self.audit_store.touch_pipeline_phase(
             &self.input.project_root,
@@ -234,8 +253,20 @@ impl<'a> PipelineOrchestrator<'a> {
             (resolved, selected)
         };
         let selected_skill_ids = selected_skills.all_skill_ids();
+        let runtime_state_write_declarations = selected_skills.get_state_write_declarations();
         let runtime_state_writes = selected_skills.all_state_writes();
         let runtime_affects_layers = selected_skills.all_affects_layers();
+        let workflow_orchestration = selected_skills.get_workflow_orchestration();
+        let skill_post_task_sources = selected_skills.get_aggregated_post_tasks();
+        let configured_post_tasks = if skill_post_task_sources.is_empty() {
+            route.post_tasks.clone()
+        } else {
+            skill_post_task_sources
+                .iter()
+                .map(|item| item.task.clone())
+                .collect::<Vec<_>>()
+        };
+        let filtered_skills = selected_skills.filtered_skills.clone();
         let route_override_meta = selected_skills.route_override.as_ref().map(|route| {
             json!({
                 "provider": route.provider,
@@ -243,6 +274,56 @@ impl<'a> PipelineOrchestrator<'a> {
                 "reason": route.reason,
             })
         });
+        if selection_context.available_contexts_overridden {
+            self.pipeline_service.emit_event(
+                self.app_handle,
+                AiPipelineEvent {
+                    request_id: self.request_id.to_string(),
+                    phase: PHASE_ROUTE.to_string(),
+                    event_type: "warning".to_string(),
+                    delta: None,
+                    error_code: Some("PIPELINE_AVAILABLE_CONTEXTS_OVERRIDDEN".to_string()),
+                    message: Some("runtime available contexts override applied".to_string()),
+                    recoverable: Some(true),
+                    meta: Some(json!({
+                        "inferredAvailableContexts": inferred_available_contexts,
+                        "runtimeAvailableContexts": selection_context.available_contexts.clone(),
+                    })),
+                },
+            );
+        }
+
+        let critical_filtered_skills = filtered_skills
+            .iter()
+            .filter(|item| {
+                item.reason == "missing_required_contexts"
+                    && (item.skill_class == "workflow"
+                        || item.skill_class == "policy"
+                        || selection_context
+                            .explicit_skill_ids
+                            .iter()
+                            .any(|id| id.eq_ignore_ascii_case(item.id.as_str())))
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        if !critical_filtered_skills.is_empty() {
+            self.pipeline_service.emit_event(
+                self.app_handle,
+                AiPipelineEvent {
+                    request_id: self.request_id.to_string(),
+                    phase: PHASE_ROUTE.to_string(),
+                    event_type: "warning".to_string(),
+                    delta: None,
+                    error_code: Some("PIPELINE_SKILL_CONTEXT_FILTERED".to_string()),
+                    message: Some("critical skills filtered due to missing contexts".to_string()),
+                    recoverable: Some(true),
+                    meta: Some(json!({
+                        "filteredSkills": critical_filtered_skills,
+                        "availableContexts": selection_context.available_contexts.clone(),
+                    })),
+                },
+            );
+        }
         self.pipeline_service.emit_event(
             self.app_handle,
             AiPipelineEvent {
@@ -258,7 +339,8 @@ impl<'a> PipelineOrchestrator<'a> {
                     "modelId": route.model_id.clone(),
                     "modelPoolId": route.model_pool_id.clone(),
                     "fallbackModelPoolId": route.fallback_model_pool_id.clone(),
-                    "postTasks": route.post_tasks.clone(),
+                    "postTasks": configured_post_tasks.clone(),
+                    "routePostTasks": route.post_tasks.clone(),
                     "attempts": route.attempts.clone(),
                     "selectedSkills": {
                         "workflow": selected_skills.workflow_skills.len(),
@@ -270,10 +352,15 @@ impl<'a> PipelineOrchestrator<'a> {
                     "activeBundles": selection_context.active_bundle_ids,
                     "sceneTags": selection_context.scene_tags,
                     "availableContexts": selection_context.available_contexts,
+                    "availableContextsOverridden": selection_context.available_contexts_overridden,
                     "explicitSkillIds": selection_context.explicit_skill_ids,
                     "selectedSkillIds": selected_skill_ids.clone(),
                     "stateWrites": runtime_state_writes.clone(),
+                    "stateWriteSources": runtime_state_write_declarations.clone(),
                     "affectsLayers": runtime_affects_layers.clone(),
+                    "filteredSkills": filtered_skills.clone(),
+                    "workflowOrchestration": workflow_orchestration.clone(),
+                    "postTaskSources": skill_post_task_sources.clone(),
                     "routeOverride": route_override_meta,
                 })),
             },
@@ -288,14 +375,19 @@ impl<'a> PipelineOrchestrator<'a> {
                     "modelId": route.model_id.clone(),
                     "modelPoolId": route.model_pool_id.clone(),
                     "fallbackModelPoolId": route.fallback_model_pool_id.clone(),
-                    "postTasks": route.post_tasks.clone(),
+                    "postTasks": configured_post_tasks.clone(),
+                    "routePostTasks": route.post_tasks.clone(),
                     "attempts": route.attempts.clone(),
                 },
                 "skillSelection": {
                     "selectedSkillIds": selected_skill_ids.clone(),
                     "stateWrites": runtime_state_writes.clone(),
+                    "stateWriteSources": runtime_state_write_declarations.clone(),
                     "affectsLayers": runtime_affects_layers.clone(),
+                    "filteredSkills": filtered_skills.clone(),
+                    "workflowOrchestration": workflow_orchestration.clone(),
                 },
+                "postTaskSources": skill_post_task_sources.clone(),
             }),
         );
         self.pipeline_service
@@ -304,8 +396,6 @@ impl<'a> PipelineOrchestrator<'a> {
                 phase: PHASE_ROUTE,
                 error: err,
             })?;
-
-        let continuity_depth = strategy_profile.continuity_pack_depth.clone();
         let continuity_pack = ContinuityPackCompiler.compile(
             &self.input.project_root,
             self.canonical_task,
@@ -314,11 +404,16 @@ impl<'a> PipelineOrchestrator<'a> {
             self.context_service,
             self.input.chapter_id.as_deref(),
             &runtime_affects_layers,
+            strategy_profile.window_planning_horizon,
         );
         let continuity_completeness = assess_continuity_pack_completeness(
             self.canonical_task,
             &continuity_depth,
             &continuity_pack,
+        );
+        let context_gate_enforced = should_enforce_context_completeness(
+            self.canonical_task,
+            strategy_profile.enforce_context_completeness,
         );
         if !continuity_completeness.is_complete {
             self.pipeline_service.emit_event(
@@ -330,10 +425,11 @@ impl<'a> PipelineOrchestrator<'a> {
                     delta: None,
                     error_code: Some("PIPELINE_CONTEXT_INCOMPLETE".to_string()),
                     message: Some("context_incomplete".to_string()),
-                    recoverable: Some(true),
+                    recoverable: Some(!context_gate_enforced),
                     meta: Some(json!({
                         "warningCode": "context_incomplete",
                         "taskType": self.canonical_task,
+                        "contextGateEnforced": context_gate_enforced,
                         "requestedDepth": continuity_completeness.requested_depth.clone(),
                         "effectiveDepth": continuity_completeness.effective_depth.clone(),
                         "enforcedMinimumDepth": continuity_completeness.enforced_minimum_depth.clone(),
@@ -343,6 +439,22 @@ impl<'a> PipelineOrchestrator<'a> {
                     })),
                 },
             );
+            if context_gate_enforced {
+                return Err(StageError {
+                    phase: PHASE_CONTEXT,
+                    error: AppErrorDto::new(
+                        "PIPELINE_CONTEXT_INCOMPLETE_BLOCKED",
+                        "上下文不完整，已阻断关键任务执行",
+                        true,
+                    )
+                    .with_detail(format!(
+                        "task={} missing_layers={}",
+                        self.canonical_task,
+                        continuity_completeness.missing_layers.join(",")
+                    ))
+                    .with_suggested_action("请补齐 state/promise/window_plan 等关键上下文后重试"),
+                });
+            }
         }
 
         self.audit_store.touch_pipeline_phase(
@@ -559,6 +671,7 @@ impl<'a> PipelineOrchestrator<'a> {
                     self.request_id,
                     RuntimeStateWriteOptions {
                         state_writes: &runtime_state_writes,
+                        state_write_declarations: &runtime_state_write_declarations,
                         state_write_policy: &strategy_profile.state_write_policy,
                         persist_mode: persist_mode.as_str(),
                         active_skill_ids: &selected_skill_ids,
@@ -610,7 +723,8 @@ impl<'a> PipelineOrchestrator<'a> {
                 &self.input.project_root,
                 self.input.chapter_id.as_deref(),
                 scene_classification.scene_type.as_str(),
-                route.post_tasks.as_slice(),
+                configured_post_tasks.as_slice(),
+                skill_post_task_sources.as_slice(),
                 normalized.as_str(),
                 self.context_service,
             );
@@ -629,14 +743,19 @@ impl<'a> PipelineOrchestrator<'a> {
                         "modelId": route.model_id.clone(),
                         "modelPoolId": route.model_pool_id.clone(),
                         "fallbackModelPoolId": route.fallback_model_pool_id.clone(),
-                        "postTasks": route.post_tasks.clone(),
+                        "postTasks": configured_post_tasks.clone(),
+                        "routePostTasks": route.post_tasks.clone(),
                         "attempts": route.attempts.clone(),
                     },
                     "skillSelection": {
                         "selectedSkillIds": selected_skill_ids.clone(),
                         "stateWrites": runtime_state_writes.clone(),
+                        "stateWriteSources": runtime_state_write_declarations.clone(),
                         "affectsLayers": runtime_affects_layers.clone(),
+                        "filteredSkills": filtered_skills.clone(),
+                        "workflowOrchestration": workflow_orchestration.clone(),
                     },
+                    "postTaskSources": skill_post_task_sources.clone(),
                     "sceneDecision": {
                         "sceneType": scene_classification.scene_type.clone(),
                         "sceneConfidence": scene_classification.confidence,
@@ -659,6 +778,7 @@ impl<'a> PipelineOrchestrator<'a> {
                         "sceneType": scene_classification.scene_type,
                         "sceneConfidence": scene_classification.confidence,
                         "matchedFeatures": scene_classification.matched_features,
+                        "postTaskSources": skill_post_task_sources.clone(),
                         "postTaskResults": results,
                     })),
                 },
@@ -823,7 +943,7 @@ impl<'a> PipelineOrchestrator<'a> {
         &self,
         profile: &AiStrategyProfile,
         context: &crate::services::context_service::CollectedContext,
-        certainty_zones: &CertaintyZones,
+        inferred_available_contexts: &[String],
     ) -> SkillSelectionContext {
         let runtime = self.input.skill_selection.as_ref();
         let runtime_explicit_skill_ids = runtime
@@ -852,10 +972,13 @@ impl<'a> PipelineOrchestrator<'a> {
         let baseline_explicit_skill_ids =
             merge_unique_values(&generation_workflow_stack, &profile.always_on_policy_skills);
         let explicit_skill_ids = baseline_explicit_skill_ids;
-        let mut available_contexts = self.collect_available_contexts(context);
-        if certainty_zones.has_any() {
-            available_contexts.push("certainty_zones".to_string());
-        }
+        let available_contexts_overridden = !runtime_contexts.is_empty();
+        let available_contexts = if available_contexts_overridden {
+            let empty: Vec<String> = Vec::new();
+            merge_unique_values(&empty, runtime_contexts)
+        } else {
+            inferred_available_contexts.to_vec()
+        };
 
         SkillSelectionContext {
             explicit_skill_ids: merge_unique_values(
@@ -867,8 +990,9 @@ impl<'a> PipelineOrchestrator<'a> {
                 runtime_bundle_ids,
             ),
             scene_tags: merge_unique_values(&inferred_scene_tags, runtime_scene_tags),
-            available_contexts: merge_unique_values(&available_contexts, runtime_contexts),
+            available_contexts,
             automation_tier: Some(self.resolve_automation_tier(profile)),
+            available_contexts_overridden,
         }
     }
 
@@ -912,26 +1036,18 @@ impl<'a> PipelineOrchestrator<'a> {
 
     fn collect_available_contexts(
         &self,
+        continuity_pack: &ContinuityPack,
         context: &crate::services::context_service::CollectedContext,
+        certainty_zones: &CertaintyZones,
     ) -> Vec<String> {
-        let mut keys = Vec::new();
-        keys.push("constitution".to_string());
-        if !context.global_context.blueprint_summary.is_empty()
-            || !context.related_context.characters.is_empty()
-            || !context.related_context.world_rules.is_empty()
-            || !context.related_context.plot_nodes.is_empty()
-            || !context.related_context.relationship_edges.is_empty()
-        {
-            keys.push("canon".to_string());
-        }
+        let mut keys = continuity_pack.get_available_context_keys();
         if context.related_context.chapter.is_some() {
             keys.push("chapter".to_string());
         }
-        keys.push("state".to_string());
-        if context.related_context.previous_chapter_summary.is_some() {
-            keys.push("recent_continuity".to_string());
+        if certainty_zones.has_any() {
+            keys.push("certainty_zones".to_string());
         }
-        keys
+        merge_unique_values(&keys, &[])
     }
 
     fn infer_scene_tags(
@@ -1054,7 +1170,7 @@ fn resolve_generation_workflow_stack(
     canonical_task: &str,
 ) -> Vec<String> {
     if !canonical_task.starts_with("chapter.") {
-        return profile.default_workflow_stack.clone();
+        return Vec::new();
     }
     match profile
         .chapter_generation_mode
@@ -1071,6 +1187,14 @@ fn resolve_generation_workflow_stack(
         ],
         _ => profile.default_workflow_stack.clone(),
     }
+}
+
+fn should_enforce_context_completeness(canonical_task: &str, profile_enforced: bool) -> bool {
+    const CRITICAL_TASKS: [&str; 2] = ["chapter.draft", "chapter.continue"];
+    profile_enforced
+        || CRITICAL_TASKS
+            .iter()
+            .any(|task| task.eq_ignore_ascii_case(canonical_task))
 }
 
 fn extract_certainty_zones(
@@ -1125,7 +1249,7 @@ fn merge_unique_zone_values(target: &mut Vec<String>, values: &[String]) {
 mod tests {
     use super::{
         extract_certainty_zones, infer_scene_bundle_ids, merge_unique_values,
-        resolve_generation_workflow_stack, CertaintyZones,
+        resolve_generation_workflow_stack, should_enforce_context_completeness, CertaintyZones,
     };
     use crate::services::context_service::{
         BlueprintStepSummary, CollectedContext, GlobalContext, RelatedContext,
@@ -1324,5 +1448,26 @@ mod tests {
                 "chapter.draft".to_string()
             ]
         );
+        assert_eq!(
+            resolve_generation_workflow_stack(&profile, "timeline.review"),
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn context_completeness_gate_enforces_critical_tasks_even_when_profile_disabled() {
+        assert!(should_enforce_context_completeness("chapter.draft", false));
+        assert!(should_enforce_context_completeness(
+            "chapter.continue",
+            false
+        ));
+        assert!(!should_enforce_context_completeness(
+            "dashboard.review",
+            false
+        ));
+        assert!(should_enforce_context_completeness(
+            "dashboard.review",
+            true
+        ));
     }
 }

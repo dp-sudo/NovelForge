@@ -41,6 +41,10 @@ pub struct SkillManifest {
     pub required_contexts: Vec<String>,
     #[serde(default, alias = "state_writes")]
     pub state_writes: Vec<String>,
+    #[serde(default, alias = "workflow_stages")]
+    pub workflow_stages: Vec<String>,
+    #[serde(default, alias = "post_tasks")]
+    pub post_tasks: Vec<String>,
     #[serde(default, alias = "automation_tier")]
     pub automation_tier: Option<String>,
     #[serde(default, alias = "scene_tags")]
@@ -79,28 +83,63 @@ pub struct SelectedSkills {
     pub policy_skills: Vec<SkillManifest>,
     pub review_skills: Vec<SkillManifest>,
     pub route_override: Option<RouteOverride>,
+    pub filtered_skills: Vec<FilteredSkill>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StateWriteDeclaration {
+    pub state_write_key: String,
+    pub source_skill_id: String,
+    pub source_skill_class: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowStage {
+    pub stage: String,
+    pub source_skill_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowOrchestration {
+    pub workflow_skill_ids: Vec<String>,
+    pub stages: Vec<WorkflowStage>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PostTaskSource {
+    pub task: String,
+    pub source_skill_id: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FilteredSkill {
+    pub id: String,
+    pub skill_class: String,
+    pub reason: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub missing_contexts: Vec<String>,
 }
 
 impl SelectedSkills {
     pub fn all_skills(&self) -> impl Iterator<Item = &SkillManifest> {
         self.workflow_skills
             .iter()
-            .chain(self.capability_skills.iter())
             .chain(self.extractor_skills.iter())
+            .chain(self.capability_skills.iter())
             .chain(self.policy_skills.iter())
             .chain(self.review_skills.iter())
     }
 
     pub fn all_state_writes(&self) -> Vec<String> {
-        let mut state_writes = Vec::new();
-        for skill in self.all_skills() {
-            for item in &skill.state_writes {
-                if !state_writes.iter().any(|existing| existing == item) {
-                    state_writes.push(item.clone());
-                }
-            }
-        }
-        state_writes
+        self.get_resolved_state_write_declarations()
+            .into_iter()
+            .map(|item| item.state_write_key)
+            .collect()
     }
 
     pub fn all_affects_layers(&self) -> Vec<String> {
@@ -125,6 +164,93 @@ impl SelectedSkills {
     pub fn all_skill_ids(&self) -> Vec<String> {
         self.all_skills().map(|skill| skill.id.clone()).collect()
     }
+
+    pub fn get_state_write_declarations(&self) -> Vec<StateWriteDeclaration> {
+        let mut declarations = Vec::new();
+        declarations
+            .extend(self.state_write_declarations_for_class("workflow", &self.workflow_skills));
+        declarations
+            .extend(self.state_write_declarations_for_class("extractor", &self.extractor_skills));
+        declarations
+            .extend(self.state_write_declarations_for_class("capability", &self.capability_skills));
+        declarations.extend(self.state_write_declarations_for_class("policy", &self.policy_skills));
+        declarations.extend(self.state_write_declarations_for_class("review", &self.review_skills));
+        declarations
+    }
+
+    pub fn get_resolved_state_write_declarations(&self) -> Vec<StateWriteDeclaration> {
+        prioritize_state_write_declarations(&self.get_state_write_declarations())
+    }
+
+    pub fn get_workflow_orchestration(&self) -> WorkflowOrchestration {
+        let mut workflow_skill_ids = Vec::new();
+        let mut stages = Vec::new();
+        let mut seen_stages = std::collections::HashSet::<String>::new();
+        for skill in &self.workflow_skills {
+            workflow_skill_ids.push(skill.id.clone());
+            let configured_stages = if skill.workflow_stages.is_empty() {
+                default_workflow_stages_for_skill(skill.id.as_str())
+            } else {
+                skill.workflow_stages.clone()
+            };
+            for stage in configured_stages {
+                let normalized = stage.trim().to_ascii_lowercase();
+                if normalized.is_empty() || seen_stages.contains(&normalized) {
+                    continue;
+                }
+                seen_stages.insert(normalized.clone());
+                stages.push(WorkflowStage {
+                    stage: normalized,
+                    source_skill_id: skill.id.clone(),
+                });
+            }
+        }
+        WorkflowOrchestration {
+            workflow_skill_ids,
+            stages,
+        }
+    }
+
+    pub fn get_aggregated_post_tasks(&self) -> Vec<PostTaskSource> {
+        let mut seen = std::collections::HashSet::<String>::new();
+        let mut aggregated = Vec::new();
+        for skill in self.all_skills() {
+            for item in &skill.post_tasks {
+                let normalized = item.trim().to_ascii_lowercase();
+                if normalized.is_empty() || seen.contains(&normalized) {
+                    continue;
+                }
+                seen.insert(normalized.clone());
+                aggregated.push(PostTaskSource {
+                    task: normalized,
+                    source_skill_id: skill.id.clone(),
+                });
+            }
+        }
+        aggregated
+    }
+
+    fn state_write_declarations_for_class(
+        &self,
+        skill_class: &str,
+        skills: &[SkillManifest],
+    ) -> Vec<StateWriteDeclaration> {
+        let mut declarations = Vec::new();
+        for skill in skills {
+            for state_write in &skill.state_writes {
+                let normalized = state_write.trim().to_ascii_lowercase();
+                if normalized.is_empty() {
+                    continue;
+                }
+                declarations.push(StateWriteDeclaration {
+                    state_write_key: normalized,
+                    source_skill_id: skill.id.clone(),
+                    source_skill_class: skill_class.to_string(),
+                });
+            }
+        }
+        declarations
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -134,6 +260,7 @@ pub struct SkillSelectionContext {
     pub scene_tags: Vec<String>,
     pub available_contexts: Vec<String>,
     pub automation_tier: Option<String>,
+    pub available_contexts_overridden: bool,
 }
 
 fn default_true() -> bool {
@@ -165,6 +292,10 @@ pub struct SkillManifestPatch {
     pub required_contexts: Option<Vec<String>>,
     #[serde(default, alias = "state_writes")]
     pub state_writes: Option<Vec<String>>,
+    #[serde(default, alias = "workflow_stages")]
+    pub workflow_stages: Option<Vec<String>>,
+    #[serde(default, alias = "post_tasks")]
+    pub post_tasks: Option<Vec<String>>,
     #[serde(default, alias = "automation_tier")]
     pub automation_tier: Option<String>,
     #[serde(default, alias = "scene_tags")]
@@ -364,12 +495,40 @@ impl SkillRegistry {
                 continue;
             }
             if !skill_matches_scene(skill, &scene_tags) {
+                selected.filtered_skills.push(FilteredSkill {
+                    id: skill.id.clone(),
+                    skill_class: skill
+                        .skill_class
+                        .clone()
+                        .unwrap_or_else(|| "unclassified".to_string()),
+                    reason: "scene_tag_mismatch".to_string(),
+                    missing_contexts: Vec::new(),
+                });
                 continue;
             }
-            if !skill_has_required_contexts(skill, &available_contexts) {
+            let missing_contexts = missing_required_contexts(skill, &available_contexts);
+            if !missing_contexts.is_empty() {
+                selected.filtered_skills.push(FilteredSkill {
+                    id: skill.id.clone(),
+                    skill_class: skill
+                        .skill_class
+                        .clone()
+                        .unwrap_or_else(|| "unclassified".to_string()),
+                    reason: "missing_required_contexts".to_string(),
+                    missing_contexts,
+                });
                 continue;
             }
             if !skill_matches_automation_tier(skill, runtime_tier.as_deref()) {
+                selected.filtered_skills.push(FilteredSkill {
+                    id: skill.id.clone(),
+                    skill_class: skill
+                        .skill_class
+                        .clone()
+                        .unwrap_or_else(|| "unclassified".to_string()),
+                    reason: "automation_tier_mismatch".to_string(),
+                    missing_contexts: Vec::new(),
+                });
                 continue;
             }
 
@@ -673,6 +832,12 @@ fn apply_manifest_patch(
     if let Some(state_writes) = patch.state_writes {
         manifest.state_writes = trim_items(state_writes);
     }
+    if let Some(workflow_stages) = patch.workflow_stages {
+        manifest.workflow_stages = trim_items(workflow_stages);
+    }
+    if let Some(post_tasks) = patch.post_tasks {
+        manifest.post_tasks = trim_items(post_tasks);
+    }
     if let Some(automation_tier) = patch.automation_tier {
         manifest.automation_tier = validate_automation_tier(automation_tier)?;
     }
@@ -731,6 +896,69 @@ fn normalize_optional_string(value: String) -> Option<String> {
     }
 }
 
+fn default_workflow_stages_for_skill(skill_id: &str) -> Vec<String> {
+    let normalized = skill_id.trim().to_ascii_lowercase();
+    if normalized.contains("chapter.plan") {
+        return vec!["plan".to_string()];
+    }
+    if normalized.contains("chapter.draft")
+        || normalized.contains("chapter.continue")
+        || normalized.contains("chapter.rewrite")
+    {
+        return vec!["draft".to_string()];
+    }
+    if normalized.contains("review") || normalized.contains("scan") {
+        return vec!["review".to_string()];
+    }
+    vec![normalized]
+}
+
+fn state_write_priority(skill_class: &str) -> u8 {
+    match skill_class.trim().to_ascii_lowercase().as_str() {
+        "workflow" => 1,
+        "extractor" => 2,
+        "capability" => 3,
+        "policy" => 4,
+        "review" => 5,
+        _ => 255,
+    }
+}
+
+fn prioritize_state_write_declarations(
+    declarations: &[StateWriteDeclaration],
+) -> Vec<StateWriteDeclaration> {
+    let mut ranked = std::collections::HashMap::<String, StateWriteDeclaration>::new();
+    for item in declarations {
+        let key = item.state_write_key.trim().to_ascii_lowercase();
+        if key.is_empty() {
+            continue;
+        }
+        let should_replace = ranked
+            .get(&key)
+            .map(|existing| {
+                state_write_priority(item.source_skill_class.as_str())
+                    < state_write_priority(existing.source_skill_class.as_str())
+            })
+            .unwrap_or(true);
+        if should_replace {
+            ranked.insert(
+                key.clone(),
+                StateWriteDeclaration {
+                    state_write_key: key,
+                    source_skill_id: item.source_skill_id.clone(),
+                    source_skill_class: item.source_skill_class.clone(),
+                },
+            );
+        }
+    }
+
+    let mut keys = ranked.keys().cloned().collect::<Vec<_>>();
+    keys.sort();
+    keys.into_iter()
+        .filter_map(|key| ranked.remove(&key))
+        .collect()
+}
+
 fn route_matches_task(route: &SkillTaskRouteOverride, canonical_task: &str) -> bool {
     let route_task = route.task_type.trim();
     if route_task.is_empty() {
@@ -783,14 +1011,22 @@ fn skill_matches_scene(
     })
 }
 
-fn skill_has_required_contexts(
+fn missing_required_contexts(
     skill: &SkillManifest,
     available_contexts: &std::collections::HashSet<String>,
-) -> bool {
-    skill.required_contexts.iter().all(|context_key| {
-        let normalized = context_key.trim().to_ascii_lowercase();
-        normalized.is_empty() || available_contexts.contains(&normalized)
-    })
+) -> Vec<String> {
+    skill
+        .required_contexts
+        .iter()
+        .filter_map(|context_key| {
+            let normalized = context_key.trim().to_ascii_lowercase();
+            if normalized.is_empty() || available_contexts.contains(&normalized) {
+                None
+            } else {
+                Some(normalized)
+            }
+        })
+        .collect()
 }
 
 fn skill_matches_automation_tier(skill: &SkillManifest, runtime_tier: Option<&str>) -> bool {
@@ -959,6 +1195,8 @@ mod tests {
             trigger_conditions: Vec::new(),
             required_contexts: Vec::new(),
             state_writes: Vec::new(),
+            workflow_stages: Vec::new(),
+            post_tasks: Vec::new(),
             automation_tier: None,
             scene_tags: Vec::new(),
             affects_layers: Vec::new(),
@@ -1032,6 +1270,8 @@ mod tests {
             trigger_conditions: Vec::new(),
             required_contexts: Vec::new(),
             state_writes: Vec::new(),
+            workflow_stages: Vec::new(),
+            post_tasks: Vec::new(),
             automation_tier: None,
             scene_tags: Vec::new(),
             affects_layers: Vec::new(),
@@ -1077,6 +1317,8 @@ mod tests {
             trigger_conditions: Vec::new(),
             required_contexts: Vec::new(),
             state_writes: Vec::new(),
+            workflow_stages: Vec::new(),
+            post_tasks: Vec::new(),
             automation_tier: None,
             scene_tags: Vec::new(),
             affects_layers: Vec::new(),
@@ -1221,6 +1463,112 @@ mod tests {
                 "window_plan".to_string()
             ]
         );
+    }
+
+    #[test]
+    fn select_skills_records_filtered_skills_with_missing_context_reason() {
+        let registry = create_test_registry("filtered-contexts");
+        let mut capability = build_manifest("capability.requires-state", "capability");
+        capability.trigger_conditions = vec!["chapter.draft".to_string()];
+        capability.required_contexts = vec!["state".to_string(), "canon".to_string()];
+        registry
+            .create_skill(&capability, "context-sensitive capability")
+            .expect("create context-sensitive skill");
+
+        let selected = registry
+            .select_skills_for_task_with_context(
+                "chapter.draft",
+                &SkillSelectionContext {
+                    available_contexts: vec!["canon".to_string()],
+                    ..Default::default()
+                },
+            )
+            .expect("select with incomplete contexts");
+
+        assert!(selected.capability_skills.is_empty());
+        assert!(selected.filtered_skills.iter().any(|item| {
+            item.id == "capability.requires-state"
+                && item.reason == "missing_required_contexts"
+                && item.missing_contexts == vec!["state".to_string()]
+        }));
+    }
+
+    #[test]
+    fn resolved_state_writes_prioritize_workflow_over_extractor_and_capability() {
+        let registry = create_test_registry("state-write-priority");
+        let mut capability = build_manifest("capability.emotion", "capability");
+        capability.trigger_conditions = vec!["chapter.draft".to_string()];
+        capability.state_writes = vec!["character.emotion".to_string()];
+        registry
+            .create_skill(&capability, "capability emotion writer")
+            .expect("create capability");
+
+        let mut extractor = build_manifest("extractor.emotion", "extractor");
+        extractor.trigger_conditions = vec!["chapter.draft".to_string()];
+        extractor.state_writes = vec!["character.emotion".to_string()];
+        registry
+            .create_skill(&extractor, "extractor emotion writer")
+            .expect("create extractor");
+
+        let mut workflow = build_manifest("workflow.chapter-draft", "workflow");
+        workflow.trigger_conditions = vec!["chapter.draft".to_string()];
+        workflow.state_writes = vec!["character.emotion".to_string()];
+        registry
+            .create_skill(&workflow, "workflow emotion writer")
+            .expect("create workflow");
+
+        let selected = registry
+            .select_skills_for_task("chapter.draft")
+            .expect("select draft skills");
+        let resolved = selected.get_resolved_state_write_declarations();
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(resolved[0].state_write_key, "character.emotion");
+        assert_eq!(resolved[0].source_skill_id, "workflow.chapter-draft");
+        assert_eq!(resolved[0].source_skill_class, "workflow");
+    }
+
+    #[test]
+    fn selected_skills_expose_workflow_orchestration_and_post_task_sources() {
+        let registry = create_test_registry("workflow-post-tasks");
+        let mut workflow = build_manifest("workflow.chapter-draft", "workflow");
+        workflow.trigger_conditions = vec!["chapter.draft".to_string()];
+        workflow.workflow_stages = vec![
+            "plan".to_string(),
+            "draft".to_string(),
+            "review".to_string(),
+        ];
+        registry
+            .create_skill(&workflow, "workflow with stages")
+            .expect("create workflow");
+
+        let mut extractor = build_manifest("extractor.emotion", "extractor");
+        extractor.trigger_conditions = vec!["chapter.draft".to_string()];
+        extractor.post_tasks = vec!["extract_emotion".to_string()];
+        registry
+            .create_skill(&extractor, "extractor with post task")
+            .expect("create extractor");
+
+        let selected = registry
+            .select_skills_for_task("chapter.draft")
+            .expect("select draft skills");
+        let orchestration = selected.get_workflow_orchestration();
+        assert!(orchestration
+            .workflow_skill_ids
+            .iter()
+            .any(|id| id == "workflow.chapter-draft"));
+        assert_eq!(
+            orchestration
+                .stages
+                .iter()
+                .map(|item| item.stage.as_str())
+                .collect::<Vec<_>>(),
+            vec!["plan", "draft", "review"]
+        );
+
+        let post_tasks = selected.get_aggregated_post_tasks();
+        assert_eq!(post_tasks.len(), 1);
+        assert_eq!(post_tasks[0].task, "extract_emotion");
+        assert_eq!(post_tasks[0].source_skill_id, "extractor.emotion");
     }
 
     #[test]

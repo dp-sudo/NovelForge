@@ -167,23 +167,29 @@
 - 未命中模板时回退 `PromptBuilder`。
 - 章节任务在 `prompt` 前会先编译 `ContinuityPack`（Constitution/Canon/Lexicon Policy/State/Promise/Window/Recent）。
 - `projects.writing_style` 与已选技能栈（workflow/capability/extractor/policy/review）会共同注入提示词。
+- workflow 技能支持 `workflowStages`，在 Prompt 中以“阶段编排”方式注入（如 `plan -> draft -> review`）；capability 技能保持“能力块”注入。
 
 ### 6.4 运行期技能消费与路由覆盖
 - `orchestrator` 在 `route` 阶段构建运行时技能选择上下文，并统一执行 `select_skills_for_task_with_context`。
 - 运行时技能选择上下文包含：`alwaysOnPolicySkills`、`defaultCapabilityBundles`、请求级 `skillSelection` 覆盖、当前 `automationTier`、可用上下文键、推断出的场景标签。
+- `availableContexts` 由 `ContinuityPack.get_available_context_keys()` 自动推断；若请求级传入 `skillSelection.availableContexts`，会覆盖并发出覆盖事件（`PIPELINE_AVAILABLE_CONTEXTS_OVERRIDDEN`）。
+- 技能筛选会记录 `filteredSkills`（含原因），并在 `ai:pipeline:event` route 阶段回传；关键 workflow/policy 技能因上下文缺失被过滤时会发出 `PIPELINE_SKILL_CONTEXT_FILTERED` 警告。
 - `orchestrator` 先解析本次请求最终 provider/model，再把显式路由写入生成请求，避免 `route` 与 `generate` 阶段重复按旧逻辑二次选技能。
 - 若技能声明 `affectsLayers`，`orchestrator` 会按聚合层焦点裁剪 `ContinuityPack`（constitution/lexicon 护栏层固定保留）。
 - 章节任务新增场景后置链：
   - `SceneClassifier` 分类 `dialogue/action/exposition/introspection/combat`。
-  - `PostTaskExecutor` 合并默认后置任务与路由 `post_tasks`（`review_continuity/extract_state/extract_assets`）。
+  - `PostTaskExecutor` 合并默认后置任务与“技能声明 `postTasks`（优先）/路由 `post_tasks`（回退）”（`review_continuity/extract_state/extract_assets`）。
+  - route 元信息回传 `postTaskSources`（`{task, sourceSkillId}`），post-task 结果可追溯 `sourceSkillId`。
   - 后置结果写入 `ai_pipeline_runs.post_task_results` 供审计回放。
-- `ai:pipeline:event.meta` 回传所选技能数量、技能 IDs、stateWrites、affectsLayers、激活 bundle、推断 scene tag 与 route override 元信息，便于审计。
+- `ai:pipeline:event.meta` 回传所选技能数量、技能 IDs、stateWrites、stateWriteSources、affectsLayers、激活 bundle、推断 scene tag、filteredSkills、workflowOrchestration 与 route override 元信息，便于审计。
 - `ai_pipeline_runs.meta_json` 会记录路由决策（包含 `modelPoolId` 与 fallback 池信息），用于回放与审计。
+- 上下文完整性检查：`assess_continuity_pack_completeness` 在关键任务（`chapter.draft/chapter.continue`）强制硬门禁，缺层返回 `PIPELINE_CONTEXT_INCOMPLETE_BLOCKED`；非关键任务是否阻断由 `projects.ai_strategy_profile.enforce_context_completeness` 控制。
 
 ### 6.5 写后回写与来源轨迹
 - `save_chapter_content` 写正文后调用 `StoryStateService.record_window_progress` 回写窗口状态。
 - `task_handlers.persist_task_output` 在正式资产写入后统一记录 `entity_provenance`。
 - 若已激活技能声明 `stateWrites`，`task_handlers` 会按项目级 `stateWritePolicy` 追加运行时 `story_state` 记录。
+- `stateWrites` 冲突去重优先级：`workflow > extractor > capability > policy > review`，并在 `story_state.payload_json` 写入 `sourceSkillId`。
 - 手动 CRUD（character/world/plot/glossary/narrative）创建时写入 `source_kind = "user_input"`。
 
 ### 6.6 编辑器结构化抽取闭环

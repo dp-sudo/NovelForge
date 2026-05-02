@@ -15,6 +15,7 @@ use crate::services::ai_pipeline_service::{PersistedRecord, RunAiTaskPipelineInp
 use crate::services::glossary_service::CreateGlossaryTermInput;
 use crate::services::narrative_service::CreateObligationInput;
 use crate::services::project_service::get_project_id;
+use crate::services::skill_registry::StateWriteDeclaration;
 use crate::services::{
     blueprint_service::{
         extract_certainty_zones_from_content, supports_certainty_zones_step, BlueprintService,
@@ -33,6 +34,7 @@ use crate::services::{
 #[derive(Clone, Copy)]
 pub struct RuntimeStateWriteOptions<'a> {
     pub state_writes: &'a [String],
+    pub state_write_declarations: &'a [StateWriteDeclaration],
     pub state_write_policy: &'a str,
     pub persist_mode: &'a str,
     pub active_skill_ids: &'a [String],
@@ -43,6 +45,7 @@ impl<'a> Default for RuntimeStateWriteOptions<'a> {
     fn default() -> Self {
         Self {
             state_writes: &[],
+            state_write_declarations: &[],
             state_write_policy: "manual_only",
             persist_mode: "none",
             active_skill_ids: &[],
@@ -117,6 +120,71 @@ fn open_pipeline_project_context(project_root: &str) -> Result<(Connection, Stri
     let conn = open_pipeline_database(project_root)?;
     let project_id = get_project_id(&conn)?;
     Ok((conn, project_id))
+}
+
+#[derive(Debug, Clone)]
+struct RuntimeStateWriteTarget {
+    state_write_key: String,
+    source_skill_id: Option<String>,
+}
+
+fn runtime_state_write_class_priority(skill_class: &str) -> u8 {
+    match skill_class.trim().to_ascii_lowercase().as_str() {
+        "workflow" => 1,
+        "extractor" => 2,
+        "capability" => 3,
+        "policy" => 4,
+        "review" => 5,
+        _ => 255,
+    }
+}
+
+fn resolve_runtime_state_write_targets(
+    state_writes: &[String],
+    declarations: &[StateWriteDeclaration],
+) -> Vec<RuntimeStateWriteTarget> {
+    let mut targets = Vec::<RuntimeStateWriteTarget>::new();
+    if !declarations.is_empty() {
+        let mut ranked = HashMap::<String, (u8, RuntimeStateWriteTarget)>::new();
+        for declaration in declarations {
+            let normalized = declaration.state_write_key.trim().to_ascii_lowercase();
+            if normalized.is_empty() {
+                continue;
+            }
+            let priority = runtime_state_write_class_priority(&declaration.source_skill_class);
+            let candidate = RuntimeStateWriteTarget {
+                state_write_key: normalized.clone(),
+                source_skill_id: Some(declaration.source_skill_id.clone()),
+            };
+            match ranked.get(&normalized) {
+                Some((existing_priority, _)) if *existing_priority <= priority => {}
+                _ => {
+                    ranked.insert(normalized, (priority, candidate));
+                }
+            }
+        }
+        let mut keys = ranked.keys().cloned().collect::<Vec<_>>();
+        keys.sort();
+        for key in keys {
+            if let Some((_, target)) = ranked.remove(&key) {
+                targets.push(target);
+            }
+        }
+        return targets;
+    }
+
+    let mut seen = HashSet::<String>::new();
+    for state_write in state_writes {
+        let normalized = state_write.trim().to_ascii_lowercase();
+        if normalized.is_empty() || !seen.insert(normalized.clone()) {
+            continue;
+        }
+        targets.push(RuntimeStateWriteTarget {
+            state_write_key: normalized,
+            source_skill_id: None,
+        });
+    }
+    targets
 }
 
 impl TaskHandlers {
@@ -344,7 +412,11 @@ impl TaskHandlers {
         let now = now_iso();
         let tx = conn.transaction().map_err(project_db_open_error)?;
 
-        for state_write_key in runtime_options.state_writes {
+        let resolved_state_writes = resolve_runtime_state_write_targets(
+            runtime_options.state_writes,
+            runtime_options.state_write_declarations,
+        );
+        for state_write in resolved_state_writes {
             let Some(state_input) = build_runtime_story_state_input(
                 canonical_task,
                 input,
@@ -352,7 +424,8 @@ impl TaskHandlers {
                 request_id,
                 runtime_options.persist_mode,
                 records,
-                state_write_key,
+                state_write.state_write_key.as_str(),
+                state_write.source_skill_id.as_deref(),
                 runtime_options.active_skill_ids,
                 runtime_options.affects_layers,
             ) else {
@@ -2076,6 +2149,7 @@ mod tests {
     use crate::services::chapter_service::{ChapterInput, ChapterService};
     use crate::services::character_service::CharacterService;
     use crate::services::project_service::{CreateProjectInput, ProjectService};
+    use crate::services::skill_registry::StateWriteDeclaration;
     use serde_json::Value;
     use uuid::Uuid;
 
@@ -2848,6 +2922,7 @@ mod tests {
                         "chapter.plan_status".to_string(),
                         "scene.environment".to_string(),
                     ],
+                    state_write_declarations: &[],
                     state_write_policy: "chapter_confirmed",
                     persist_mode: "formal",
                     active_skill_ids: &["capability.scene-environment".to_string()],
@@ -2874,6 +2949,109 @@ mod tests {
                     .and_then(|value| value.as_str())
                     == Some("scene.environment")
         }));
+
+        remove_temp_workspace(&workspace);
+    }
+
+    #[test]
+    fn persist_task_output_with_runtime_state_deduplicates_and_records_source_skill() {
+        let workspace = create_temp_workspace();
+        let project_service = ProjectService;
+        let chapter_service = ChapterService;
+
+        let project = project_service
+            .create_project(CreateProjectInput {
+                name: "技能状态去重测试".to_string(),
+                author: None,
+                genre: "玄幻".to_string(),
+                target_words: None,
+                save_directory: workspace.to_string_lossy().to_string(),
+            })
+            .expect("project should be created");
+
+        let chapter = chapter_service
+            .create_chapter(
+                &project.project_root,
+                ChapterInput {
+                    title: "第一章".to_string(),
+                    summary: Some("旧摘要".to_string()),
+                    target_words: Some(1200),
+                    status: Some("drafting".to_string()),
+                },
+            )
+            .expect("chapter should be created");
+
+        let mut input = build_pipeline_input(
+            &project.project_root,
+            "chapter.plan",
+            Some(chapter.id.clone()),
+        );
+        input.automation_tier = Some("confirm".to_string());
+        let output = r#"
+        {
+          "chapterFunction": "推进主线并建立对立",
+          "successCriteria": "主角完成线索确认并触发下一冲突",
+          "scenes": [{"purpose":"正面冲突"}],
+          "totalWords": 3600
+        }
+        "#;
+
+        let declarations = vec![
+            StateWriteDeclaration {
+                state_write_key: "character.emotion".to_string(),
+                source_skill_id: "capability.emotion".to_string(),
+                source_skill_class: "capability".to_string(),
+            },
+            StateWriteDeclaration {
+                state_write_key: "character.emotion".to_string(),
+                source_skill_id: "extractor.emotion".to_string(),
+                source_skill_class: "extractor".to_string(),
+            },
+            StateWriteDeclaration {
+                state_write_key: "character.emotion".to_string(),
+                source_skill_id: "workflow.chapter.draft".to_string(),
+                source_skill_class: "workflow".to_string(),
+            },
+        ];
+
+        TaskHandlers
+            .persist_task_output_with_runtime_state(
+                "chapter.plan",
+                &project.project_root,
+                &input,
+                output,
+                "req-skill-state-dedup",
+                RuntimeStateWriteOptions {
+                    state_writes: &["character.emotion".to_string()],
+                    state_write_declarations: &declarations,
+                    state_write_policy: "chapter_confirmed",
+                    persist_mode: "formal",
+                    active_skill_ids: &[
+                        "workflow.chapter.draft".to_string(),
+                        "extractor.emotion".to_string(),
+                        "capability.emotion".to_string(),
+                    ],
+                    affects_layers: &["state".to_string()],
+                },
+            )
+            .expect("persist with deduplicated runtime state writes should succeed");
+
+        let states = crate::services::story_state_service::StoryStateService
+            .list_chapter_states(&project.project_root, &chapter.id)
+            .expect("list story states");
+
+        let emotion_states = states
+            .iter()
+            .filter(|row| row.subject_type == "character" && row.state_kind == "emotion")
+            .collect::<Vec<_>>();
+        assert_eq!(emotion_states.len(), 1);
+        assert_eq!(
+            emotion_states[0]
+                .payload_json
+                .get("sourceSkillId")
+                .and_then(|value| value.as_str()),
+            Some("workflow.chapter.draft")
+        );
 
         remove_temp_workspace(&workspace);
     }

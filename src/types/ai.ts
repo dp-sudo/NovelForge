@@ -163,6 +163,7 @@ export interface AiStrategyProfile {
   defaultCapabilityBundles: string[];
   stateWritePolicy: "chapter_confirmed" | "manual_only";
   continuityPackDepth: "minimal" | "standard" | "deep";
+  enforceContextCompleteness: boolean;
   chapterGenerationMode: "draft_only" | "plan_draft" | "plan_scene_draft";
   windowPlanningHorizon: number;
 }
@@ -176,6 +177,7 @@ export function defaultAiStrategyProfile(): AiStrategyProfile {
     defaultCapabilityBundles: [],
     stateWritePolicy: "chapter_confirmed",
     continuityPackDepth: "standard",
+    enforceContextCompleteness: true,
     chapterGenerationMode: "plan_scene_draft",
     windowPlanningHorizon: 10,
   };

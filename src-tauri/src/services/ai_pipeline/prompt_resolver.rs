@@ -27,6 +27,7 @@ struct PromptRenderContext {
 #[derive(Debug, Default)]
 struct RuntimeSkillPromptContext {
     orchestration_lines: Vec<String>,
+    workflow_lines: Vec<String>,
     policy_lines: Vec<String>,
     capability_lines: Vec<String>,
     review_lines: Vec<String>,
@@ -202,6 +203,11 @@ impl PromptResolver {
         );
         Self::push_context_section(
             &mut parts,
+            "Workflow Skill Context",
+            &skill_context.workflow_lines,
+        );
+        Self::push_context_section(
+            &mut parts,
             "Policy Skill Context",
             &skill_context.policy_lines,
         );
@@ -232,6 +238,11 @@ impl PromptResolver {
         );
         Self::push_context_section(
             &mut parts,
+            "Workflow Skill Context",
+            &skill_context.workflow_lines,
+        );
+        Self::push_context_section(
+            &mut parts,
             "Capability Skill Context",
             &skill_context.capability_lines,
         );
@@ -249,6 +260,10 @@ impl PromptResolver {
     ) -> Result<RuntimeSkillPromptContext, AppErrorDto> {
         Ok(RuntimeSkillPromptContext {
             orchestration_lines: Self::collect_skill_orchestration_lines(selected_skills),
+            workflow_lines: Self::collect_skill_templates(
+                registry,
+                &selected_skills.workflow_skills,
+            )?,
             policy_lines: Self::collect_skill_templates(registry, &selected_skills.policy_skills)?,
             capability_lines: Self::collect_skill_templates(
                 registry,
@@ -282,6 +297,30 @@ impl PromptResolver {
                 "aggregatedAffectsLayers: {}",
                 affects_layers.join(", ")
             ));
+        }
+        let workflow_orchestration = selected_skills.get_workflow_orchestration();
+        if !workflow_orchestration.workflow_skill_ids.is_empty() {
+            lines.push(format!(
+                "workflowSkillIds: {}",
+                workflow_orchestration.workflow_skill_ids.join(", ")
+            ));
+        }
+        if !workflow_orchestration.stages.is_empty() {
+            lines.push(format!(
+                "workflowStages: {}",
+                workflow_orchestration
+                    .stages
+                    .iter()
+                    .map(|stage| stage.stage.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" -> ")
+            ));
+            for stage in workflow_orchestration.stages {
+                lines.push(format!(
+                    "workflowStage={} sourceSkill={}",
+                    stage.stage, stage.source_skill_id
+                ));
+            }
         }
 
         for skill in selected_skills.all_skills() {
@@ -842,6 +881,8 @@ mod tests {
             trigger_conditions: Vec::new(),
             required_contexts: Vec::new(),
             state_writes: Vec::new(),
+            workflow_stages: Vec::new(),
+            post_tasks: Vec::new(),
             automation_tier: None,
             scene_tags: Vec::new(),
             affects_layers: Vec::new(),
@@ -1063,5 +1104,50 @@ mod tests {
         assert!(rendered.contains("### Skill: runtime.policy.guard"));
         assert!(rendered.contains("### Skill: runtime.capability.scene"));
         assert!(rendered.contains("### Skill: runtime.review.logic"));
+    }
+
+    #[test]
+    fn workflow_skill_stages_are_rendered_in_prompt_orchestration_context() {
+        let resolver = PromptResolver;
+        let context = sample_context();
+        let continuity_pack = ContinuityPack::default();
+        let registry = create_registry_with_builtin_templates();
+
+        {
+            let guard = registry.read().expect("lock registry");
+            let mut workflow = runtime_skill_manifest("chapter.draft.workflow", "workflow");
+            workflow.trigger_conditions = vec!["chapter.draft".to_string()];
+            workflow.workflow_stages = vec![
+                "plan".to_string(),
+                "draft".to_string(),
+                "review".to_string(),
+            ];
+            guard
+                .create_skill(&workflow, "按阶段执行：规划 -> 起草 -> 审查")
+                .expect("create workflow skill with stages");
+        }
+
+        let input = sample_input("chapter.draft");
+        let selected = {
+            let guard = registry.read().expect("lock registry");
+            guard
+                .select_skills_for_task("chapter.draft")
+                .expect("select chapter workflow skills")
+        };
+        let rendered = resolver
+            .resolve_or_build_prompt(
+                &registry,
+                &context,
+                &continuity_pack,
+                "chapter.draft",
+                &input,
+                &selected,
+            )
+            .expect("render prompt with workflow stages");
+
+        assert!(rendered.contains("workflowStages: plan -> draft -> review"));
+        assert!(rendered.contains("workflowStage=plan sourceSkill=chapter.draft.workflow"));
+        assert!(rendered.contains("workflowStage=draft sourceSkill=chapter.draft.workflow"));
+        assert!(rendered.contains("workflowStage=review sourceSkill=chapter.draft.workflow"));
     }
 }

@@ -89,6 +89,7 @@ pub struct AiStrategyProfile {
     pub default_capability_bundles: Vec<String>,
     pub state_write_policy: String,
     pub continuity_pack_depth: String,
+    pub enforce_context_completeness: bool,
     pub chapter_generation_mode: String,
     pub window_planning_horizon: i64,
 }
@@ -108,6 +109,7 @@ impl Default for AiStrategyProfile {
             ],
             state_write_policy: "chapter_confirmed".to_string(),
             continuity_pack_depth: "standard".to_string(),
+            enforce_context_completeness: true,
             chapter_generation_mode: "plan_scene_draft".to_string(),
             window_planning_horizon: 10,
         }
@@ -828,6 +830,7 @@ mod tests {
             default_capability_bundles: vec!["emotion-flow".to_string()],
             state_write_policy: "manual_only".to_string(),
             continuity_pack_depth: "deep".to_string(),
+            enforce_context_completeness: false,
             chapter_generation_mode: "plan_draft".to_string(),
             window_planning_horizon: 12,
         };

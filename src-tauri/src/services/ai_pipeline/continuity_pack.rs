@@ -15,6 +15,34 @@ pub struct ContinuityPack {
     pub recent_continuity_context: Vec<String>,
 }
 
+impl ContinuityPack {
+    pub fn get_available_context_keys(&self) -> Vec<String> {
+        let mut keys = Vec::new();
+        if !self.constitution_context.is_empty() {
+            keys.push("constitution".to_string());
+        }
+        if !self.canon_context.is_empty() {
+            keys.push("canon".to_string());
+        }
+        if !self.lexicon_policy_context.is_empty() {
+            keys.push("lexicon_policy".to_string());
+        }
+        if !self.state_context.is_empty() {
+            keys.push("state".to_string());
+        }
+        if !self.promise_context.is_empty() {
+            keys.push("promise".to_string());
+        }
+        if !self.window_plan_context.is_empty() {
+            keys.push("window_plan".to_string());
+        }
+        if !self.recent_continuity_context.is_empty() {
+            keys.push("recent_continuity".to_string());
+        }
+        keys
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ContinuityPackDepth {
     Minimal,
@@ -97,8 +125,10 @@ impl ContinuityPackCompiler {
         context_service: &ContextService,
         chapter_id: Option<&str>,
         affects_layers: &[String],
+        window_planning_horizon: i64,
     ) -> ContinuityPack {
         let depth = resolve_effective_depth(canonical_task, depth);
+        let window_planning_horizon = normalize_window_planning_horizon(window_planning_horizon);
         let mut pack = ContinuityPack {
             lexicon_policy_context: build_lexicon_policy_context(context),
             ..ContinuityPack::default()
@@ -140,7 +170,10 @@ impl ContinuityPackCompiler {
         if depth == ContinuityPackDepth::Deep {
             pack.window_plan_context =
                 match context_service.get_window_plan(project_root, chapter_id, context) {
-                    Ok(lines) => lines,
+                    Ok(mut lines) => {
+                        lines.insert(0, format!("窗口规划地平线: {} 章", window_planning_horizon));
+                        lines
+                    }
                     Err(err) => {
                         log::warn!(
                             "[CONTINUITY_PACK] window plan unavailable for task {}: {} {}",
@@ -169,6 +202,10 @@ impl ContinuityPackCompiler {
 
         apply_layer_focus(pack, affects_layers)
     }
+}
+
+fn normalize_window_planning_horizon(raw: i64) -> i64 {
+    raw.clamp(1, 50)
 }
 
 pub fn assess_continuity_pack_completeness(
@@ -420,6 +457,7 @@ mod tests {
             &service,
             Some("ch-1"),
             &[],
+            10,
         );
         assert!(!pack.lexicon_policy_context.is_empty());
         assert!(pack.constitution_context.is_empty());
@@ -452,6 +490,7 @@ mod tests {
             &service,
             Some("ch-1"),
             &[],
+            10,
         );
         let style_line = pack
             .lexicon_policy_context
@@ -499,6 +538,7 @@ mod tests {
             &service,
             Some("ch-1"),
             &[],
+            10,
         );
         let completeness = assess_continuity_pack_completeness("chapter.draft", "standard", &pack);
         assert_eq!(completeness.requested_depth, "standard");
@@ -510,5 +550,48 @@ mod tests {
         assert!(completeness
             .required_layers
             .contains(&"recent_continuity".to_string()));
+    }
+
+    #[test]
+    fn available_context_keys_only_include_present_layers() {
+        let pack = ContinuityPack {
+            constitution_context: vec!["const".to_string()],
+            canon_context: vec!["canon".to_string()],
+            lexicon_policy_context: Vec::new(),
+            state_context: vec!["state".to_string()],
+            promise_context: Vec::new(),
+            window_plan_context: vec!["window".to_string()],
+            recent_continuity_context: Vec::new(),
+        };
+        assert_eq!(
+            pack.get_available_context_keys(),
+            vec![
+                "constitution".to_string(),
+                "canon".to_string(),
+                "state".to_string(),
+                "window_plan".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn deep_compile_includes_window_planning_horizon_line() {
+        let compiler = ContinuityPackCompiler;
+        let context = sample_context();
+        let service = ContextService;
+        let pack = compiler.compile(
+            "",
+            "chapter.draft",
+            "deep",
+            &context,
+            &service,
+            None,
+            &[],
+            15,
+        );
+        assert_eq!(
+            pack.window_plan_context.first().map(String::as_str),
+            Some("窗口规划地平线: 15 章")
+        );
     }
 }

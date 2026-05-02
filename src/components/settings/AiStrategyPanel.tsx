@@ -280,6 +280,19 @@ export function AiStrategyPanel({ projectRoot }: AiStrategyPanelProps) {
             ]}
           />
           <Select
+            label="上下文完整性硬门禁"
+            value={profile.enforceContextCompleteness ? "true" : "false"}
+            onChange={(e) =>
+              patchProfile({
+                enforceContextCompleteness: e.target.value === "true",
+              })
+            }
+            options={[
+              { value: "true", label: "启用（缺层阻断）" },
+              { value: "false", label: "关闭（仅告警）" },
+            ]}
+          />
+          <Select
             label="章节生成模式"
             value={profile.chapterGenerationMode}
             onChange={(e) =>
