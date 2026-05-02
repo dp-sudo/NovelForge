@@ -4,9 +4,7 @@ import { Button } from "../../components/ui/Button.js";
 import { Input } from "../../components/forms/Input.js";
 import { Select } from "../../components/forms/Select.js";
 import { Textarea } from "../../components/forms/Textarea.js";
-import { Modal } from "../../components/dialogs/Modal.js";
 import {
-  aiGenerateNarrativeObligation,
   createNarrativeObligation,
   deleteNarrativeObligation,
   listNarrativeObligations,
@@ -78,10 +76,6 @@ export function NarrativePage() {
   const [error, setError] = useState<string | null>(null);
   const [statusUpdatingId, setStatusUpdatingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [showAiCreate, setShowAiCreate] = useState(false);
-  const [aiDescription, setAiDescription] = useState("");
-  const [aiResult, setAiResult] = useState<string | null>(null);
-  const [aiLoading, setAiLoading] = useState(false);
 
   const chapterLabelMap = useMemo(() => chapterNameById(chapters), [chapters]);
   const chapterOptions = useMemo(
@@ -195,13 +189,16 @@ export function NarrativePage() {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-surface-100">叙事义务</h1>
         <div className="flex items-center gap-2">
-          <Button variant="ghost" size="sm" onClick={() => { setAiDescription(""); setAiResult(null); setShowAiCreate(true); }}>
-            AI 生成
-          </Button>
           <Button variant="secondary" size="sm" onClick={() => void loadData()} loading={loading}>
             刷新
           </Button>
         </div>
+      </div>
+
+      <div className="rounded-lg border border-surface-700 bg-surface-800/70 px-3 py-2">
+        <p className="text-xs text-surface-400">
+          本页承担故事宪法中的义务深度整理。主生产链里的推进、审查和兑现提醒，已在全书指挥台集中展示。
+        </p>
       </div>
 
       <Card padding="lg" className="space-y-4">
@@ -319,47 +316,6 @@ export function NarrativePage() {
           </div>
         )}
       </Card>
-
-      <Modal open={showAiCreate} onClose={() => setShowAiCreate(false)} title="AI 生成叙事义务" width="lg">
-        <div className="space-y-4">
-          <Textarea
-            label="描述要生成的叙事义务"
-            value={aiDescription}
-            onChange={(e) => setAiDescription(e.target.value)}
-            placeholder="例如：在第3章埋下主角身世谜团，并在第12章兑现"
-            className="min-h-[100px]"
-          />
-          <Button
-            variant="primary"
-            loading={aiLoading}
-            onClick={async () => {
-              if (!projectRoot) return;
-              setAiLoading(true);
-              try {
-                setAiResult(await aiGenerateNarrativeObligation(projectRoot, aiDescription));
-                await loadData();
-              } catch {
-                setAiResult("AI 生成失败。请检查 AI 供应商配置。");
-              } finally {
-                setAiLoading(false);
-              }
-            }}
-            disabled={!aiDescription.trim()}
-          >
-            {aiLoading ? "生成中..." : "生成并入库"}
-          </Button>
-          {aiResult && (
-            <div className="p-4 bg-primary/5 border border-primary/20 rounded-xl">
-              <p className="text-xs text-success mb-2">AI 结果已自动写入叙事义务列表。</p>
-              <pre className="text-sm text-surface-200 whitespace-pre-wrap font-sans leading-relaxed max-h-64 overflow-y-auto">{aiResult}</pre>
-              <div className="flex gap-2 mt-3">
-                <Button variant="ghost" size="sm" onClick={() => setAiResult(null)}>重新生成</Button>
-                <Button variant="primary" size="sm" onClick={() => { setAiResult(null); setAiDescription(""); setShowAiCreate(false); }}>关闭</Button>
-              </div>
-            </div>
-          )}
-        </div>
-      </Modal>
     </div>
   );
 }

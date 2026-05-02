@@ -8,20 +8,9 @@ interface PageItem {
 
 const PAGES: PageItem[] = [
   { label: "项目中心", path: "/", keywords: "project center 项目 首页" },
-  { label: "项目仪表盘", path: "/dashboard", keywords: "dashboard 仪表盘 统计 stats" },
-  { label: "创作蓝图", path: "/blueprint", keywords: "blueprint 蓝图 规划" },
-  { label: "角色工坊", path: "/characters", keywords: "characters 角色 人物" },
-  { label: "世界设定库", path: "/world", keywords: "world 世界 设定 规则" },
-  { label: "名词库", path: "/glossary", keywords: "glossary 名词 术语" },
-  { label: "剧情骨架", path: "/plot", keywords: "plot 剧情 主线 骨架" },
-  { label: "章节管理", path: "/chapters", keywords: "chapters 章节 卷" },
-  { label: "章节编辑器", path: "/editor", keywords: "editor 编辑 写作" },
-  { label: "一致性检查", path: "/consistency", keywords: "consistency 检查 审稿" },
+  { label: "全书指挥台", path: "/command-center", keywords: "command center 指挥台 工作台 production workbench" },
   { label: "导出中心", path: "/export", keywords: "export 导出" },
   { label: "设置", path: "/settings", keywords: "settings 设置 配置 模型" },
-  { label: "叙事义务", path: "/narrative", keywords: "narrative 伏笔 义务 叙事" },
-  { label: "时间线", path: "/timeline", keywords: "timeline 时间线" },
-  { label: "角色关系", path: "/relationships", keywords: "relationships 关系 图谱" },
 ];
 
 interface CommandPaletteProps {

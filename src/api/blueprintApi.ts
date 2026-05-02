@@ -1,5 +1,4 @@
 import { invokeCommand } from "./tauriClient.js";
-import { runModuleAiTask } from "./moduleAiApi.js";
 import type { BlueprintStepKey, BlueprintStepStatus } from "../domain/constants.js";
 import { parseBlueprintContent, type BlueprintCertaintyZones } from "../domain/types.js";
 import { listChapters } from "./chapterApi.js";
@@ -43,13 +42,6 @@ export async function markBlueprintCompleted(stepKey: BlueprintStepKey, projectR
 
 export async function resetBlueprintStep(stepKey: BlueprintStepKey, projectRoot: string): Promise<void> {
   await invokeCommand<void>("reset_blueprint_step", { projectRoot, stepKey });
-}
-
-export interface BlueprintSuggestionInput {
-  projectRoot: string;
-  stepKey: string;
-  stepTitle: string;
-  userInstruction: string;
 }
 
 export interface WindowPlanningData {
@@ -97,17 +89,4 @@ export async function getWindowPlanningData(projectRoot: string): Promise<Window
     plannedChapterCount,
     windowPlanningHorizon: clampHorizon(strategy.windowPlanningHorizon),
   };
-}
-
-export async function generateBlueprintSuggestion(input: BlueprintSuggestionInput): Promise<string> {
-  return runModuleAiTask({
-    projectRoot: input.projectRoot,
-    taskType: "blueprint.generate_step",
-    userInstruction: input.userInstruction,
-    blueprintStepKey: input.stepKey,
-    blueprintStepTitle: input.stepTitle,
-    persistMode: "formal",
-    automationTier: "supervised",
-    uiAction: "generate_blueprint_suggestion",
-  });
 }

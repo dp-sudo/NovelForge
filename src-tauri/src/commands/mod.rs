@@ -2,6 +2,7 @@ pub mod ai_commands;
 pub mod blueprint_commands;
 pub mod chapter_commands;
 pub mod character_commands;
+pub mod command_center_commands;
 pub mod consistency_commands;
 pub mod context_commands;
 pub mod dashboard_commands;

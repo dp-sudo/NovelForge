@@ -8,17 +8,7 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
-  { route: "dashboard", label: "仪表盘", icon: "📊" },
-  { route: "blueprint", label: "蓝图", icon: "📐" },
-  { route: "characters", label: "角色", icon: "👤" },
-  { route: "world", label: "世界", icon: "🌍" },
-  { route: "glossary", label: "名词库", icon: "📖" },
-  { route: "plot", label: "剧情", icon: "📈" },
-  { route: "narrative", label: "叙事义务", icon: "🧭" },
-  { route: "timeline", label: "时间线", icon: "🕒" },
-  { route: "relationships", label: "关系图", icon: "🕸️" },
-  { route: "chapters", label: "章节", icon: "📑" },
-  { route: "consistency", label: "检查", icon: "🔍" },
+  { route: "command-center", label: "指挥台", icon: "🧭" },
   { route: "export", label: "导出", icon: "📤" },
   { route: "settings", label: "设置", icon: "⚙️" }
 ];

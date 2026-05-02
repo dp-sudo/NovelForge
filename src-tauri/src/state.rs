@@ -7,6 +7,7 @@ use crate::services::backup_service::BackupService;
 use crate::services::blueprint_service::BlueprintService;
 use crate::services::chapter_service::{ChapterService, VolumeService};
 use crate::services::character_service::{CharacterService, RelationshipService};
+use crate::services::command_center_service::CommandCenterService;
 use crate::services::consistency_service::ConsistencyService;
 use crate::services::context_service::ContextService;
 use crate::services::dashboard_service::DashboardService;
@@ -34,6 +35,7 @@ pub struct AppState {
     pub chapter_service: ChapterService,
     pub volume_service: VolumeService,
     pub character_service: CharacterService,
+    pub command_center_service: CommandCenterService,
     pub import_service: ImportService,
     pub relationship_service: RelationshipService,
     pub consistency_service: ConsistencyService,
@@ -66,6 +68,7 @@ impl AppState {
             chapter_service: ChapterService,
             volume_service: VolumeService,
             character_service: CharacterService,
+            command_center_service: CommandCenterService,
             import_service: ImportService,
             relationship_service: RelationshipService,
             consistency_service: ConsistencyService,

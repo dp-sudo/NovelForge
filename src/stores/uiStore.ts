@@ -2,7 +2,7 @@ import { create } from "zustand";
 
 export type AppRoute =
   | "project-center"
-  | "dashboard"
+  | "command-center"
   | "blueprint"
   | "characters"
   | "world"
@@ -12,7 +12,6 @@ export type AppRoute =
   | "timeline"
   | "relationships"
   | "chapters"
-  | "editor"
   | "consistency"
   | "export"
   | "settings";

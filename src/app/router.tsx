@@ -4,15 +4,8 @@ import { Suspense, lazy, type ComponentType } from "react";
 import { AppShell } from "../components/layout/AppShell";
 import { PageTransition } from "../components/ui/PageTransition.js";
 import { ProjectCenterPage } from "../pages/ProjectCenter/ProjectCenterPage";
+import { CommandCenterPage } from "../pages/CommandCenter/CommandCenterPage.js";
 
-const DashboardPage = lazy(async () => {
-  const mod = await import("../pages/Dashboard/DashboardPage");
-  return { default: mod.DashboardPage };
-});
-const BlueprintPage = lazy(async () => {
-  const mod = await import("../pages/Blueprint/BlueprintPage");
-  return { default: mod.BlueprintPage };
-});
 const CharactersPage = lazy(async () => {
   const mod = await import("../pages/Characters/CharactersPage");
   return { default: mod.CharactersPage };
@@ -29,10 +22,6 @@ const PlotPage = lazy(async () => {
   const mod = await import("../pages/Plot/PlotPage");
   return { default: mod.PlotPage };
 });
-const NarrativePage = lazy(async () => {
-  const mod = await import("../pages/Narrative/NarrativePage");
-  return { default: mod.NarrativePage };
-});
 const TimelinePage = lazy(async () => {
   const mod = await import("../pages/Timeline/TimelinePage");
   return { default: mod.TimelinePage };
@@ -40,18 +29,6 @@ const TimelinePage = lazy(async () => {
 const RelationshipsPage = lazy(async () => {
   const mod = await import("../pages/Relationships/RelationshipsPage");
   return { default: mod.RelationshipsPage };
-});
-const ChaptersPage = lazy(async () => {
-  const mod = await import("../pages/Chapters/ChaptersPage");
-  return { default: mod.ChaptersPage };
-});
-const EditorPage = lazy(async () => {
-  const mod = await import("../pages/Editor/EditorPage");
-  return { default: mod.EditorPage };
-});
-const ConsistencyPage = lazy(async () => {
-  const mod = await import("../pages/Consistency/ConsistencyPage");
-  return { default: mod.ConsistencyPage };
 });
 const ExportPage = lazy(async () => {
   const mod = await import("../pages/Export/ExportPage");
@@ -64,25 +41,24 @@ const SettingsPage = lazy(async () => {
 
 const routeMap: Record<AppRoute, ComponentType> = {
   "project-center": ProjectCenterPage,
-  dashboard: DashboardPage,
-  blueprint: BlueprintPage,
+  "command-center": CommandCenterPage,
+  blueprint: CommandCenterPage,
   characters: CharactersPage,
   world: WorldPage,
   glossary: GlossaryPage,
   plot: PlotPage,
-  narrative: NarrativePage,
+  narrative: CommandCenterPage,
   timeline: TimelinePage,
   relationships: RelationshipsPage,
-  chapters: ChaptersPage,
-  editor: EditorPage,
-  consistency: ConsistencyPage,
+  chapters: CommandCenterPage,
+  consistency: CommandCenterPage,
   export: ExportPage,
   settings: SettingsPage
 };
 
 function PageContent() {
   const activeRoute = useUiStore((s) => s.activeRoute);
-  const Page = routeMap[activeRoute] ?? DashboardPage;
+  const Page = routeMap[activeRoute] ?? CommandCenterPage;
   return (
     <PageTransition routeKey={activeRoute}>
       <Suspense fallback={<div className="px-4 py-3 text-xs text-surface-400">页面加载中...</div>}>

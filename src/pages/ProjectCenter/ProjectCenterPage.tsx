@@ -115,7 +115,7 @@ export function ProjectCenterPage() {
       });
       setCurrentProject(result.projectRoot, result.project);
       setShowNew(false);
-      setActiveRoute("dashboard");
+      setActiveRoute("command-center");
       setSaveDirectory("");
       setName("");
       setAuthor("");
@@ -126,7 +126,7 @@ export function ProjectCenterPage() {
           const existing = await openProject(appError.detail);
           setCurrentProject(existing.projectRoot, existing.project);
           setShowNew(false);
-          setActiveRoute("dashboard");
+          setActiveRoute("command-center");
           setActionError(null);
           return;
         } catch {
@@ -146,7 +146,7 @@ export function ProjectCenterPage() {
       try {
         const result = await openProject(projectPath);
         setCurrentProject(result.projectRoot, result.project);
-        setActiveRoute("dashboard");
+        setActiveRoute("command-center");
         setActionError(null);
       } catch (err) {
         setActionError(getErrorMessage(err, "打开项目失败，请确认路径有效"));
@@ -169,7 +169,7 @@ export function ProjectCenterPage() {
     try {
       const result = await openProject(openDirectory.trim());
       setCurrentProject(result.projectRoot, result.project);
-      setActiveRoute("dashboard");
+      setActiveRoute("command-center");
       setShowOpen(false);
       setOpenDirectory("");
     } catch (err) {

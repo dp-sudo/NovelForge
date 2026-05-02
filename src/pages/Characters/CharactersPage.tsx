@@ -6,7 +6,7 @@ import { Select } from "../../components/forms/Select.js";
 import { Textarea } from "../../components/forms/Textarea.js";
 import { Modal } from "../../components/dialogs/Modal.js";
 import { ConfirmDialog } from "../../components/dialogs/ConfirmDialog.js";
-import { listCharacters, createCharacter, deleteCharacter, aiGenerateCharacter, listCharacterRelationships, createCharacterRelationship, deleteCharacterRelationship, type CharacterRelationship } from "../../api/characterApi.js";
+import { listCharacters, createCharacter, deleteCharacter, listCharacterRelationships, createCharacterRelationship, deleteCharacterRelationship, type CharacterRelationship } from "../../api/characterApi.js";
 import { useProjectStore } from "../../stores/projectStore.js";
 
 const ROLE_TYPES = [
@@ -35,11 +35,6 @@ interface CharacterRow {
   flaw: string | null; arc_stage: string | null; notes: string | null;
 }
 
-type AiCreateResult = {
-  status: "success" | "error";
-  message: string;
-};
-
 const emptyForm = {
   name: "", roleType: "配角" as const, age: "", gender: "",
   identityText: "", appearance: "", motivation: "", desire: "",
@@ -53,10 +48,6 @@ export function CharactersPage() {
   const [showDelete, setShowDelete] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [relationships, setRelationships] = useState<CharacterRelationship[]>([]);
-  const [showAiCreate, setShowAiCreate] = useState(false);
-  const [aiDescription, setAiDescription] = useState("");
-  const [aiLoading, setAiLoading] = useState(false);
-  const [aiResult, setAiResult] = useState<AiCreateResult | null>(null);
   const [showNewRel, setShowNewRel] = useState(false);
   const [relForm, setRelForm] = useState({ targetId: "", relType: "盟友", description: "" });
   const projectRoot = useProjectStore((s) => s.currentProjectPath);
@@ -105,20 +96,6 @@ export function CharactersPage() {
     setShowDelete(false); setSelected(null); await load();
   }
 
-  async function handleAiCreate() {
-    if (!projectRoot || !aiDescription.trim()) return;
-    setAiLoading(true); setAiResult(null);
-    try {
-      const result = await aiGenerateCharacter(projectRoot, aiDescription);
-      setAiResult({ status: "success", message: result || "AI 已完成生成并自动入库。" });
-      await load();
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "AI 生成失败";
-      setAiResult({ status: "error", message });
-    }
-    finally { setAiLoading(false); }
-  }
-
   async function handleAddRelationship() {
     if (!projectRoot || !selected || !relForm.targetId) return;
     await createCharacterRelationship(projectRoot, {
@@ -146,11 +123,14 @@ export function CharactersPage() {
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold text-surface-100">角色工坊</h1>
         <div className="flex gap-2">
-          <Button variant="ghost" size="sm" onClick={() => { setAiDescription(""); setAiResult(null); setShowAiCreate(true); }}>
-            AI 创建
-          </Button>
           <Button variant="primary" size="sm" onClick={() => { resetForm(); setShowNew(true); }}>新建角色</Button>
         </div>
+      </div>
+
+      <div className="mb-4 rounded-lg border border-surface-700 bg-surface-800/70 px-3 py-2">
+        <p className="text-xs text-surface-400">
+          本页是正式资产的深度整理入口。AI 生产主链已收束到全书指挥台，这里只负责人工补录、核对和修正。
+        </p>
       </div>
 
       <div className="flex gap-6">
@@ -264,30 +244,6 @@ export function CharactersPage() {
             <Button variant="ghost" onClick={() => setShowNew(false)}>取消</Button>
             <Button variant="primary" onClick={() => void handleCreate()} disabled={!form.name.trim()}>创建</Button>
           </div>
-        </div>
-      </Modal>
-
-      <Modal open={showAiCreate} onClose={() => setShowAiCreate(false)} title="AI 创建角色" width="lg">
-        <div className="space-y-4">
-          <Textarea label="描述角色设想" value={aiDescription} onChange={(e) => setAiDescription(e.target.value)}
-            placeholder="例如：一位冷峻的剑客，表面冷酷内心温柔，背负着血海深仇..." className="min-h-[120px]" />
-          <Button variant="primary" loading={aiLoading} onClick={() => void handleAiCreate()} disabled={!aiDescription.trim()}>
-            {aiLoading ? "生成中..." : "生成并入库"}
-          </Button>
-          {aiResult && (
-            <div className={`p-4 rounded-xl ${aiResult.status === "success" ? "bg-surface-800" : "bg-error/10 border border-error/30"}`}>
-              <p className={`text-xs mb-2 ${aiResult.status === "success" ? "text-success" : "text-error-light"}`}>
-                {aiResult.status === "success" ? "AI 结果已自动写入角色库。" : "AI 生成失败，未写入角色库。"}
-              </p>
-              <pre className="text-sm text-surface-200 whitespace-pre-wrap font-sans">{aiResult.message}</pre>
-              <div className="flex gap-2 mt-3">
-                <Button variant="ghost" size="sm" onClick={() => setAiResult(null)}>
-                  {aiResult.status === "success" ? "重新生成" : "重试"}
-                </Button>
-                <Button variant="primary" size="sm" onClick={() => { setShowAiCreate(false); setAiDescription(""); setAiResult(null); }}>关闭</Button>
-              </div>
-            </div>
-          )}
         </div>
       </Modal>
 

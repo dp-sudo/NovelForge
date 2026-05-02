@@ -1,10 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Card } from "../../components/cards/Card";
 import { Button } from "../../components/ui/Button";
-import { Modal } from "../../components/dialogs/Modal";
-import { Textarea } from "../../components/forms/Textarea";
 import { listTimelineEntries, type TimelineEntry } from "../../api/timelineApi";
-import { runModuleAiTask } from "../../api/moduleAiApi";
 import { useProjectStore } from "../../stores/projectStore";
 
 const STATUS_TEXT: Record<string, string> = {
@@ -19,11 +16,6 @@ export function TimelinePage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [descending, setDescending] = useState(false);
-  const [showAiReview, setShowAiReview] = useState(false);
-  const [aiPrompt, setAiPrompt] = useState("");
-  const [aiResult, setAiResult] = useState<string | null>(null);
-  const [aiError, setAiError] = useState<string | null>(null);
-  const [aiLoading, setAiLoading] = useState(false);
 
   const loadTimeline = async () => {
     if (!projectRoot) {
@@ -63,9 +55,6 @@ export function TimelinePage() {
           <p className="text-sm text-surface-400 mt-1">按章节顺序浏览全书推进脉络</p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="ghost" size="sm" onClick={() => { setShowAiReview(true); setAiError(null); setAiResult(null); }}>
-            AI 审阅
-          </Button>
           <Button variant="secondary" size="sm" onClick={() => setDescending((v) => !v)}>
             {descending ? "切换正序" : "切换倒序"}
           </Button>
@@ -120,56 +109,6 @@ export function TimelinePage() {
         </div>
       )}
 
-      <Modal open={showAiReview} onClose={() => setShowAiReview(false)} title="AI 时间线审阅" width="lg">
-        <div className="space-y-4">
-          <Textarea
-            label="附加要求（可选）"
-            value={aiPrompt}
-            onChange={(e) => setAiPrompt(e.target.value)}
-            placeholder="例如：重点检查人物年龄线和事件先后关系"
-            className="min-h-[90px]"
-          />
-          <Button
-            variant="primary"
-            loading={aiLoading}
-            onClick={async () => {
-              if (!projectRoot) return;
-              setAiLoading(true);
-              setAiError(null);
-              setAiResult(null);
-              try {
-                const result = await runModuleAiTask({
-                  projectRoot,
-                  taskType: "timeline.review",
-                  persistMode: "derived_review",
-                  automationTier: "auto",
-                  uiAction: "timeline.ai.review",
-                  userInstruction: aiPrompt,
-                });
-                setAiResult(result || "AI 未返回内容。");
-                await loadTimeline();
-              } catch (err) {
-                setAiError(err instanceof Error ? err.message : "AI 审阅失败");
-              } finally {
-                setAiLoading(false);
-              }
-            }}
-            disabled={!projectRoot}
-          >
-            {aiLoading ? "审阅中..." : "生成审阅报告"}
-          </Button>
-          {aiError && (
-            <div className="p-3 rounded-lg bg-error/10 border border-error/30 text-sm text-error">
-              {aiError}
-            </div>
-          )}
-          {aiResult && (
-            <div className="p-4 rounded-xl bg-primary/5 border border-primary/20">
-              <pre className="text-sm text-surface-200 whitespace-pre-wrap font-sans leading-relaxed max-h-80 overflow-y-auto">{aiResult}</pre>
-            </div>
-          )}
-        </div>
-      </Modal>
     </div>
   );
 }

@@ -8,14 +8,13 @@ import { useUiStore } from "../../stores/uiStore.js";
 /** Maps command palette paths to AppRoute names. */
 const PATH_TO_ROUTE: Record<string, string> = {
   "/": "project-center",
-  "/dashboard": "dashboard",
+  "/command-center": "command-center",
   "/blueprint": "blueprint",
   "/characters": "characters",
   "/world": "world",
   "/glossary": "glossary",
   "/plot": "plot",
   "/chapters": "chapters",
-  "/editor": "editor",
   "/consistency": "consistency",
   "/export": "export",
   "/settings": "settings",

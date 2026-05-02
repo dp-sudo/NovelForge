@@ -9,7 +9,6 @@ import { Textarea } from "../../components/forms/Textarea.js";
 import { Modal } from "../../components/dialogs/Modal.js";
 import { ConfirmDialog } from "../../components/dialogs/ConfirmDialog.js";
 import { Badge } from "../../components/ui/Badge.js";
-import { runModuleAiTask } from "../../api/moduleAiApi.js";
 import {
   assignChapterVolume,
   createChapter,
@@ -59,12 +58,6 @@ export function ChaptersPage() {
   const [volumeFilter, setVolumeFilter] = useState<VolumeFilter>("all");
   const [form, setForm] = useState({ title: "", summary: "", targetWords: 3000 });
   const [volumeForm, setVolumeForm] = useState({ title: "", description: "" });
-  const [showAiReview, setShowAiReview] = useState(false);
-  const [aiPrompt, setAiPrompt] = useState("");
-  const [aiTargetChapterId, setAiTargetChapterId] = useState("");
-  const [aiResult, setAiResult] = useState<string | null>(null);
-  const [aiError, setAiError] = useState<string | null>(null);
-  const [aiLoading, setAiLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const setActiveRoute = useUiStore((s) => s.setActiveRoute);
   const setActiveChapter = useEditorStore((s) => s.setActiveChapter);
@@ -245,9 +238,9 @@ export function ChaptersPage() {
     if (dragInProgressRef.current) {
       return;
     }
-    // 问题1修复(链路入口): 这里只切路由与章节，不主动改写正文；正文加载统一由 EditorPage 处理。
+    // 章节页只负责队列管理，真正的生产入口统一回到指挥台当前作业区。
     setActiveChapter(chapter.id, chapter.title);
-    setActiveRoute("editor");
+    setActiveRoute("command-center");
   }
 
   async function handleImportFiles(event: React.ChangeEvent<HTMLInputElement>) {
@@ -306,25 +299,16 @@ export function ChaptersPage() {
           <Button variant="secondary" size="sm" onClick={() => setShowCreateVolume(true)} disabled={!projectRoot}>
             新建卷
           </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => {
-              setAiPrompt("");
-              const defaultChapterId = visibleChapters[0]?.id ?? chapters[0]?.id ?? "";
-              setAiTargetChapterId(defaultChapterId);
-              setAiResult(null);
-              setAiError(null);
-              setShowAiReview(true);
-            }}
-            disabled={!projectRoot}
-          >
-            AI 规划
-          </Button>
           <Button variant="primary" size="sm" onClick={() => setShowNew(true)} disabled={!projectRoot}>
             新建章节
           </Button>
         </div>
+      </div>
+
+      <div className="rounded-lg border border-surface-700 bg-surface-800/70 px-3 py-2">
+        <p className="text-xs text-surface-400">
+          本页只负责章节队列和分卷维护。进入具体生产请回到全书指挥台的当前作业区。
+        </p>
       </div>
 
       <input
@@ -548,71 +532,6 @@ export function ChaptersPage() {
               创建卷
             </Button>
           </div>
-        </div>
-      </Modal>
-
-      <Modal open={showAiReview} onClose={() => setShowAiReview(false)} title="AI 章节规划建议" width="lg">
-        <div className="space-y-4">
-          <Select
-            label="回填章节"
-            value={aiTargetChapterId}
-            onChange={(e) => setAiTargetChapterId(e.target.value)}
-            options={[
-              { value: "", label: "请选择章节" },
-              ...chapters.map((chapter) => ({
-                value: chapter.id,
-                label: `#${chapter.chapterIndex} ${chapter.title}`,
-              })),
-            ]}
-          />
-          <Textarea
-            label="附加要求（可选）"
-            value={aiPrompt}
-            onChange={(e) => setAiPrompt(e.target.value)}
-            placeholder="例如：优先检查分卷节奏和章节目标衔接"
-            className="min-h-[90px]"
-          />
-          <Button
-            variant="primary"
-            loading={aiLoading}
-            onClick={async () => {
-              if (!projectRoot) return;
-              setAiLoading(true);
-              setAiResult(null);
-              setAiError(null);
-              try {
-                const result = await runModuleAiTask({
-                  projectRoot,
-                  taskType: "chapter.plan",
-                  chapterId: aiTargetChapterId || undefined,
-                  persistMode: "formal",
-                  automationTier: "supervised",
-                  uiAction: "chapters.ai.plan",
-                  userInstruction: aiPrompt,
-                });
-                setAiResult(result || "AI 未返回内容。");
-                setMessage("AI 章节规划已回填到章节数据");
-                await load();
-              } catch (err) {
-                setAiError(err instanceof Error ? err.message : "AI 规划失败");
-              } finally {
-                setAiLoading(false);
-              }
-            }}
-            disabled={!projectRoot || !aiTargetChapterId}
-          >
-            {aiLoading ? "分析中..." : "生成并回填章节规划"}
-          </Button>
-          {aiError && (
-            <div className="p-3 rounded-lg bg-error/10 border border-error/30 text-sm text-error">
-              {aiError}
-            </div>
-          )}
-          {aiResult && (
-            <div className="p-4 rounded-xl bg-primary/5 border border-primary/20">
-              <pre className="text-sm text-surface-200 whitespace-pre-wrap font-sans leading-relaxed max-h-80 overflow-y-auto">{aiResult}</pre>
-            </div>
-          )}
         </div>
       </Modal>
 

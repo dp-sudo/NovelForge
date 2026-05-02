@@ -140,7 +140,8 @@ function SliderControl({
 }
 
 export function SettingsPage() {
-  const [activeTab, setActiveTab] = useState<TabKey>("model");
+  const [activeTab, setActiveTab] = useState<TabKey>("writing");
+  const [showAdvancedTabs, setShowAdvancedTabs] = useState(false);
   const [vendors, setVendors] = useState<Record<string, VendorFormState>>({});
   const [configuredProviderIds, setConfiguredProviderIds] = useState<string[]>([]);
   const [taskRoutes, setTaskRoutes] = useState<Record<string, TaskRouteFormState>>({});
@@ -1066,15 +1067,17 @@ export function SettingsPage() {
     );
   }
 
-  const tabs: { key: TabKey; label: string }[] = [
+  const basicTabs: { key: TabKey; label: string }[] = [
+    { key: "editor", label: "编辑器" },
+    { key: "writing", label: "写作风格" },
+    { key: "about", label: "关于" },
+  ];
+  const advancedTabs: { key: TabKey; label: string }[] = [
     { key: "model", label: "模型配置" },
     { key: "routing", label: "任务路由" },
     { key: "skills", label: "技能管理" },
     { key: "aiStrategy", label: "AI 策略" },
-    { key: "editor", label: "编辑器" },
-    { key: "writing", label: "写作风格" },
     { key: "backup", label: "数据与备份" },
-    { key: "about", label: "关于" },
   ];
 
   const configuredProviderIdSet = new Set(configuredProviderIds);
@@ -1110,18 +1113,56 @@ export function SettingsPage() {
     <div className="max-w-4xl mx-auto">
       <h1 className="text-2xl font-bold text-surface-100 mb-6">设置</h1>
 
-      <div className="flex gap-1 mb-6 p-1 bg-surface-800 rounded-lg border border-surface-700 w-fit">
-        {tabs.map((tab) => (
+      <div className="space-y-3 mb-6">
+        <div className="flex gap-1 p-1 bg-surface-800 rounded-lg border border-surface-700 w-fit">
+          {basicTabs.map((tab) => (
+            <button
+              key={tab.key}
+              onClick={() => setActiveTab(tab.key)}
+              className={`px-4 py-2 text-sm rounded-md transition-colors ${
+                activeTab === tab.key ? "bg-primary text-white" : "text-surface-300 hover:text-surface-100"
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex items-center gap-3">
           <button
-            key={tab.key}
-            onClick={() => setActiveTab(tab.key)}
-            className={`px-4 py-2 text-sm rounded-md transition-colors ${
-              activeTab === tab.key ? "bg-primary text-white" : "text-surface-300 hover:text-surface-100"
-            }`}
+            onClick={() => {
+              setShowAdvancedTabs((prev) => {
+                const next = !prev;
+                if (!next && advancedTabs.some((tab) => tab.key === activeTab)) {
+                  setActiveTab("writing");
+                }
+                return next;
+              });
+            }}
+            className="px-3 py-1.5 text-xs rounded-md border border-surface-700 bg-surface-800 text-surface-300 hover:text-surface-100 transition-colors"
           >
-            {tab.label}
+            {showAdvancedTabs ? "收起高级维护面板" : "展开高级维护面板"}
           </button>
-        ))}
+          <span className="text-xs text-surface-500">
+            默认只展示低频配置，模型路由、技能和数据运维已降级为维护入口。
+          </span>
+        </div>
+
+        {showAdvancedTabs && (
+          <div className="flex gap-1 p-1 bg-surface-800 rounded-lg border border-surface-700 w-fit">
+            {advancedTabs.map((tab) => (
+              <button
+                key={tab.key}
+                onClick={() => setActiveTab(tab.key)}
+                className={`px-4 py-2 text-sm rounded-md transition-colors ${
+                  activeTab === tab.key ? "bg-primary text-white" : "text-surface-300 hover:text-surface-100"
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {activeTab === "model" && (

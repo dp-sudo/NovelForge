@@ -10,7 +10,6 @@ import {
   saveBlueprintStep,
   markBlueprintCompleted,
   resetBlueprintStep,
-  generateBlueprintSuggestion,
   getWindowPlanningData,
   type WindowPlanningData,
 } from "../../api/blueprintApi.js";
@@ -19,7 +18,6 @@ import {
   buildPromotionStages,
   resolveChapterPlanChapterSelection,
   selectPromotionStage,
-  streamBookGenerationPipeline,
   type ChapterPlanSelectionStrategy,
 } from "../../api/bookPipelineApi.js";
 import { runModuleAiTask } from "../../api/moduleAiApi.js";
@@ -28,11 +26,9 @@ import { useProjectStore } from "../../stores/projectStore.js";
 import { useEditorStore } from "../../stores/editorStore.js";
 import {
   parseBlueprintContent,
-  serializeBlueprintContent,
   type BlueprintCertaintyZones,
 } from "../../domain/types.js";
 import type { BlueprintStepKey } from "../../domain/constants.js";
-import { BookPipelinePanel } from "./components/BookPipelinePanel.js";
 import { CertaintyZonesEditor } from "./components/CertaintyZonesEditor.js";
 import {
   EMPTY_CERTAINTY_ZONES,
@@ -392,7 +388,11 @@ const PROMOTION_TARGETS_BY_STEP: Partial<Record<BlueprintStepKey, Array<{ label:
 
 // ── Main component ──
 
-export function BlueprintPage() {
+interface BlueprintPageProps {
+  embedded?: boolean;
+}
+
+export function BlueprintPage({ embedded = false }: BlueprintPageProps) {
   const [steps, setSteps] = useState<Array<{
     status: string;
     content: string;
@@ -405,13 +405,7 @@ export function BlueprintPage() {
   );
   const [certaintyZones, setCertaintyZones] = useState<BlueprintCertaintyZones>({ ...EMPTY_CERTAINTY_ZONES });
   const [saving, setSaving] = useState(false);
-  const [aiLoading, setAiLoading] = useState(false);
-  const [aiResult, setAiResult] = useState<string | null>(null);
-  const [bookIdeaPrompt, setBookIdeaPrompt] = useState("");
-  const [bookPipelineRunning, setBookPipelineRunning] = useState(false);
-  const [bookPipelineLogs, setBookPipelineLogs] = useState<string[]>([]);
   const [bookPipelineStatus, setBookPipelineStatus] = useState<string | null>(null);
-  const [bookPipelineAbort, setBookPipelineAbort] = useState<AbortController | null>(null);
   const [promotionRunning, setPromotionRunning] = useState(false);
   const [promotionChapters, setPromotionChapters] = useState<ChapterRecord[]>([]);
   const [selectedPromotionChapterId, setSelectedPromotionChapterId] = useState("");
@@ -496,7 +490,6 @@ export function BlueprintPage() {
     } else {
       setCertaintyZones({ ...EMPTY_CERTAINTY_ZONES });
     }
-    setAiResult(null);
     setCertaintyValidationNotice(null);
   }, [steps, activeIdx, cur.key]);
 
@@ -693,106 +686,16 @@ export function BlueprintPage() {
     await resetBlueprintStep(cur.key, projectRoot);
     setFormData(parseBlueprintContent(cur.key, ""));
     setCertaintyZones({ ...EMPTY_CERTAINTY_ZONES });
-    setAiResult(null);
     await Promise.all([load(), loadLoopData()]);
-  }
-
-  async function handleAiSuggest() {
-    if (!projectRoot) return;
-    setAiLoading(true);
-    setAiResult(null);
-    try {
-      const baseSummary = Object.entries(formData)
-        .filter(([, v]) => v.trim())
-        .map(([k, v]) => `${(FIELD_LABELS[cur.key]?.[k] ?? k)}：${v}`)
-        .join("\n");
-      const certaintySummary = certaintyZoneEnabled && hasCertaintyZones(certaintyZones)
-        ? [
-            certaintyZones.frozen.length > 0 ? `冻结区：${certaintyZones.frozen.join("；")}` : "",
-            certaintyZones.promised.length > 0 ? `承诺区：${certaintyZones.promised.join("；")}` : "",
-            certaintyZones.exploratory.length > 0 ? `探索区：${certaintyZones.exploratory.join("；")}` : "",
-          ]
-            .filter((line) => line.length > 0)
-            .join("\n")
-        : "";
-      const textSummary = [baseSummary, certaintySummary].filter((line) => line.length > 0).join("\n");
-      const suggestion = await generateBlueprintSuggestion({
-        projectRoot,
-        stepKey: cur.key,
-        stepTitle: cur.label,
-        userInstruction: textSummary || ""
-      });
-      setAiResult(suggestion.trim() ? suggestion : "AI 返回为空内容，请重试或切换模型后再试。");
-      await Promise.all([load(), loadLoopData()]);
-    } catch (error) {
-      const rawMessage = error instanceof Error ? error.message : "AI 建议生成失败。请检查 AI 供应商配置。";
-      const errorCode = parseErrorCode(rawMessage);
-      setAiResult(formatPipelineBlockingTip(errorCode, rawMessage));
-    } finally { setAiLoading(false); }
-  }
-
-  function handleApplyAiResult() {
-    if (!aiResult) return;
-    setFormData(parseBlueprintContent(cur.key, aiResult));
-    if (certaintyZoneEnabled) {
-      setCertaintyZones(parseCertaintyZonesFromLegacyContent(aiResult));
-    }
-    setAiResult(null);
   }
 
   function handleFormChange(newData: Record<string, string>) {
     setFormData(newData);
   }
 
-  async function handleRunBookPipeline() {
-    if (!projectRoot || !bookIdeaPrompt.trim() || bookPipelineRunning) return;
-    const abortController = new AbortController();
-    setBookPipelineAbort(abortController);
-    setBookPipelineRunning(true);
-    setBookPipelineStatus(null);
-    setBookPipelineLogs([]);
-    try {
-      for await (const event of streamBookGenerationPipeline(
-        {
-          projectRoot,
-          ideaPrompt: bookIdeaPrompt.trim(),
-        },
-        abortController.signal,
-      )) {
-        if (event.type === "stage-start") {
-          setBookPipelineLogs((prev) => [...prev, `开始：${event.stageLabel}`]);
-          continue;
-        }
-        if (event.type === "stage-done") {
-          setBookPipelineLogs((prev) => [...prev, `完成：${event.stageLabel}`]);
-          continue;
-        }
-        if (event.type === "stage-error") {
-          const message = formatPipelineBlockingTip(event.errorCode, event.message);
-          setBookPipelineLogs((prev) => [...prev, `失败：${event.stageLabel} - ${message}`]);
-          setBookPipelineStatus(message);
-          return;
-        }
-      }
-      setBookPipelineStatus("全书生成编排执行完成");
-      await Promise.all([load(), loadLoopData()]);
-    } catch (error) {
-      setBookPipelineStatus(error instanceof Error ? error.message : "全书生成编排执行失败");
-    } finally {
-      setBookPipelineRunning(false);
-      setBookPipelineAbort(null);
-    }
-  }
-
-  function handleCancelBookPipeline() {
-    if (!bookPipelineAbort) return;
-    bookPipelineAbort.abort();
-    setBookPipelineStatus("已取消全书生成编排");
-  }
-
   return (
     <div className="max-w-6xl mx-auto">
-      <h1 className="text-2xl font-bold text-surface-100 mb-6">创作蓝图</h1>
+      <h1 className={`text-2xl font-bold text-surface-100 ${embedded ? "mb-4" : "mb-6"}`}>创作蓝图</h1>
       <div className="flex gap-6">
         {/* ── Sidebar nav ── */}
         <div className="w-56 shrink-0">
@@ -929,19 +832,6 @@ export function BlueprintPage() {
               </div>
             )}
 
-            {/* ── AI result panel ── */}
-            {aiResult && (
-              <div className="mt-4 p-4 bg-primary/5 border border-primary/20 rounded-xl">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-medium text-primary">AI 建议（已自动写入当前步骤，可选同步到表单）</span>
-                  <div className="flex gap-2">
-                    <Button variant="primary" size="sm" onClick={handleApplyAiResult}>填充到表单</Button>
-                    <Button variant="ghost" size="sm" onClick={() => setAiResult(null)}>忽略</Button>
-                  </div>
-                </div>
-                <pre className="text-sm text-surface-200 whitespace-pre-wrap font-sans leading-relaxed max-h-64 overflow-y-auto">{aiResult}</pre>
-              </div>
-            )}
           </Card>
 
           <div className="mt-4 grid grid-cols-1 xl:grid-cols-2 gap-4">
@@ -1017,37 +907,6 @@ export function BlueprintPage() {
           </div>
         </div>
 
-        {/* ── AI sidebar ── */}
-        <div className="w-64 shrink-0 hidden lg:block">
-          <Card padding="md">
-            <h3 className="text-sm font-semibold text-surface-200 mb-3">AI 建议</h3>
-            <p className="text-xs text-surface-400 mb-3">
-              AI 可基于已有内容生成当前步骤的完善建议。
-            </p>
-            <Button
-              variant="secondary"
-              size="sm"
-              className="w-full justify-center mb-3"
-              loading={aiLoading}
-              onClick={() => void handleAiSuggest()}
-            >
-              {aiLoading ? "生成中..." : "生成并写入"}
-            </Button>
-            {!projectRoot && <p className="text-xs text-warning mb-2">请先打开项目</p>}
-          </Card>
-          <BookPipelinePanel
-            title="一键全书生成"
-            ideaPrompt={bookIdeaPrompt}
-            onIdeaPromptChange={setBookIdeaPrompt}
-            running={bookPipelineRunning}
-            status={bookPipelineStatus}
-            logs={bookPipelineLogs}
-            onRun={() => void handleRunBookPipeline()}
-            onCancel={handleCancelBookPipeline}
-            runDisabled={!bookIdeaPrompt.trim()}
-            projectReady={Boolean(projectRoot)}
-          />
-        </div>
       </div>
     </div>
   );

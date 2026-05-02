@@ -188,6 +188,7 @@ pub fn run() {
             commands::character_commands::list_character_relationships,
             commands::character_commands::create_character_relationship,
             commands::character_commands::delete_character_relationship,
+            commands::command_center_commands::get_command_center_snapshot,
             commands::world_commands::list_world_rules,
             commands::world_commands::create_world_rule,
             commands::world_commands::delete_world_rule,

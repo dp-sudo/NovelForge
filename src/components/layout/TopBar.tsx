@@ -21,7 +21,7 @@ const resultTypeLabels: Record<string, string> = {
 };
 
 function resolveRouteByResultType(type: string): AppRoute {
-  if (type === "chapter") return "editor";
+  if (type === "chapter") return "command-center";
   if (type === "character") return "characters";
   if (type === "world_rule") return "world";
   if (type === "glossary") return "glossary";
@@ -46,7 +46,7 @@ export function TopBar() {
   const searchBoxRef = useRef<HTMLDivElement>(null);
 
   const statusInfo = saveStatusLabels[saveStatus] ?? saveStatusLabels.saved;
-  const isEditor = activeRoute === "editor";
+  const isEditor = activeRoute === "command-center";
 
   useEffect(() => {
     function handleOutsideClick(event: MouseEvent) {

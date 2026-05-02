@@ -7,7 +7,7 @@ import { Textarea } from "../../components/forms/Textarea.js";
 import { Modal } from "../../components/dialogs/Modal.js";
 import { Badge } from "../../components/ui/Badge.js";
 import type { GlossaryTermInput } from "../../domain/types.js";
-import { listGlossaryTerms, createGlossaryTerm, aiGenerateGlossaryTerm, type GlossaryRow } from "../../api/glossaryApi.js";
+import { listGlossaryTerms, createGlossaryTerm, type GlossaryRow } from "../../api/glossaryApi.js";
 import { useProjectStore } from "../../stores/projectStore.js";
 
 const TERM_TYPES = [
@@ -25,19 +25,10 @@ const termTypeColors: Record<string, BadgeVariant> = {
 
 type BadgeVariant = "default" | "success" | "warning" | "error" | "info";
 
-type AiCreateResult = {
-  status: "success" | "error";
-  message: string;
-};
-
 export function GlossaryPage() {
   const [terms, setTerms] = useState<GlossaryRow[]>([]);
   const [showNew, setShowNew] = useState(false);
-  const [showAiCreate, setShowAiCreate] = useState(false);
   const [form, setForm] = useState({ term: "", termType: "术语" as string, description: "", locked: false, banned: false });
-  const [aiDescription, setAiDescription] = useState("");
-  const [aiResult, setAiResult] = useState<AiCreateResult | null>(null);
-  const [aiLoading, setAiLoading] = useState(false);
   const projectRoot = useProjectStore((s) => s.currentProjectPath);
 
   const load = useCallback(async () => {
@@ -70,9 +61,14 @@ export function GlossaryPage() {
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold text-surface-100">名词库</h1>
         <div className="flex gap-2">
-          <Button variant="ghost" size="sm" onClick={() => { setAiDescription(""); setAiResult(null); setShowAiCreate(true); }}>AI 生成</Button>
           <Button variant="primary" size="sm" onClick={() => setShowNew(true)}>新增名词</Button>
         </div>
+      </div>
+
+      <div className="mb-4 rounded-lg border border-surface-700 bg-surface-800/70 px-3 py-2">
+        <p className="text-xs text-surface-400">
+          本页是正式名词的深度整理入口。主生产链中的抽取、锁定和审查已整合到全书指挥台。
+        </p>
       </div>
 
       <Card padding="none">
@@ -135,54 +131,6 @@ export function GlossaryPage() {
             <Button variant="ghost" onClick={() => setShowNew(false)}>取消</Button>
             <Button variant="primary" onClick={() => void handleCreate()} disabled={!form.term.trim()}>创建</Button>
           </div>
-        </div>
-      </Modal>
-
-      <Modal open={showAiCreate} onClose={() => setShowAiCreate(false)} title="AI 生成名词" width="lg">
-        <div className="space-y-4">
-          <Textarea
-            label="描述你要生成的名词"
-            value={aiDescription}
-            onChange={(e) => setAiDescription(e.target.value)}
-            placeholder="例如：给这部作品生成3条关键术语，包含1条禁用词"
-            className="min-h-[100px]"
-          />
-          <Button
-            variant="primary"
-            loading={aiLoading}
-            onClick={async () => {
-              if (!projectRoot) return;
-              setAiLoading(true);
-              setAiResult(null);
-              try {
-                const result = await aiGenerateGlossaryTerm(projectRoot, aiDescription);
-                setAiResult({ status: "success", message: result || "AI 已完成生成并自动入库。" });
-                await load();
-              } catch (error) {
-                const message = error instanceof Error ? error.message : "AI 生成失败";
-                setAiResult({ status: "error", message });
-              } finally {
-                setAiLoading(false);
-              }
-            }}
-            disabled={!aiDescription.trim()}
-          >
-            {aiLoading ? "生成中..." : "生成并入库"}
-          </Button>
-          {aiResult && (
-            <div className={`p-4 rounded-xl ${aiResult.status === "success" ? "bg-primary/5 border border-primary/20" : "bg-error/10 border border-error/30"}`}>
-              <p className={`text-xs mb-2 ${aiResult.status === "success" ? "text-success" : "text-error-light"}`}>
-                {aiResult.status === "success" ? "AI 结果已自动写入名词库。" : "AI 生成失败，未写入名词库。"}
-              </p>
-              <pre className="text-sm text-surface-200 whitespace-pre-wrap font-sans leading-relaxed max-h-64 overflow-y-auto">{aiResult.message}</pre>
-              <div className="flex gap-2 mt-3">
-                <Button variant="ghost" size="sm" onClick={() => setAiResult(null)}>
-                  {aiResult.status === "success" ? "重新生成" : "重试"}
-                </Button>
-                <Button variant="primary" size="sm" onClick={() => { setAiResult(null); setAiDescription(""); setShowAiCreate(false); }}>关闭</Button>
-              </div>
-            </div>
-          )}
         </div>
       </Modal>
     </div>

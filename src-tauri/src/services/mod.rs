@@ -5,6 +5,7 @@ pub mod backup_service;
 pub mod blueprint_service;
 pub mod chapter_service;
 pub mod character_service;
+pub mod command_center_service;
 pub mod consistency_service;
 pub mod context_service;
 pub mod dashboard_service;

@@ -51,7 +51,12 @@ const STATUS_BADGE: Record<string, { variant: "default" | "success" | "warning" 
 };
 
 
-export function EditorPage() {
+interface EditorPageProps {
+  embedded?: boolean;
+  hideChapterTree?: boolean;
+}
+
+export function EditorPage({ embedded = false, hideChapterTree = false }: EditorPageProps) {
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const selRef = useRef<{ start: number; end: number }>({ start: 0, end: 0 });
   const autosaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -745,61 +750,63 @@ export function EditorPage() {
   const currentChapter = chapters.find((chapter) => chapter.id === chapterId);
 
   return (
-    <div className="flex gap-4 h-[calc(100vh-8rem)]">
+    <div className={`flex gap-4 ${embedded ? "min-h-[52rem]" : "h-[calc(100vh-8rem)]"}`}>
       {/* Left: Chapter Tree */}
-      <div className="w-56 shrink-0 bg-surface-800 border border-surface-700 rounded-xl flex flex-col overflow-hidden">
-        <div className="px-3 py-2.5 border-b border-surface-700 space-y-2">
-          <h3 className="text-xs font-semibold text-surface-400 uppercase tracking-wider">章节树</h3>
-          <Select
-            value={volumeFilter}
-            onChange={(e) => setVolumeFilter(e.target.value)}
-            options={volumeFilterOptions}
-          />
+      {!hideChapterTree && (
+        <div className="w-56 shrink-0 bg-surface-800 border border-surface-700 rounded-xl flex flex-col overflow-hidden">
+          <div className="px-3 py-2.5 border-b border-surface-700 space-y-2">
+            <h3 className="text-xs font-semibold text-surface-400 uppercase tracking-wider">章节树</h3>
+            <Select
+              value={volumeFilter}
+              onChange={(e) => setVolumeFilter(e.target.value)}
+              options={volumeFilterOptions}
+            />
+          </div>
+          <div className="flex-1 overflow-y-auto p-2 space-y-2">
+            {chapters.length === 0 ? (
+              <p className="text-xs text-surface-500 text-center py-8">暂无章节</p>
+            ) : (
+              groupedChapters.map((group) => (
+                <div key={group.id} className="space-y-1">
+                  {volumeFilter === "all" && (
+                    <div className="text-[11px] uppercase tracking-wide text-surface-500 px-1">{group.title}</div>
+                  )}
+                  {group.items.length === 0 ? (
+                    volumeFilter === "all" ? (
+                      <p className="text-[11px] text-surface-600 px-2 py-1">暂无章节</p>
+                    ) : null
+                  ) : (
+                    group.items.map((chapter) => (
+                      <button
+                        key={chapter.id}
+                        onClick={() => handleSelectChapter(chapter)}
+                        className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${
+                          chapterId === chapter.id
+                            ? "bg-primary/10 text-primary border border-primary/20"
+                            : "text-surface-300 hover:bg-surface-700 border border-transparent"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="truncate">
+                            <span className="text-surface-500 mr-1.5">#{chapter.chapterIndex}</span>
+                            {chapter.title}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <span className="text-xs text-surface-500">{chapter.currentWords}字</span>
+                          <Badge variant={chapter.status === "completed" ? "success" : chapter.status === "drafting" ? "info" : "default"}>
+                            {chapter.status === "completed" ? "已完成" : chapter.status === "drafting" ? "写作中" : "待修订"}
+                          </Badge>
+                        </div>
+                      </button>
+                    ))
+                  )}
+                </div>
+              ))
+            )}
+          </div>
         </div>
-        <div className="flex-1 overflow-y-auto p-2 space-y-2">
-          {chapters.length === 0 ? (
-            <p className="text-xs text-surface-500 text-center py-8">暂无章节</p>
-          ) : (
-            groupedChapters.map((group) => (
-              <div key={group.id} className="space-y-1">
-                {volumeFilter === "all" && (
-                  <div className="text-[11px] uppercase tracking-wide text-surface-500 px-1">{group.title}</div>
-                )}
-                {group.items.length === 0 ? (
-                  volumeFilter === "all" ? (
-                    <p className="text-[11px] text-surface-600 px-2 py-1">暂无章节</p>
-                  ) : null
-                ) : (
-                  group.items.map((chapter) => (
-                    <button
-                      key={chapter.id}
-                      onClick={() => handleSelectChapter(chapter)}
-                      className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${
-                        chapterId === chapter.id
-                          ? "bg-primary/10 text-primary border border-primary/20"
-                          : "text-surface-300 hover:bg-surface-700 border border-transparent"
-                      }`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="truncate">
-                          <span className="text-surface-500 mr-1.5">#{chapter.chapterIndex}</span>
-                          {chapter.title}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2 mt-0.5">
-                        <span className="text-xs text-surface-500">{chapter.currentWords}字</span>
-                        <Badge variant={chapter.status === "completed" ? "success" : chapter.status === "drafting" ? "info" : "default"}>
-                          {chapter.status === "completed" ? "已完成" : chapter.status === "drafting" ? "写作中" : "待修订"}
-                        </Badge>
-                      </div>
-                    </button>
-                  ))
-                )}
-              </div>
-            ))
-          )}
-        </div>
-      </div>
+      )}
 
       {/* Center: Editor */}
       <div className="flex-1 min-w-0 flex flex-col gap-3">
