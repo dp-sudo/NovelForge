@@ -27,6 +27,8 @@ alwaysOn: false
 triggerConditions: [context.collect]
 requiredContexts: [chapter, canon]
 stateWrites: [relationship.relationship, relationship.temperature, character.involvement, character.emotion, character.action, character.appearance, character.knowledge, scene.environment, scene.danger_level, scene.spatial_constraint]
+workflowStages: []
+postTasks: [extract_assets, extract_state]
 automationTier: auto
 sceneTags: [dialogue, emotion, environment]
 affectsLayers: [canon, state, recent_continuity]

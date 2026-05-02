@@ -30,8 +30,8 @@ test("问题5编排回归：全书生成边界默认只覆盖蓝图阶段", () =
     ],
   );
   assert.ok(stages.every((stage) => stage.request.projectRoot === "F:/demo"));
-  assert.equal(stages[0]?.request.autoPersist, true);
-  assert.equal(stages.at(-1)?.request.autoPersist, true);
+  assert.equal("autoPersist" in (stages[0]?.request ?? {}), false);
+  assert.equal("autoPersist" in (stages.at(-1)?.request ?? {}), false);
   assert.equal(stages[0]?.request.persistMode, "formal");
   assert.equal(stages[0]?.request.automationTier, "supervised");
 });

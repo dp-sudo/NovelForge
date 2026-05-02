@@ -568,12 +568,19 @@ impl ChapterService {
         let draft_path = draft_path_from_content(project_root_path, &chapter_row.content_path)?;
         let _ = fs::remove_file(draft_path);
 
-        StoryStateService.record_window_progress(
+        if let Err(err) = StoryStateService.record_window_progress(
             project_root,
             chapter_id,
             chapter_row.chapter_index,
             current_words,
-        )?;
+        ) {
+            log::warn!(
+                "[CHAPTER_SAVE] content saved but story_state update failed: chapter={} code={} detail={:?}",
+                chapter_id,
+                err.code,
+                err.detail
+            );
+        }
         FeedbackService::trigger_foreshadow_unfulfilled_async(
             project_root.to_string(),
             chapter_id.to_string(),

@@ -34,7 +34,6 @@ export async function aiGenerateWorldRule(projectRoot: string, userDescription: 
     projectRoot,
     taskType: "world.create_rule",
     userInstruction: userDescription,
-    autoPersist: true,
     persistMode: "formal",
     automationTier: "supervised",
     uiAction: "ai_generate_world_rule",

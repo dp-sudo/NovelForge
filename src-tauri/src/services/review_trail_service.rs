@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use rusqlite::{params, Connection, OptionalExtension, Transaction};
+use rusqlite::{params, Connection, Transaction};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
@@ -76,9 +76,9 @@ fn parse_optional_json(raw: Option<String>) -> Option<Value> {
 }
 
 fn parse_optional_json_or_string(raw: Option<String>) -> Option<Value> {
-    raw.and_then(|value| match serde_json::from_str::<Value>(&value) {
-        Ok(parsed) => Some(parsed),
-        Err(_) => Some(Value::String(value)),
+    raw.map(|value| match serde_json::from_str::<Value>(&value) {
+        Ok(parsed) => parsed,
+        Err(_) => Value::String(value),
     })
 }
 
@@ -415,43 +415,6 @@ impl ReviewTrailService {
                 .with_detail(e.to_string())
         })?;
         Ok(())
-    }
-
-    pub fn latest_draft_action(
-        &self,
-        project_root: &str,
-        draft_item_id: &str,
-    ) -> Result<Option<ReviewTrailRecord>, AppErrorDto> {
-        let conn = open_project_database(project_root)?;
-        let project_id = get_project_id(&conn)?;
-        conn.query_row(
-            "SELECT id, project_id, chapter_id, entity_type, entity_id, draft_item_id, action, reason, detail_json, created_at
-             FROM user_review_actions
-             WHERE project_id = ?1 AND draft_item_id = ?2
-             ORDER BY created_at DESC
-             LIMIT 1",
-            params![project_id, draft_item_id.trim()],
-            |row| {
-                let detail_raw: Option<String> = row.get(8)?;
-                Ok(ReviewTrailRecord {
-                    id: row.get(0)?,
-                    project_id: row.get(1)?,
-                    chapter_id: row.get(2)?,
-                    entity_type: row.get(3)?,
-                    entity_id: row.get(4)?,
-                    draft_item_id: row.get(5)?,
-                    action: row.get(6)?,
-                    reason: row.get(7)?,
-                    detail: parse_optional_json(detail_raw),
-                    created_at: row.get(9)?,
-                })
-            },
-        )
-        .optional()
-        .map_err(|e| {
-            AppErrorDto::new("REVIEW_TRAIL_QUERY_FAILED", "查询审查轨迹失败", true)
-                .with_detail(e.to_string())
-        })
     }
 }
 

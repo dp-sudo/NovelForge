@@ -106,7 +106,6 @@ export async function generateBlueprintSuggestion(input: BlueprintSuggestionInpu
     userInstruction: input.userInstruction,
     blueprintStepKey: input.stepKey,
     blueprintStepTitle: input.stepTitle,
-    autoPersist: true,
     persistMode: "formal",
     automationTier: "supervised",
     uiAction: "generate_blueprint_suggestion",

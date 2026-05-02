@@ -27,6 +27,8 @@ alwaysOn: false
 triggerConditions: [extractor.character.appearance, extract_state]
 requiredContexts: [chapter, state]
 stateWrites: [character.appearance]
+workflowStages: []
+postTasks: [extract_state]
 automationTier: auto
 sceneTags: [dialogue, action, combat]
 affectsLayers: [state]

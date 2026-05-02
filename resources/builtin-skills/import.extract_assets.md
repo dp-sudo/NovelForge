@@ -27,6 +27,8 @@ alwaysOn: false
 triggerConditions: [import.extract_assets]
 requiredContexts: [chapter, canon]
 stateWrites: [character.involvement, scene.environment]
+workflowStages: []
+postTasks: [extract_assets]
 automationTier: auto
 sceneTags: [environment]
 affectsLayers: [canon, state]

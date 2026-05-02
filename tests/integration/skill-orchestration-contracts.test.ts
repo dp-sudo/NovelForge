@@ -26,6 +26,8 @@ test("技能契约：SkillManifest 扩展字段在后端结构体中存在", asy
   assert.match(registry, /pub trigger_conditions: Vec<String>/);
   assert.match(registry, /pub required_contexts: Vec<String>/);
   assert.match(registry, /pub state_writes: Vec<String>/);
+  assert.match(registry, /pub workflow_stages: Vec<String>/);
+  assert.match(registry, /pub post_tasks: Vec<String>/);
   assert.match(registry, /pub automation_tier: Option<String>/);
   assert.match(registry, /pub scene_tags: Vec<String>/);
   assert.match(registry, /pub affects_layers: Vec<String>/);
@@ -36,6 +38,8 @@ test("技能契约：设置 UI 可编辑分类、绑定与触发条件", async (
   assert.match(detail, /技能分类/);
   assert.match(detail, /bundleIds/);
   assert.match(detail, /triggerConditions/);
+  assert.match(detail, /workflowStages/);
+  assert.match(detail, /postTasks/);
   assert.match(detail, /常驻激活/);
   assert.match(detail, /sceneTags/);
 });
@@ -87,6 +91,8 @@ test("技能素材契约：内置技能 frontmatter 补齐编排元数据字段"
     assert.match(raw, /skillClass:/, `${file} 缺少 skillClass`);
     assert.match(raw, /triggerConditions:/, `${file} 缺少 triggerConditions`);
     assert.match(raw, /requiredContexts:/, `${file} 缺少 requiredContexts`);
+    assert.match(raw, /workflowStages:/, `${file} 缺少 workflowStages`);
+    assert.match(raw, /postTasks:/, `${file} 缺少 postTasks`);
     assert.match(raw, /affectsLayers:/, `${file} 缺少 affectsLayers`);
   }
 });

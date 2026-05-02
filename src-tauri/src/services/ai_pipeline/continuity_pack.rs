@@ -115,38 +115,42 @@ fn resolve_effective_depth(canonical_task: &str, requested_depth: &str) -> Conti
 #[derive(Default)]
 pub struct ContinuityPackCompiler;
 
+pub struct ContinuityPackCompileInput<'a> {
+    pub project_root: &'a str,
+    pub canonical_task: &'a str,
+    pub depth: &'a str,
+    pub context: &'a CollectedContext,
+    pub context_service: &'a ContextService,
+    pub chapter_id: Option<&'a str>,
+    pub affects_layers: &'a [String],
+    pub window_planning_horizon: i64,
+}
+
 impl ContinuityPackCompiler {
-    pub fn compile(
-        &self,
-        project_root: &str,
-        canonical_task: &str,
-        depth: &str,
-        context: &CollectedContext,
-        context_service: &ContextService,
-        chapter_id: Option<&str>,
-        affects_layers: &[String],
-        window_planning_horizon: i64,
-    ) -> ContinuityPack {
-        let depth = resolve_effective_depth(canonical_task, depth);
-        let window_planning_horizon = normalize_window_planning_horizon(window_planning_horizon);
+    pub fn compile(&self, input: ContinuityPackCompileInput<'_>) -> ContinuityPack {
+        let depth = resolve_effective_depth(input.canonical_task, input.depth);
+        let window_planning_horizon =
+            normalize_window_planning_horizon(input.window_planning_horizon);
         let mut pack = ContinuityPack {
-            lexicon_policy_context: build_lexicon_policy_context(context),
+            lexicon_policy_context: build_lexicon_policy_context(input.context),
             ..ContinuityPack::default()
         };
 
         if depth == ContinuityPackDepth::Minimal {
-            return apply_layer_focus(pack, affects_layers);
+            return apply_layer_focus(pack, input.affects_layers);
         }
 
-        pack.constitution_context = context_service.get_constitution_context(context);
-        pack.canon_context = context_service.get_canon_context(context);
+        pack.constitution_context = input
+            .context_service
+            .get_constitution_context(input.context);
+        pack.canon_context = input.context_service.get_canon_context(input.context);
 
-        pack.state_context = match context_service.get_state_summary(project_root) {
+        pack.state_context = match input.context_service.get_state_summary(input.project_root) {
             Ok(items) => items.into_iter().map(format_state_line).collect(),
             Err(err) => {
                 log::warn!(
                     "[CONTINUITY_PACK] state summary unavailable for task {}: {} {}",
-                    canonical_task,
+                    input.canonical_task,
                     err.code,
                     err.message
                 );
@@ -154,12 +158,15 @@ impl ContinuityPackCompiler {
             }
         };
 
-        pack.promise_context = match context_service.get_promise_context(project_root) {
+        pack.promise_context = match input
+            .context_service
+            .get_promise_context(input.project_root)
+        {
             Ok(lines) => lines,
             Err(err) => {
                 log::warn!(
                     "[CONTINUITY_PACK] promise context unavailable for task {}: {} {}",
-                    canonical_task,
+                    input.canonical_task,
                     err.code,
                     err.message
                 );
@@ -168,39 +175,44 @@ impl ContinuityPackCompiler {
         };
 
         if depth == ContinuityPackDepth::Deep {
-            pack.window_plan_context =
-                match context_service.get_window_plan(project_root, chapter_id, context) {
-                    Ok(mut lines) => {
-                        lines.insert(0, format!("窗口规划地平线: {} 章", window_planning_horizon));
-                        lines
-                    }
-                    Err(err) => {
-                        log::warn!(
-                            "[CONTINUITY_PACK] window plan unavailable for task {}: {} {}",
-                            canonical_task,
-                            err.code,
-                            err.message
-                        );
-                        Vec::new()
-                    }
-                };
+            pack.window_plan_context = match input.context_service.get_window_plan(
+                input.project_root,
+                input.chapter_id,
+                input.context,
+            ) {
+                Ok(mut lines) => {
+                    lines.insert(0, format!("窗口规划地平线: {} 章", window_planning_horizon));
+                    lines
+                }
+                Err(err) => {
+                    log::warn!(
+                        "[CONTINUITY_PACK] window plan unavailable for task {}: {} {}",
+                        input.canonical_task,
+                        err.code,
+                        err.message
+                    );
+                    Vec::new()
+                }
+            };
 
-            pack.recent_continuity_context =
-                match context_service.get_recent_continuity(project_root, chapter_id) {
-                    Ok(lines) => lines,
-                    Err(err) => {
-                        log::warn!(
-                            "[CONTINUITY_PACK] recent continuity unavailable for task {}: {} {}",
-                            canonical_task,
-                            err.code,
-                            err.message
-                        );
-                        Vec::new()
-                    }
-                };
+            pack.recent_continuity_context = match input
+                .context_service
+                .get_recent_continuity(input.project_root, input.chapter_id)
+            {
+                Ok(lines) => lines,
+                Err(err) => {
+                    log::warn!(
+                        "[CONTINUITY_PACK] recent continuity unavailable for task {}: {} {}",
+                        input.canonical_task,
+                        err.code,
+                        err.message
+                    );
+                    Vec::new()
+                }
+            };
         }
 
-        apply_layer_focus(pack, affects_layers)
+        apply_layer_focus(pack, input.affects_layers)
     }
 }
 
@@ -257,15 +269,37 @@ pub fn assess_continuity_pack_completeness(
 }
 
 fn required_layers_for_task(canonical_task: &str, effective: ContinuityPackDepth) -> Vec<String> {
-    let mut layers = vec![
-        "constitution".to_string(),
-        "canon".to_string(),
-        "lexicon_policy".to_string(),
-        "state".to_string(),
-        "promise".to_string(),
-    ];
+    let normalized = canonical_task.trim().to_ascii_lowercase();
+    let mut layers = match normalized.as_str() {
+        "blueprint.generate_step" => vec!["constitution".to_string(), "lexicon_policy".to_string()],
+        "character.create"
+        | "world.create_rule"
+        | "plot.create_node"
+        | "glossary.create_term"
+        | "narrative.create_obligation"
+        | "import.extract_assets" => vec![
+            "constitution".to_string(),
+            "canon".to_string(),
+            "lexicon_policy".to_string(),
+        ],
+        "dashboard.review" | "export.review" => {
+            vec!["canon".to_string(), "state".to_string()]
+        }
+        "consistency.scan" | "timeline.review" | "relationship.review" => vec![
+            "canon".to_string(),
+            "state".to_string(),
+            "promise".to_string(),
+        ],
+        _ => vec![
+            "constitution".to_string(),
+            "canon".to_string(),
+            "lexicon_policy".to_string(),
+            "state".to_string(),
+            "promise".to_string(),
+        ],
+    };
     let chapter_task_requires_full = matches!(
-        canonical_task,
+        normalized.as_str(),
         "chapter.draft" | "chapter.continue" | "chapter.rewrite" | "prose.naturalize"
     );
     if chapter_task_requires_full || effective == ContinuityPackDepth::Deep {
@@ -400,7 +434,7 @@ fn display_language_style(raw: &str) -> String {
 mod tests {
     use super::{
         apply_layer_focus, assess_continuity_pack_completeness, ContextService, ContinuityPack,
-        ContinuityPackCompiler,
+        ContinuityPackCompileInput, ContinuityPackCompiler, ContinuityPackDepth,
     };
     use crate::services::context_service::{
         BlueprintStepSummary, ChapterSummary, CollectedContext, GlobalContext, RelatedContext,
@@ -449,16 +483,16 @@ mod tests {
         let context = sample_context();
         let service = ContextService;
 
-        let pack = compiler.compile(
-            "",
-            "dashboard.review",
-            "minimal",
-            &context,
-            &service,
-            Some("ch-1"),
-            &[],
-            10,
-        );
+        let pack = compiler.compile(ContinuityPackCompileInput {
+            project_root: "",
+            canonical_task: "dashboard.review",
+            depth: "minimal",
+            context: &context,
+            context_service: &service,
+            chapter_id: Some("ch-1"),
+            affects_layers: &[],
+            window_planning_horizon: 10,
+        });
         assert!(!pack.lexicon_policy_context.is_empty());
         assert!(pack.constitution_context.is_empty());
         assert!(pack.canon_context.is_empty());
@@ -482,16 +516,16 @@ mod tests {
         });
         let service = ContextService;
 
-        let pack = compiler.compile(
-            "",
-            "dashboard.review",
-            "minimal",
-            &context,
-            &service,
-            Some("ch-1"),
-            &[],
-            10,
-        );
+        let pack = compiler.compile(ContinuityPackCompileInput {
+            project_root: "",
+            canonical_task: "dashboard.review",
+            depth: "minimal",
+            context: &context,
+            context_service: &service,
+            chapter_id: Some("ch-1"),
+            affects_layers: &[],
+            window_planning_horizon: 10,
+        });
         let style_line = pack
             .lexicon_policy_context
             .iter()
@@ -530,16 +564,16 @@ mod tests {
         let context = sample_context();
         let service = ContextService;
 
-        let pack = compiler.compile(
-            "",
-            "chapter.draft",
-            "standard",
-            &context,
-            &service,
-            Some("ch-1"),
-            &[],
-            10,
-        );
+        let pack = compiler.compile(ContinuityPackCompileInput {
+            project_root: "",
+            canonical_task: "chapter.draft",
+            depth: "standard",
+            context: &context,
+            context_service: &service,
+            chapter_id: Some("ch-1"),
+            affects_layers: &[],
+            window_planning_horizon: 10,
+        });
         let completeness = assess_continuity_pack_completeness("chapter.draft", "standard", &pack);
         assert_eq!(completeness.requested_depth, "standard");
         assert_eq!(completeness.effective_depth, "deep");
@@ -550,6 +584,21 @@ mod tests {
         assert!(completeness
             .required_layers
             .contains(&"recent_continuity".to_string()));
+    }
+
+    #[test]
+    fn bootstrap_tasks_do_not_require_runtime_layers_before_assets_exist() {
+        let layers = super::required_layers_for_task(
+            "blueprint.generate_step",
+            ContinuityPackDepth::Standard,
+        );
+        assert!(layers.contains(&"constitution".to_string()));
+        assert!(layers.contains(&"lexicon_policy".to_string()));
+        assert!(!layers.contains(&"canon".to_string()));
+        assert!(!layers.contains(&"state".to_string()));
+        assert!(!layers.contains(&"promise".to_string()));
+        assert!(!layers.contains(&"window_plan".to_string()));
+        assert!(!layers.contains(&"recent_continuity".to_string()));
     }
 
     #[test]
@@ -579,16 +628,16 @@ mod tests {
         let compiler = ContinuityPackCompiler;
         let context = sample_context();
         let service = ContextService;
-        let pack = compiler.compile(
-            "",
-            "chapter.draft",
-            "deep",
-            &context,
-            &service,
-            None,
-            &[],
-            15,
-        );
+        let pack = compiler.compile(ContinuityPackCompileInput {
+            project_root: "",
+            canonical_task: "chapter.draft",
+            depth: "deep",
+            context: &context,
+            context_service: &service,
+            chapter_id: None,
+            affects_layers: &[],
+            window_planning_horizon: 15,
+        });
         assert_eq!(
             pack.window_plan_context.first().map(String::as_str),
             Some("窗口规划地平线: 15 章")

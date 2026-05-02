@@ -46,7 +46,8 @@ export async function aiScanConsistency(input: AiConsistencyInput): Promise<stri
     taskType: "consistency.scan",
     chapterId: input.chapterId,
     chapterContent: input.chapterContent,
-    autoPersist: true,
+    persistMode: "derived_review",
+    automationTier: "confirm",
     uiAction: "ai_scan_consistency",
   });
 }

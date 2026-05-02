@@ -585,7 +585,8 @@ export function ChaptersPage() {
                   projectRoot,
                   taskType: "chapter.plan",
                   chapterId: aiTargetChapterId || undefined,
-                  autoPersist: true,
+                  persistMode: "formal",
+                  automationTier: "supervised",
                   uiAction: "chapters.ai.plan",
                   userInstruction: aiPrompt,
                 });

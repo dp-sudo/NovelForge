@@ -28,6 +28,8 @@ alwaysOn: false
 triggerConditions: [glossary.create_term]
 requiredContexts: [constitution, canon]
 stateWrites: []
+workflowStages: [extract_term, define_term, promote_term]
+postTasks: []
 automationTier: supervised
 sceneTags: []
 affectsLayers: [constitution, canon, lexicon_policy]

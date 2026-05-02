@@ -29,6 +29,8 @@ alwaysOn: false
 triggerConditions: [relationship.review]
 requiredContexts: [chapter, canon, state]
 stateWrites: [relationship.relationship, relationship.temperature]
+workflowStages: []
+postTasks: [review_continuity]
 automationTier: confirm
 sceneTags: [dialogue, emotion]
 affectsLayers: [canon, state, promise, recent_continuity]

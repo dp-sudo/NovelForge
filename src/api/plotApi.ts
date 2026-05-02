@@ -34,7 +34,6 @@ export async function aiGeneratePlotNode(projectRoot: string, userDescription: s
     projectRoot,
     taskType: "plot.create_node",
     userInstruction: userDescription,
-    autoPersist: true,
     persistMode: "formal",
     automationTier: "supervised",
     uiAction: "ai_generate_plot_node",

@@ -245,7 +245,6 @@ mod tests {
             chapter_content: None,
             blueprint_step_key: None,
             blueprint_step_title: None,
-            auto_persist: true,
             persist_mode: None,
             automation_tier: None,
             skill_selection: None,
@@ -330,15 +329,12 @@ mod tests {
                 .and_then(|value| value.as_str()),
             Some("workflow.chapter.draft")
         );
-        assert_eq!(
-            state_input
-                .payload_json
-                .get("value")
-                .and_then(|value| value.get("emotionSummary"))
-                .and_then(|value| value.as_str())
-                .is_some(),
-            true
-        );
+        assert!(state_input
+            .payload_json
+            .get("value")
+            .and_then(|value| value.get("emotionSummary"))
+            .and_then(|value| value.as_str())
+            .is_some());
     }
 
     #[test]

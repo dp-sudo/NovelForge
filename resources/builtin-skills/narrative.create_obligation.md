@@ -28,6 +28,8 @@ alwaysOn: false
 triggerConditions: [narrative.create_obligation]
 requiredContexts: [constitution, canon, promise]
 stateWrites: []
+workflowStages: [identify_promise, draft_obligation, promote_obligation]
+postTasks: [review_continuity]
 automationTier: supervised
 sceneTags: []
 affectsLayers: [constitution, canon, promise, window_plan]

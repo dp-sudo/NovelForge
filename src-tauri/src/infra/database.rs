@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use log::info;
 use rusqlite::{Connection, Result as SqlResult};
@@ -31,7 +32,7 @@ pub fn initialize_database(project_root: &Path) -> SqlResult<()> {
     }
 
     let conn = Connection::open(db_path)?;
-    enable_foreign_keys(&conn)?;
+    configure_connection(&conn)?;
     // Run migrations (will create tables and track versions)
     let result = crate::infra::migrator::run_project_pending(&conn).map_err(|e| {
         let detail = e
@@ -49,7 +50,7 @@ pub fn initialize_database(project_root: &Path) -> SqlResult<()> {
 pub fn open_database(project_root: &Path) -> SqlResult<Connection> {
     validate_project_root(project_root)?;
     let conn = Connection::open(get_database_path(project_root))?;
-    enable_foreign_keys(&conn)?;
+    configure_connection(&conn)?;
     // Run pending migrations on open (idempotent)
     let result = crate::infra::migrator::run_project_pending(&conn).map_err(|e| {
         let detail = e
@@ -64,7 +65,8 @@ pub fn open_database(project_root: &Path) -> SqlResult<Connection> {
     Ok(conn)
 }
 
-fn enable_foreign_keys(conn: &Connection) -> SqlResult<()> {
+fn configure_connection(conn: &Connection) -> SqlResult<()> {
+    conn.busy_timeout(Duration::from_secs(5))?;
     conn.execute_batch("PRAGMA foreign_keys = ON;")
 }
 
@@ -244,6 +246,20 @@ mod tests {
             .query_row("PRAGMA foreign_keys", [], |row| row.get(0))
             .expect("query foreign_keys pragma");
         assert_eq!(foreign_keys, 1);
+
+        remove_temp_workspace(&workspace);
+    }
+
+    #[test]
+    fn open_database_configures_busy_timeout() {
+        let workspace = create_temp_workspace();
+        initialize_database(&workspace).expect("initialize database");
+
+        let conn = open_database(&workspace).expect("open database");
+        let busy_timeout_ms: i64 = conn
+            .query_row("PRAGMA busy_timeout", [], |row| row.get(0))
+            .expect("query busy_timeout pragma");
+        assert!(busy_timeout_ms >= 5_000);
 
         remove_temp_workspace(&workspace);
     }

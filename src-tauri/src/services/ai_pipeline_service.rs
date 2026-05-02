@@ -34,10 +34,6 @@ pub struct RunAiTaskPipelineInput {
     pub chapter_content: Option<String>,
     pub blueprint_step_key: Option<String>,
     pub blueprint_step_title: Option<String>,
-    /// Legacy bridge for callers not yet migrated to explicit persistMode.
-    /// Deprecation window: keep through 2026-08-31, then remove after UI callers migrate.
-    #[serde(default)]
-    pub auto_persist: bool,
     #[serde(default)]
     pub persist_mode: Option<String>,
     #[serde(default)]

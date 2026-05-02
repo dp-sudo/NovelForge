@@ -141,7 +141,6 @@ export function TimelinePage() {
                 const result = await runModuleAiTask({
                   projectRoot,
                   taskType: "timeline.review",
-                  autoPersist: true,
                   persistMode: "derived_review",
                   automationTier: "auto",
                   uiAction: "timeline.ai.review",

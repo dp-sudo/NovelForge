@@ -28,6 +28,8 @@ alwaysOn: false
 triggerConditions: [character.create]
 requiredContexts: [constitution, canon]
 stateWrites: [character.involvement]
+workflowStages: [extract_signal, draft_character, promote_character]
+postTasks: [extract_assets]
 automationTier: supervised
 sceneTags: []
 affectsLayers: [constitution, canon, state, promise]

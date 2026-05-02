@@ -52,8 +52,8 @@
 ### 4.3 编辑器 AI（Pipeline 主链路）
 1. 点击 9 个固定按钮之一或输入自定义指令。
 2. `EditorPage` 先做前置校验（章节/选区/指令/正文要求）。
-3. 调用 `run_ai_task_pipeline` 得到 `requestId`（输入支持 `autoPersist` + `persistMode` + `automationTier` + 可选 `skillSelection` 请求级覆盖）。
-   - 新调用约束：优先显式传 `persistMode/automationTier`；`autoPersist` 仅保留兼容推导路径，命中时前端记录 `PIPELINE.LEGACY_POLICY_BRIDGE` 诊断事件。
+3. 调用 `run_ai_task_pipeline` 得到 `requestId`（输入必须显式传 `persistMode` + `automationTier`，并可传 `skillSelection` 请求级覆盖）。
+   - `autoPersist` 兼容推导已移除；官方入口不再根据任务类型隐式推断持久化语义。
 4. 通过 `streamTaskPipeline` 监听 `ai:pipeline:event`。
 5. 事件按阶段推进：
    - `validate`

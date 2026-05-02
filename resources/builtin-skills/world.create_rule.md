@@ -28,6 +28,8 @@ alwaysOn: false
 triggerConditions: [world.create_rule]
 requiredContexts: [constitution, canon]
 stateWrites: []
+workflowStages: [define_rule, validate_rule, promote_rule]
+postTasks: []
 automationTier: supervised
 sceneTags: [environment]
 affectsLayers: [constitution, canon, promise]

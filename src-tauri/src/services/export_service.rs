@@ -1,6 +1,6 @@
 use std::fs;
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -313,7 +313,7 @@ fn write_export_output(
     project_name: &str,
     project_language: &str,
 ) -> Result<PathBuf, AppErrorDto> {
-    let resolved = resolve_output_path(project_root, output_path);
+    let resolved = resolve_output_path(project_root, output_path)?;
     if let Some(parent) = resolved.parent() {
         fs::create_dir_all(parent).map_err(|err| {
             AppErrorDto::new("EXPORT_FAILED", "导出失败", true)
@@ -341,13 +341,42 @@ fn write_export_output(
     Ok(resolved)
 }
 
-fn resolve_output_path(project_root: &Path, output_path: &str) -> PathBuf {
-    let path = Path::new(output_path);
-    if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        project_root.join(path)
+fn resolve_output_path(project_root: &Path, output_path: &str) -> Result<PathBuf, AppErrorDto> {
+    let trimmed = output_path.trim();
+    if trimmed.is_empty() {
+        return Err(export_output_path_error("导出文件路径不能为空"));
     }
+
+    let path = Path::new(trimmed);
+    if path.is_absolute() {
+        return Err(export_output_path_error("导出路径必须是项目内相对路径"));
+    }
+
+    let mut components = path.components();
+    match components.next() {
+        Some(Component::Normal(first)) if first == "exports" => {}
+        _ => {
+            return Err(export_output_path_error(
+                "导出文件必须写入项目 exports 目录",
+            ))
+        }
+    }
+    if path.components().any(|component| {
+        matches!(
+            component,
+            Component::ParentDir | Component::RootDir | Component::Prefix(_)
+        )
+    }) {
+        return Err(export_output_path_error("导出路径不能包含目录逃逸片段"));
+    }
+
+    resolve_project_relative_path(project_root, trimmed).map_err(export_output_path_error)
+}
+
+fn export_output_path_error(detail: impl ToString) -> AppErrorDto {
+    AppErrorDto::new("EXPORT_OUTPUT_PATH_INVALID", "导出路径无效", true)
+        .with_detail(detail.to_string())
+        .with_suggested_action("请将导出文件保存到项目 exports 目录内")
 }
 
 fn resolve_export_path(project_root: &Path, stored_path: &str) -> Result<PathBuf, AppErrorDto> {
@@ -1005,13 +1034,15 @@ mod tests {
             .save_chapter_content(&project.project_root, &chapter.id, "正文内容")
             .expect("save chapter content");
 
-        let chapter_out = workspace.join("chapter.md");
+        let chapter_out = PathBuf::from(&project.project_root)
+            .join("exports")
+            .join("chapter.md");
         export_service
             .export_chapter(
                 &project.project_root,
                 &chapter.id,
                 "md",
-                &chapter_out.to_string_lossy(),
+                "exports/chapter.md",
                 Some(ExportOptions {
                     include_chapter_title: Some(true),
                     include_chapter_summary: Some(true),
@@ -1022,12 +1053,14 @@ mod tests {
             .expect("export chapter");
         assert!(chapter_out.exists());
 
-        let book_out = workspace.join("book.txt");
+        let book_out = PathBuf::from(&project.project_root)
+            .join("exports")
+            .join("book.txt");
         export_service
             .export_book(
                 &project.project_root,
                 "txt",
-                &book_out.to_string_lossy(),
+                "exports/book.txt",
                 Some(ExportOptions {
                     include_chapter_title: Some(true),
                     include_chapter_summary: Some(false),
@@ -1072,12 +1105,14 @@ mod tests {
             .save_chapter_content(&project.project_root, &chapter.id, "夜雨落在青瓦上。")
             .expect("save chapter content");
 
-        let docx_out = workspace.join("book.docx");
+        let docx_out = PathBuf::from(&project.project_root)
+            .join("exports")
+            .join("book.docx");
         export_service
             .export_book(
                 &project.project_root,
                 "docx",
-                &docx_out.to_string_lossy(),
+                "exports/book.docx",
                 Some(ExportOptions {
                     include_chapter_title: Some(true),
                     include_chapter_summary: Some(true),
@@ -1089,12 +1124,14 @@ mod tests {
         let docx_bytes = fs::read(&docx_out).expect("read docx");
         assert!(docx_bytes.starts_with(b"PK"));
 
-        let pdf_out = workspace.join("book.pdf");
+        let pdf_out = PathBuf::from(&project.project_root)
+            .join("exports")
+            .join("book.pdf");
         export_service
             .export_book(
                 &project.project_root,
                 "pdf",
-                &pdf_out.to_string_lossy(),
+                "exports/book.pdf",
                 Some(ExportOptions {
                     include_chapter_title: Some(true),
                     include_chapter_summary: Some(false),
@@ -1106,12 +1143,14 @@ mod tests {
         let pdf_bytes = fs::read(&pdf_out).expect("read pdf");
         assert!(pdf_bytes.starts_with(b"%PDF-1.4"));
 
-        let epub_out = workspace.join("book.epub");
+        let epub_out = PathBuf::from(&project.project_root)
+            .join("exports")
+            .join("book.epub");
         export_service
             .export_book(
                 &project.project_root,
                 "epub",
-                &epub_out.to_string_lossy(),
+                "exports/book.epub",
                 Some(ExportOptions {
                     include_chapter_title: Some(true),
                     include_chapter_summary: Some(true),
@@ -1168,12 +1207,14 @@ mod tests {
         )
         .expect("write project json");
 
-        let epub_out = workspace.join("book-lang.epub");
+        let epub_out = PathBuf::from(&project.project_root)
+            .join("exports")
+            .join("book-lang.epub");
         export_service
             .export_book(
                 &project.project_root,
                 "epub",
-                &epub_out.to_string_lossy(),
+                "exports/book-lang.epub",
                 Some(ExportOptions {
                     include_chapter_title: Some(true),
                     include_chapter_summary: Some(true),
@@ -1210,6 +1251,97 @@ mod tests {
             .read_to_string(&mut chapter_xhtml)
             .expect("read chapter xhtml");
         assert!(chapter_xhtml.contains("xml:lang=\"en-US\""));
+
+        remove_temp_workspace(&workspace);
+    }
+
+    #[test]
+    fn export_rejects_output_path_that_escapes_project_root() {
+        let workspace = create_temp_workspace();
+        let project_service = ProjectService;
+        let chapter_service = ChapterService;
+        let export_service = ExportService;
+        let project = project_service
+            .create_project(CreateProjectInput {
+                name: "导出路径安全".to_string(),
+                author: None,
+                genre: "测试".to_string(),
+                target_words: None,
+                save_directory: workspace.to_string_lossy().to_string(),
+            })
+            .expect("project created");
+        let chapter = chapter_service
+            .create_chapter(
+                &project.project_root,
+                ChapterInput {
+                    title: "第一章".to_string(),
+                    summary: None,
+                    target_words: None,
+                    status: None,
+                },
+            )
+            .expect("chapter created");
+        chapter_service
+            .save_chapter_content(&project.project_root, &chapter.id, "正文内容")
+            .expect("save chapter content");
+
+        let err = export_service
+            .export_chapter(
+                &project.project_root,
+                &chapter.id,
+                "md",
+                "../escape.md",
+                None,
+            )
+            .expect_err("path traversal should be rejected");
+        assert_eq!(err.code, "EXPORT_OUTPUT_PATH_INVALID");
+        assert!(!workspace.join("escape.md").exists());
+
+        remove_temp_workspace(&workspace);
+    }
+
+    #[test]
+    fn export_rejects_absolute_output_path_outside_project_root() {
+        let workspace = create_temp_workspace();
+        let project_service = ProjectService;
+        let chapter_service = ChapterService;
+        let export_service = ExportService;
+        let project = project_service
+            .create_project(CreateProjectInput {
+                name: "导出绝对路径安全".to_string(),
+                author: None,
+                genre: "测试".to_string(),
+                target_words: None,
+                save_directory: workspace.to_string_lossy().to_string(),
+            })
+            .expect("project created");
+        let chapter = chapter_service
+            .create_chapter(
+                &project.project_root,
+                ChapterInput {
+                    title: "第一章".to_string(),
+                    summary: None,
+                    target_words: None,
+                    status: None,
+                },
+            )
+            .expect("chapter created");
+        chapter_service
+            .save_chapter_content(&project.project_root, &chapter.id, "正文内容")
+            .expect("save chapter content");
+
+        let outside = workspace.join("outside.md");
+        let err = export_service
+            .export_chapter(
+                &project.project_root,
+                &chapter.id,
+                "md",
+                &outside.to_string_lossy(),
+                None,
+            )
+            .expect_err("absolute path outside project should be rejected");
+        assert_eq!(err.code, "EXPORT_OUTPUT_PATH_INVALID");
+        assert!(!outside.exists());
 
         remove_temp_workspace(&workspace);
     }

@@ -493,7 +493,7 @@ impl AiService {
                 (stage_score + risk_score, template)
             })
             .collect::<Vec<_>>();
-        scored.sort_by(|a, b| b.0.cmp(&a.0));
+        scored.sort_by_key(|item| std::cmp::Reverse(item.0));
         Ok(scored.into_iter().map(|(_, template)| template).collect())
     }
 

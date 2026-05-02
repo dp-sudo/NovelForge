@@ -31,6 +31,8 @@ alwaysOn: false
 triggerConditions: [timeline.review]
 requiredContexts: [chapter, canon, state, window_plan]
 stateWrites: [window.progress]
+workflowStages: []
+postTasks: [review_continuity]
 automationTier: confirm
 sceneTags: []
 affectsLayers: [canon, state, window_plan, recent_continuity]

@@ -31,6 +31,8 @@ alwaysOn: false
 triggerConditions: [consistency.scan]
 requiredContexts: [chapter, canon, state]
 stateWrites: []
+workflowStages: []
+postTasks: [review_continuity]
 automationTier: confirm
 sceneTags: []
 affectsLayers: [constitution, canon, state, promise, window_plan, recent_continuity]

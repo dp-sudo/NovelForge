@@ -41,6 +41,8 @@ alwaysOn: false
 triggerConditions: [chapter.plan]
 requiredContexts: [chapter, canon, state]
 stateWrites: [chapter.plan_status, window.progress]
+workflowStages: [collect_context, plan_scenes, persist_plan]
+postTasks: [review_continuity]
 automationTier: supervised
 sceneTags: []
 affectsLayers: [constitution, canon, state, promise, window_plan, recent_continuity]

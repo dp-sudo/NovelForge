@@ -240,7 +240,6 @@ export function RelationshipsPage() {
                 const result = await runModuleAiTask({
                   projectRoot,
                   taskType: "relationship.review",
-                  autoPersist: true,
                   persistMode: "derived_review",
                   automationTier: "auto",
                   uiAction: "relationship.ai.review",

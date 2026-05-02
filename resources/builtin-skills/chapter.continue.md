@@ -31,6 +31,8 @@ alwaysOn: false
 triggerConditions: [chapter.continue]
 requiredContexts: [chapter, canon, state]
 stateWrites: [chapter.progress, character.emotion, character.action, character.appearance, character.knowledge, scene.environment, scene.danger_level, scene.spatial_constraint, relationship.temperature]
+workflowStages: [collect_context, continue_scene, review_continuity]
+postTasks: [extract_state, review_continuity]
 automationTier: supervised
 sceneTags: []
 affectsLayers: [canon, state, promise, window_plan, recent_continuity]

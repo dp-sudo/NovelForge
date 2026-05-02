@@ -288,6 +288,8 @@ export function ExportPage() {
                   taskType: "export.review",
                   uiAction: "export.ai.review",
                   userInstruction: aiPrompt,
+                  persistMode: "derived_review",
+                  automationTier: "auto",
                 });
                 setAiResult(result || "AI 未返回内容。");
               } catch (err) {

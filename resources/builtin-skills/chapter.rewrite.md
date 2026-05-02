@@ -29,6 +29,8 @@ alwaysOn: false
 triggerConditions: [chapter.rewrite]
 requiredContexts: [chapter, canon, state]
 stateWrites: [chapter.revision]
+workflowStages: [diagnose_revision, rewrite_prose, review_continuity]
+postTasks: [extract_state, review_continuity]
 automationTier: supervised
 sceneTags: [dialogue, emotion]
 affectsLayers: [canon, state, recent_continuity]

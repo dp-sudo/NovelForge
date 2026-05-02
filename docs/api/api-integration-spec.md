@@ -282,16 +282,15 @@
   - `cancel_ai_task_pipeline(requestId) -> void`
   - 前端流式入口：`streamTaskPipeline(input, options)`（监听 `ai:pipeline:event`）。
   - `run_ai_task_pipeline.input` 持久化字段：
-    - `autoPersist?: boolean`（兼容桥，保留）
-    - `persistMode?: "none" | "formal" | "derived_review"`（显式持久化语义）
-    - `automationTier?: "auto" | "supervised" | "confirm"`（显式自动化档位）
+    - `persistMode: "none" | "formal" | "derived_review"`（显式持久化语义）
+    - `automationTier: "auto" | "supervised" | "confirm"`（显式自动化档位）
     - `skillSelection?: { explicitSkillIds, activeBundleIds, sceneTags, availableContexts, disableInferredSceneTags }`（请求级技能编排覆盖）
   - route 扩展：
-    - `TaskRouteResolution.postTasks`：后置任务数组，来自任务路由 `post_tasks_json`。
-  - 兼容规则：
-    - 当 `persistMode` 存在时，以 `persistMode` 语义为准（覆盖 `autoPersist`）。
-    - 当仅有 `autoPersist: true` 时，前端按任务类型推断 `persistMode`，默认 `automationTier = "supervised"`。
-    - 当仅走 `autoPersist` 推导路径时，前端会记录 `PIPELINE.LEGACY_POLICY_BRIDGE` 诊断日志。
+    - `TaskRouteResolution.postTasks` 仅保留为路由诊断字段，不再作为 Pipeline 后置任务真相源。
+  - 清理规则：
+    - `autoPersist` 旧兼容桥已移除。
+    - 官方入口必须显式声明 `persistMode` 和 `automationTier`。
+    - 后置任务真相源为技能 manifest 的 `postTasks`；路由 `post_tasks_json` 不再参与执行。
   - 运行时行为：
     - `prompt` 前会编译 `ContinuityPack`，并注入技能选择结果。
     - 章节关键任务会强制最小上下文深度为 `deep`；若关键层缺失会先发 `warning`（`PIPELINE_CONTEXT_INCOMPLETE`），并在关键任务或策略启用硬门禁时返回 `PIPELINE_CONTEXT_INCOMPLETE_BLOCKED`。
@@ -301,7 +300,7 @@
     - 若技能声明 `affectsLayers`，`orchestrator` 会按聚合后的 layer focus 对 `ContinuityPack` 进行裁剪（保留 constitution/lexicon 护栏层）。
     - 若技能命中 `route_override`，仅覆盖本次请求的 provider/model，不修改项目配置。
     - 默认路由支持 `task -> model pool -> provider/model` 兼容链路；路由解析结果会包含 `modelPoolId` 元信息。
-    - 场景后置链：`SceneClassifier` 判别场景类型后，由 `PostTaskExecutor` 执行 `review_continuity/extract_state/extract_assets`；后置任务优先来自技能 `postTasks`（无声明时回退路由 `post_tasks`），并写入 `postTaskSources[{ task, sourceSkillId }]`。
+    - 场景后置链：`SceneClassifier` 判别场景类型后，由 `PostTaskExecutor` 执行 `review_continuity/extract_state/extract_assets`；声明式后置任务来自技能 `postTasks`，并写入 `postTaskSources[{ task, sourceSkillId }]`。
     - 若激活技能声明 `stateWrites`，后端会按优先级 `workflow > extractor > capability > policy > review` 去重回写 `story_state`，并写入 `skillIds/affectsLayers/sourceSkillId` 运行态元数据。
     - 若检测到用户指令改写冻结区条目，后端返回 `PIPELINE_FREEZE_CONFLICT`；若违反承诺区，返回 `PIPELINE_PROMISED_CONFLICT`。
 - AI 功能任务（前端薄封装，统一走 pipeline）：

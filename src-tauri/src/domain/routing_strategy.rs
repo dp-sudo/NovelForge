@@ -11,14 +11,6 @@ pub enum ProjectStage {
 }
 
 impl ProjectStage {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Draft => "draft",
-            Self::Revision => "revision",
-            Self::Polish => "polish",
-        }
-    }
-
     pub fn from_str(value: &str) -> Self {
         match value.trim().to_ascii_lowercase().as_str() {
             "revision" => Self::Revision,
@@ -34,24 +26,6 @@ pub enum RiskLevel {
     Low,
     Medium,
     High,
-}
-
-impl RiskLevel {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Low => "low",
-            Self::Medium => "medium",
-            Self::High => "high",
-        }
-    }
-
-    pub fn from_str(value: &str) -> Self {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "low" => Self::Low,
-            "high" => Self::High,
-            _ => Self::Medium,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

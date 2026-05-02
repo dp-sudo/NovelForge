@@ -24,16 +24,6 @@ pub fn parse_persist_mode(raw: &str) -> Option<PersistMode> {
     }
 }
 
-pub fn infer_legacy_persist_mode(canonical_task: &str) -> PersistMode {
-    if canonical_task.eq_ignore_ascii_case("consistency.scan")
-        || canonical_task.to_ascii_lowercase().contains("review")
-    {
-        PersistMode::DerivedReview
-    } else {
-        PersistMode::Formal
-    }
-}
-
 pub fn should_persist_task_output(canonical_task: &str, mode: PersistMode) -> bool {
     match mode {
         PersistMode::None => false,
@@ -56,8 +46,7 @@ pub fn is_derived_review_task(canonical_task: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        infer_legacy_persist_mode, is_derived_review_task, parse_persist_mode,
-        should_persist_task_output, PersistMode,
+        is_derived_review_task, parse_persist_mode, should_persist_task_output, PersistMode,
     };
 
     #[test]
@@ -79,22 +68,6 @@ mod tests {
         assert_eq!(parse_persist_mode(""), None);
         assert_eq!(parse_persist_mode("legacy"), None);
         assert_eq!(parse_persist_mode("formal_review"), None);
-    }
-
-    #[test]
-    fn legacy_persist_mode_infers_review_tasks() {
-        assert_eq!(
-            infer_legacy_persist_mode("relationship.review"),
-            PersistMode::DerivedReview
-        );
-        assert_eq!(
-            infer_legacy_persist_mode("consistency.scan"),
-            PersistMode::DerivedReview
-        );
-        assert_eq!(
-            infer_legacy_persist_mode("chapter.plan"),
-            PersistMode::Formal
-        );
     }
 
     #[test]

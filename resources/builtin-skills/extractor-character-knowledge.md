@@ -27,6 +27,8 @@ alwaysOn: false
 triggerConditions: [extractor.character.knowledge, extract_state]
 requiredContexts: [chapter, state]
 stateWrites: [character.knowledge]
+workflowStages: []
+postTasks: [extract_state]
 automationTier: auto
 sceneTags: [dialogue, exposition, introspection]
 affectsLayers: [state]

@@ -185,12 +185,8 @@ fn mask_license_key(key: &str) -> String {
     format!("{head}***-****-{tail}")
 }
 
-fn infer_tier(key: &str) -> String {
-    if key.contains("PRO") {
-        "pro".to_string()
-    } else {
-        "beta".to_string()
-    }
+fn infer_tier(_key: &str) -> String {
+    "beta".to_string()
 }
 
 fn sha256_hex(value: &str) -> String {
@@ -269,6 +265,30 @@ mod tests {
         let loaded = service.get_status().expect("load status");
         assert!(loaded.activated);
         assert!(loaded.offline_available);
+
+        std::env::remove_var("NOVELFORGE_LICENSE_FILE");
+        let root = PathBuf::from(path.parent().expect("parent"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn local_format_key_does_not_grant_pro_tier() {
+        let path = std::env::temp_dir()
+            .join(format!("novelforge-license-tests-{}", Uuid::new_v4()))
+            .join("license.json");
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("create temp dir");
+        }
+        std::env::set_var(
+            "NOVELFORGE_LICENSE_FILE",
+            path.to_string_lossy().to_string(),
+        );
+
+        let service = LicenseService;
+        let activated = service
+            .activate("nf-pro1-cd34-ef56-gh78")
+            .expect("activate local license");
+        assert_eq!(activated.tier, "beta");
 
         std::env::remove_var("NOVELFORGE_LICENSE_FILE");
         let root = PathBuf::from(path.parent().expect("parent"));

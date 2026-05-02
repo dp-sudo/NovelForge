@@ -27,6 +27,8 @@ alwaysOn: false
 triggerConditions: [dashboard.review]
 requiredContexts: [canon, state, window_plan]
 stateWrites: []
+workflowStages: []
+postTasks: [review_continuity]
 automationTier: supervised
 sceneTags: []
 affectsLayers: [canon, state, window_plan, recent_continuity]

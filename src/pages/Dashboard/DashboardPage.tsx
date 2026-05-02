@@ -419,6 +419,8 @@ export function DashboardPage() {
                   taskType: "dashboard.review",
                   uiAction: "dashboard.ai.review",
                   userInstruction: aiPrompt,
+                  persistMode: "derived_review",
+                  automationTier: "auto",
                 });
                 setAiResult(result || "AI 未返回内容。");
               } catch (error) {

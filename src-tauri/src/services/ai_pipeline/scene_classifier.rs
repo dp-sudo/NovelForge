@@ -182,7 +182,7 @@ impl SceneClassifier {
     ) -> SceneClassification {
         let features = extract_features(user_instruction, selected_text, chapter_content);
         let mut matched_features = Vec::new();
-        let mut scores = vec![
+        let mut scores = [
             (
                 SceneType::Dialogue,
                 features.dialogue_hits as f32 + features.dialogue_ratio * 10.0,

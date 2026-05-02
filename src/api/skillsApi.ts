@@ -24,6 +24,8 @@ export interface SkillManifest {
   triggerConditions: string[];
   requiredContexts: string[];
   stateWrites: string[];
+  workflowStages: string[];
+  postTasks: string[];
   automationTier?: "auto" | "supervised" | "confirm";
   sceneTags: string[];
   affectsLayers: string[];
@@ -51,6 +53,8 @@ export interface SkillManifestPatch {
   triggerConditions?: string[];
   requiredContexts?: string[];
   stateWrites?: string[];
+  workflowStages?: string[];
+  postTasks?: string[];
   automationTier?: SkillManifest["automationTier"] | "";
   sceneTags?: string[];
   affectsLayers?: string[];

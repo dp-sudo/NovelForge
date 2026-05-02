@@ -133,6 +133,8 @@ export function usePipelineStream(options: UsePipelineStreamOptions): UsePipelin
         userInstruction: input.userInstruction,
         selectedText: input.selectedText,
         chapterContent: input.chapterContent,
+        persistMode: "none",
+        automationTier: "supervised",
       });
 
       for await (const event of stream) {

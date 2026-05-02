@@ -27,6 +27,8 @@ alwaysOn: false
 triggerConditions: [export.review]
 requiredContexts: [canon, state]
 stateWrites: []
+workflowStages: []
+postTasks: [review_continuity]
 automationTier: supervised
 sceneTags: []
 affectsLayers: [canon, state, recent_continuity]

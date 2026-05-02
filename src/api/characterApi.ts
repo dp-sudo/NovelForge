@@ -47,7 +47,6 @@ export async function aiGenerateCharacter(projectRoot: string, userDescription: 
     projectRoot,
     taskType: "character.create",
     userInstruction: userDescription,
-    autoPersist: true,
     persistMode: "formal",
     automationTier: "supervised",
     uiAction: "ai_generate_character",

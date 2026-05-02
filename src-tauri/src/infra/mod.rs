@@ -2,7 +2,6 @@
 pub mod app_database;
 pub mod app_paths;
 pub mod credential_manager;
-pub mod crypto;
 pub mod database;
 pub mod fs_utils;
 pub mod logger;

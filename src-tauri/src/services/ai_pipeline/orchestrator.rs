@@ -6,12 +6,12 @@ use crate::adapters::llm_types::{ContentBlock, Message, UnifiedGenerateRequest};
 use crate::errors::AppErrorDto;
 use crate::services::ai_pipeline::audit_store::PipelineAuditStore;
 use crate::services::ai_pipeline::continuity_pack::{
-    assess_continuity_pack_completeness, ContinuityPack, ContinuityPackCompiler,
+    assess_continuity_pack_completeness, ContinuityPack, ContinuityPackCompileInput,
+    ContinuityPackCompiler,
 };
 use crate::services::ai_pipeline::freeze_guard::{detect_freeze_conflict, freeze_conflict_error};
 use crate::services::ai_pipeline::persist_policy::{
-    infer_legacy_persist_mode, is_derived_review_task, parse_persist_mode,
-    should_persist_task_output, PersistMode,
+    is_derived_review_task, parse_persist_mode, should_persist_task_output, PersistMode,
 };
 use crate::services::ai_pipeline::post_task_executor::PostTaskExecutor;
 use crate::services::ai_pipeline::prompt_resolver::PromptResolver;
@@ -191,16 +191,17 @@ impl<'a> PipelineOrchestrator<'a> {
             });
         }
         let continuity_depth = strategy_profile.continuity_pack_depth.clone();
-        let preselection_continuity_pack = ContinuityPackCompiler.compile(
-            &self.input.project_root,
-            self.canonical_task,
-            &continuity_depth,
-            &context,
-            self.context_service,
-            self.input.chapter_id.as_deref(),
-            &[],
-            strategy_profile.window_planning_horizon,
-        );
+        let preselection_continuity_pack =
+            ContinuityPackCompiler.compile(ContinuityPackCompileInput {
+                project_root: &self.input.project_root,
+                canonical_task: self.canonical_task,
+                depth: &continuity_depth,
+                context: &context,
+                context_service: self.context_service,
+                chapter_id: self.input.chapter_id.as_deref(),
+                affects_layers: &[],
+                window_planning_horizon: strategy_profile.window_planning_horizon,
+            });
         let inferred_available_contexts = self.collect_available_contexts(
             &preselection_continuity_pack,
             &context,
@@ -258,14 +259,10 @@ impl<'a> PipelineOrchestrator<'a> {
         let runtime_affects_layers = selected_skills.all_affects_layers();
         let workflow_orchestration = selected_skills.get_workflow_orchestration();
         let skill_post_task_sources = selected_skills.get_aggregated_post_tasks();
-        let configured_post_tasks = if skill_post_task_sources.is_empty() {
-            route.post_tasks.clone()
-        } else {
-            skill_post_task_sources
-                .iter()
-                .map(|item| item.task.clone())
-                .collect::<Vec<_>>()
-        };
+        let configured_post_tasks = skill_post_task_sources
+            .iter()
+            .map(|item| item.task.clone())
+            .collect::<Vec<_>>();
         let filtered_skills = selected_skills.filtered_skills.clone();
         let route_override_meta = selected_skills.route_override.as_ref().map(|route| {
             json!({
@@ -340,7 +337,6 @@ impl<'a> PipelineOrchestrator<'a> {
                     "modelPoolId": route.model_pool_id.clone(),
                     "fallbackModelPoolId": route.fallback_model_pool_id.clone(),
                     "postTasks": configured_post_tasks.clone(),
-                    "routePostTasks": route.post_tasks.clone(),
                     "attempts": route.attempts.clone(),
                     "selectedSkills": {
                         "workflow": selected_skills.workflow_skills.len(),
@@ -376,7 +372,6 @@ impl<'a> PipelineOrchestrator<'a> {
                     "modelPoolId": route.model_pool_id.clone(),
                     "fallbackModelPoolId": route.fallback_model_pool_id.clone(),
                     "postTasks": configured_post_tasks.clone(),
-                    "routePostTasks": route.post_tasks.clone(),
                     "attempts": route.attempts.clone(),
                 },
                 "skillSelection": {
@@ -396,16 +391,16 @@ impl<'a> PipelineOrchestrator<'a> {
                 phase: PHASE_ROUTE,
                 error: err,
             })?;
-        let continuity_pack = ContinuityPackCompiler.compile(
-            &self.input.project_root,
-            self.canonical_task,
-            &continuity_depth,
-            &context,
-            self.context_service,
-            self.input.chapter_id.as_deref(),
-            &runtime_affects_layers,
-            strategy_profile.window_planning_horizon,
-        );
+        let continuity_pack = ContinuityPackCompiler.compile(ContinuityPackCompileInput {
+            project_root: &self.input.project_root,
+            canonical_task: self.canonical_task,
+            depth: &continuity_depth,
+            context: &context,
+            context_service: self.context_service,
+            chapter_id: self.input.chapter_id.as_deref(),
+            affects_layers: &runtime_affects_layers,
+            window_planning_horizon: strategy_profile.window_planning_horizon,
+        });
         let continuity_completeness = assess_continuity_pack_completeness(
             self.canonical_task,
             &continuity_depth,
@@ -635,7 +630,6 @@ impl<'a> PipelineOrchestrator<'a> {
                     "persistMode": persist_mode.as_str(),
                     "stateWritePolicy": strategy_profile.state_write_policy.as_str(),
                     "automationTier": selection_context.automation_tier.as_deref(),
-                    "legacyAutoPersist": self.input.auto_persist,
                     "certaintyZones": {
                         "frozen": certainty_zones.frozen,
                         "promised": certainty_zones.promised,
@@ -683,7 +677,7 @@ impl<'a> PipelineOrchestrator<'a> {
                     error: err,
                 })?
         } else {
-            if self.input.auto_persist || self.input.persist_mode.is_some() {
+            if self.input.persist_mode.is_some() {
                 log::info!(
                     "[PIPELINE_PERSIST] skip task output persistence: request={} task={} mode={}",
                     self.request_id,
@@ -744,7 +738,6 @@ impl<'a> PipelineOrchestrator<'a> {
                         "modelPoolId": route.model_pool_id.clone(),
                         "fallbackModelPoolId": route.fallback_model_pool_id.clone(),
                         "postTasks": configured_post_tasks.clone(),
-                        "routePostTasks": route.post_tasks.clone(),
                         "attempts": route.attempts.clone(),
                     },
                     "skillSelection": {
@@ -1028,7 +1021,6 @@ impl<'a> PipelineOrchestrator<'a> {
                 );
                 PersistMode::None
             }),
-            None if self.input.auto_persist => infer_legacy_persist_mode(self.canonical_task),
             None => PersistMode::None,
         };
         mode
@@ -1191,10 +1183,19 @@ fn resolve_generation_workflow_stack(
 
 fn should_enforce_context_completeness(canonical_task: &str, profile_enforced: bool) -> bool {
     const CRITICAL_TASKS: [&str; 2] = ["chapter.draft", "chapter.continue"];
+    let normalized = canonical_task.trim().to_ascii_lowercase();
+    if CRITICAL_TASKS.iter().any(|task| *task == normalized) {
+        return true;
+    }
     profile_enforced
-        || CRITICAL_TASKS
-            .iter()
-            .any(|task| task.eq_ignore_ascii_case(canonical_task))
+        && matches!(
+            normalized.as_str(),
+            "chapter.rewrite"
+                | "prose.naturalize"
+                | "consistency.scan"
+                | "timeline.review"
+                | "relationship.review"
+        )
 }
 
 fn extract_certainty_zones(
@@ -1465,9 +1466,10 @@ mod tests {
             "dashboard.review",
             false
         ));
-        assert!(should_enforce_context_completeness(
-            "dashboard.review",
+        assert!(!should_enforce_context_completeness(
+            "blueprint.generate_step",
             true
         ));
+        assert!(should_enforce_context_completeness("chapter.rewrite", true));
     }
 }

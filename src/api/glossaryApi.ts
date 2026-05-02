@@ -29,7 +29,6 @@ export async function aiGenerateGlossaryTerm(projectRoot: string, userDescriptio
     projectRoot,
     taskType: "glossary.create_term",
     userInstruction: userDescription,
-    autoPersist: true,
     persistMode: "formal",
     automationTier: "supervised",
     uiAction: "ai_generate_glossary_term",

@@ -7,6 +7,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
@@ -66,7 +67,7 @@ pub fn open_or_create() -> Result<Connection, AppErrorDto> {
         AppErrorDto::new("APP_DB_OPEN_FAILED", "无法打开应用数据库", true)
             .with_detail(e.to_string())
     })?;
-    enable_foreign_keys(&conn)?;
+    configure_connection(&conn)?;
     // Run migrations (will create tables and track versions if not already done)
     let result = crate::infra::migrator::run_app_pending(&conn)?;
     for v in &result.applied {
@@ -78,7 +79,11 @@ pub fn open_or_create() -> Result<Connection, AppErrorDto> {
     Ok(conn)
 }
 
-fn enable_foreign_keys(conn: &Connection) -> Result<(), AppErrorDto> {
+fn configure_connection(conn: &Connection) -> Result<(), AppErrorDto> {
+    conn.busy_timeout(Duration::from_secs(5)).map_err(|e| {
+        AppErrorDto::new("APP_DB_OPEN_FAILED", "无法配置应用数据库等待锁策略", false)
+            .with_detail(e.to_string())
+    })?;
     conn.execute_batch("PRAGMA foreign_keys = ON;")
         .map_err(|e| {
             AppErrorDto::new("APP_DB_OPEN_FAILED", "无法启用应用数据库外键约束", false)
@@ -1064,7 +1069,7 @@ mod tests {
         let conn = Connection::open_in_memory().expect("open in-memory app db");
         crate::infra::migrator::run_app_pending(&conn).expect("run app migrations");
         ensure_schema_compatibility(&conn).expect("ensure schema compatibility");
-        enable_foreign_keys(&conn).expect("enable foreign keys");
+        configure_connection(&conn).expect("configure app connection");
         conn
     }
 
@@ -1099,6 +1104,15 @@ mod tests {
             .query_row("PRAGMA foreign_keys", [], |row| row.get(0))
             .expect("query foreign_keys pragma");
         assert_eq!(foreign_keys, 1);
+    }
+
+    #[test]
+    fn setup_app_conn_configures_busy_timeout() {
+        let conn = setup_app_conn();
+        let busy_timeout_ms: i64 = conn
+            .query_row("PRAGMA busy_timeout", [], |row| row.get(0))
+            .expect("query busy_timeout pragma");
+        assert!(busy_timeout_ms >= 5_000);
     }
 
     #[test]

@@ -26,6 +26,8 @@ interface ManifestDraft {
   triggerConditionsText: string;
   requiredContextsText: string;
   stateWritesText: string;
+  workflowStagesText: string;
+  postTasksText: string;
   automationTier: "" | "auto" | "supervised" | "confirm";
   sceneTags: string[];
   affectsLayersText: string;
@@ -92,6 +94,8 @@ function buildManifestDraft(skill: SkillManifest): ManifestDraft {
     triggerConditionsText: listToLines(skill.triggerConditions),
     requiredContextsText: listToLines(skill.requiredContexts),
     stateWritesText: listToLines(skill.stateWrites),
+    workflowStagesText: listToLines(skill.workflowStages),
+    postTasksText: listToLines(skill.postTasks),
     automationTier: skill.automationTier ?? "",
     sceneTags: normalizeList(skill.sceneTags),
     affectsLayersText: listToLines(skill.affectsLayers),
@@ -106,6 +110,8 @@ function draftToManifestPatch(draft: ManifestDraft): SkillManifestPatch {
     triggerConditions: linesToList(draft.triggerConditionsText),
     requiredContexts: linesToList(draft.requiredContextsText),
     stateWrites: linesToList(draft.stateWritesText),
+    workflowStages: linesToList(draft.workflowStagesText),
+    postTasks: linesToList(draft.postTasksText),
     automationTier: draft.automationTier,
     sceneTags: normalizeList(draft.sceneTags),
     affectsLayers: linesToList(draft.affectsLayersText),
@@ -380,6 +386,30 @@ export function SkillDetail({ skill, onDeleted, onUpdated }: SkillDetailProps) {
           }
           rows={2}
           placeholder="例如：character.emotion&#10;plot.progress"
+        />
+        <Textarea
+          label="工作流阶段（每行一个）"
+          value={manifestDraft.workflowStagesText}
+          onChange={(e) =>
+            setManifestDraft((prev) => ({
+              ...prev,
+              workflowStagesText: e.target.value,
+            }))
+          }
+          rows={2}
+          placeholder="例如：plan&#10;draft&#10;review"
+        />
+        <Textarea
+          label="后置任务（每行一个）"
+          value={manifestDraft.postTasksText}
+          onChange={(e) =>
+            setManifestDraft((prev) => ({
+              ...prev,
+              postTasksText: e.target.value,
+            }))
+          }
+          rows={2}
+          placeholder="例如：extract_state&#10;review_continuity"
         />
         <Textarea
           label="影响层（每行一个）"

@@ -29,6 +29,8 @@ alwaysOn: false
 triggerConditions: [blueprint.generate_step]
 requiredContexts: [constitution, canon]
 stateWrites: []
+workflowStages: [collect_brief, draft_constitution, persist_blueprint]
+postTasks: []
 automationTier: supervised
 sceneTags: []
 affectsLayers: [constitution, canon, promise]

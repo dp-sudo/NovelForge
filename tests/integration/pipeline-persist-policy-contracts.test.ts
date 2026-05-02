@@ -9,7 +9,7 @@ async function readRepoFile(relativePath: string): Promise<string> {
   return fs.readFile(path.join(REPO_ROOT, relativePath), "utf-8");
 }
 
-test("持久化策略契约：核心入口显式声明 persistMode 和 automationTier", async () => {
+test("持久化策略契约：核心入口显式声明 persistMode 和 automationTier，且不再依赖 autoPersist", async () => {
   const files = [
     "src/api/bookPipelineApi.ts",
     "src/api/blueprintApi.ts",
@@ -26,24 +26,25 @@ test("持久化策略契约：核心入口显式声明 persistMode 和 automatio
     const raw = await readRepoFile(rel);
     assert.match(raw, /persistMode:/, `${rel} 缺少 persistMode 声明`);
     assert.match(raw, /automationTier:/, `${rel} 缺少 automationTier 声明`);
+    assert.doesNotMatch(raw, /autoPersist:\s*true/, `${rel} 仍在使用 autoPersist 旧逻辑`);
   }
 });
 
-test("持久化策略契约：pipeline 输入类型声明显式策略并保留 autoPersist 兼容桥", async () => {
+test("持久化策略契约：pipeline 输入类型只接受显式策略", async () => {
   const pipelineApi = await readRepoFile("src/api/pipelineApi.ts");
   const moduleApi = await readRepoFile("src/api/moduleAiApi.ts");
 
   assert.match(pipelineApi, /export type PersistMode = "none" \| "formal" \| "derived_review";/);
   assert.match(pipelineApi, /export type AutomationTier = "auto" \| "supervised" \| "confirm";/);
-  assert.match(pipelineApi, /autoPersist\?: boolean;/);
-  assert.match(pipelineApi, /persistMode\?: PersistMode;/);
-  assert.match(pipelineApi, /automationTier\?: AutomationTier;/);
-  assert.match(pipelineApi, /legacyBridgeUsed/);
-  assert.match(pipelineApi, /PIPELINE\.LEGACY_POLICY_BRIDGE/);
+  assert.doesNotMatch(pipelineApi, /autoPersist\?: boolean;/);
+  assert.match(pipelineApi, /persistMode: PersistMode;/);
+  assert.match(pipelineApi, /automationTier: AutomationTier;/);
+  assert.doesNotMatch(pipelineApi, /legacyBridgeUsed/);
+  assert.doesNotMatch(pipelineApi, /PIPELINE\.LEGACY_POLICY_BRIDGE/);
 
   assert.match(moduleApi, /export interface RunModuleAiTaskInput/);
-  assert.match(moduleApi, /persistMode\?: PersistMode;/);
-  assert.match(moduleApi, /automationTier\?: AutomationTier;/);
+  assert.doesNotMatch(moduleApi, /persistMode\?: PersistMode;/);
+  assert.doesNotMatch(moduleApi, /automationTier\?: AutomationTier;/);
 });
 
 test("持久化策略契约：后端 run_ai_task_pipeline 入参接受新字段", async () => {
@@ -51,7 +52,8 @@ test("持久化策略契约：后端 run_ai_task_pipeline 入参接受新字段"
   const orchestrator = await readRepoFile("src-tauri/src/services/ai_pipeline/orchestrator.rs");
   const handlers = await readRepoFile("src-tauri/src/services/ai_pipeline/task_handlers.rs");
 
-  assert.match(service, /pub auto_persist: bool,/);
+  assert.doesNotMatch(service, /pub auto_persist: bool,/);
+  assert.doesNotMatch(orchestrator, /infer_legacy_persist_mode/);
   assert.match(service, /pub persist_mode: Option<String>,/);
   assert.match(service, /pub automation_tier: Option<String>,/);
   assert.match(orchestrator, /resolve_persist_mode\(/);

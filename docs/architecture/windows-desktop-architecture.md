@@ -157,7 +157,7 @@
   - `cancel_ai_task_pipeline`
 - 前端策略入口：
   - 新调用显式传 `persistMode/automationTier`。
-  - `autoPersist` 仅作 legacy bridge 推导；触发时记录 `PIPELINE.LEGACY_POLICY_BRIDGE` 诊断事件。
+  - `autoPersist` legacy bridge 已移除；缺少显式 `persistMode/automationTier` 的调用会在前端类型检查阶段暴露。
 - 事件协议：
   - 主事件：`ai:pipeline:event`
   - 事件类型：`start | progress | delta | done | error`

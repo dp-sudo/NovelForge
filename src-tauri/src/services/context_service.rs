@@ -308,6 +308,13 @@ struct StructuredDraftSlices<'a> {
     scene: &'a [ExtractedSceneDraft],
 }
 
+struct StructuredDraftExtraction {
+    relationship_drafts: Vec<ExtractedRelationshipDraft>,
+    involvement_drafts: Vec<ExtractedInvolvementDraft>,
+    scene_drafts: Vec<ExtractedSceneDraft>,
+    asset_candidates: Vec<AssetExtractionCandidate>,
+}
+
 type StructuredDraftPool = (
     Vec<RelationshipDraft>,
     Vec<InvolvementDraft>,
@@ -569,8 +576,13 @@ impl ContextService {
         let related = self.collect_related_context(&conn, &project_id, chapter_id)?;
         let glossary = self.collect_glossary_context(&conn, &project_id)?;
         let chapter_content = self.load_chapter_content(&conn, project_root_path, chapter_id)?;
-        let (relationship_drafts, involvement_drafts, scene_drafts, _) = self
-            .extract_structured_drafts(&conn, &project_id, &related, &glossary, &chapter_content)?;
+        let extracted = self.extract_structured_drafts(
+            &conn,
+            &project_id,
+            &related,
+            &glossary,
+            &chapter_content,
+        )?;
         self.persist_structured_draft_pool(
             &mut conn,
             &project_id,
@@ -578,9 +590,9 @@ impl ContextService {
             "editor.context.extract.explicit",
             &chapter_content,
             StructuredDraftSlices {
-                relationship: &relationship_drafts,
-                involvement: &involvement_drafts,
-                scene: &scene_drafts,
+                relationship: &extracted.relationship_drafts,
+                involvement: &extracted.involvement_drafts,
+                scene: &extracted.scene_drafts,
             },
         )?;
         Ok(())
@@ -604,12 +616,7 @@ impl ContextService {
         let glossary = self.collect_glossary_context(&conn, &project_id)?;
         let blueprint = self.collect_blueprint_context(&conn, &project_id)?;
         let chapter_content = self.load_chapter_content(&conn, project_root_path, chapter_id)?;
-        let (
-            extracted_relationship_drafts,
-            extracted_involvement_drafts,
-            extracted_scene_drafts,
-            asset_candidates,
-        ) = self.extract_structured_drafts(
+        let extracted = self.extract_structured_drafts(
             &conn,
             &project_id,
             &related,
@@ -625,9 +632,9 @@ impl ContextService {
                     "editor.context.extract",
                     &chapter_content,
                     StructuredDraftSlices {
-                        relationship: &extracted_relationship_drafts,
-                        involvement: &extracted_involvement_drafts,
-                        scene: &extracted_scene_drafts,
+                        relationship: &extracted.relationship_drafts,
+                        involvement: &extracted.involvement_drafts,
+                        scene: &extracted.scene_drafts,
                     },
                 )?;
                 self.load_structured_draft_pool(&conn, &project_id, chapter_id)?
@@ -637,9 +644,9 @@ impl ContextService {
                     loaded
                 } else {
                     (
-                        map_ephemeral_relationship_drafts(&extracted_relationship_drafts),
-                        map_ephemeral_involvement_drafts(&extracted_involvement_drafts),
-                        map_ephemeral_scene_drafts(&extracted_scene_drafts),
+                        map_ephemeral_relationship_drafts(&extracted.relationship_drafts),
+                        map_ephemeral_involvement_drafts(&extracted.involvement_drafts),
+                        map_ephemeral_scene_drafts(&extracted.scene_drafts),
                     )
                 }
             };
@@ -672,7 +679,7 @@ impl ContextService {
             plot_nodes: related.plot_nodes,
             glossary,
             blueprint,
-            asset_candidates,
+            asset_candidates: extracted.asset_candidates,
             relationship_drafts,
             involvement_drafts,
             scene_drafts,
@@ -714,15 +721,7 @@ impl ContextService {
         related: &RelatedContext,
         glossary: &[GlossaryContextTerm],
         chapter_content: &str,
-    ) -> Result<
-        (
-            Vec<ExtractedRelationshipDraft>,
-            Vec<ExtractedInvolvementDraft>,
-            Vec<ExtractedSceneDraft>,
-            Vec<AssetExtractionCandidate>,
-        ),
-        AppErrorDto,
-    > {
+    ) -> Result<StructuredDraftExtraction, AppErrorDto> {
         let mut existing_labels: Vec<String> = Vec::new();
         existing_labels.extend(related.characters.iter().map(|item| item.name.clone()));
         existing_labels.extend(related.world_rules.iter().map(|item| item.title.clone()));
@@ -743,12 +742,12 @@ impl ContextService {
             extract_relationship_drafts(chapter_content, &character_labels, 10);
         let involvement_drafts = extract_involvement_drafts(chapter_content, &character_labels, 10);
         let scene_drafts = extract_scene_drafts(&asset_candidates, &world_titles, 10);
-        Ok((
+        Ok(StructuredDraftExtraction {
             relationship_drafts,
             involvement_drafts,
             scene_drafts,
             asset_candidates,
-        ))
+        })
     }
 
     /// Collect only global context without requiring a chapter_id.
@@ -1225,6 +1224,7 @@ impl ContextService {
 
     /// Apply one reviewed structured draft into database.
     /// Drafts are generated automatically but persisted only after user confirmation.
+    #[allow(dead_code)]
     pub fn apply_structured_draft(
         &self,
         project_root: &str,
@@ -1364,13 +1364,9 @@ impl ContextService {
             "relationship" => promotion_service.promote(
                 "character_relationship",
                 "structured_draft",
-                reason.as_deref().or_else(|| {
-                    if evidence.is_empty() {
-                        None
-                    } else {
-                        Some(evidence.as_str())
-                    }
-                }),
+                reason
+                    .as_deref()
+                    .or((!evidence.is_empty()).then_some(evidence.as_str())),
                 || {
                     let target_label = target_label.clone().unwrap_or_default();
                     if target_label.is_empty() {
@@ -1468,13 +1464,9 @@ impl ContextService {
             "involvement" => promotion_service.promote(
                 "involvement",
                 "structured_draft",
-                reason.as_deref().or_else(|| {
-                    if evidence.is_empty() {
-                        None
-                    } else {
-                        Some(evidence.as_str())
-                    }
-                }),
+                reason
+                    .as_deref()
+                    .or((!evidence.is_empty()).then_some(evidence.as_str())),
                 || {
                     let involvement_type = involvement_type
                         .clone()
@@ -1529,13 +1521,9 @@ impl ContextService {
             "scene" => promotion_service.promote(
                 "scene",
                 "structured_draft",
-                reason.as_deref().or_else(|| {
-                    if evidence.is_empty() {
-                        None
-                    } else {
-                        Some(evidence.as_str())
-                    }
-                }),
+                reason
+                    .as_deref()
+                    .or((!evidence.is_empty()).then_some(evidence.as_str())),
                 || {
                     let scene_type = scene_type
                         .clone()
@@ -1716,6 +1704,7 @@ impl ContextService {
         Ok(result)
     }
 
+    #[allow(dead_code)]
     pub fn reject_structured_draft(
         &self,
         project_root: &str,
@@ -3294,6 +3283,7 @@ mod tests {
         (run_id, batch_id)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn seed_draft_item(
         conn: &Connection,
         item_id: &str,

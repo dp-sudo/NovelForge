@@ -5,6 +5,9 @@ use serde::{Deserialize, Serialize};
 use crate::errors::AppErrorDto;
 use crate::services::chapter_service::{ChapterInput, ChapterService};
 
+const MAX_IMPORT_FILES: usize = 50;
+const MAX_IMPORT_TOTAL_BYTES: usize = 2_000_000;
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportFileEntry {
@@ -278,6 +281,7 @@ impl ImportService {
                 true,
             ));
         }
+        validate_import_limits(&input.files)?;
 
         let chapter_service = ChapterService;
         let mut chapters = Vec::new();
@@ -347,9 +351,34 @@ impl ImportService {
     }
 }
 
+fn validate_import_limits(files: &[ImportFileEntry]) -> Result<(), AppErrorDto> {
+    if files.len() > MAX_IMPORT_FILES {
+        return Err(import_too_large_error(format!(
+            "一次最多导入 {MAX_IMPORT_FILES} 个文件"
+        )));
+    }
+    let total_bytes = files
+        .iter()
+        .map(|file| file.content.len())
+        .try_fold(0usize, |total, len| total.checked_add(len))
+        .ok_or_else(|| import_too_large_error("导入内容大小计算溢出"))?;
+    if total_bytes > MAX_IMPORT_TOTAL_BYTES {
+        return Err(import_too_large_error(format!(
+            "一次导入内容不能超过 {MAX_IMPORT_TOTAL_BYTES} 字节"
+        )));
+    }
+    Ok(())
+}
+
+fn import_too_large_error(detail: impl ToString) -> AppErrorDto {
+    AppErrorDto::new("IMPORT_TOO_LARGE", "导入内容过大", true)
+        .with_detail(detail.to_string())
+        .with_suggested_action("请减少文件数量或拆分后分批导入")
+}
+
 #[cfg(test)]
 mod tests {
-    use super::extract_asset_candidates;
+    use super::{extract_asset_candidates, ImportFileEntry, ImportInput, ImportService};
 
     #[test]
     fn extract_asset_candidates_filters_existing_labels() {
@@ -367,5 +396,37 @@ mod tests {
         let candidates = extract_asset_candidates(content, &[], 10);
         assert!(candidates.iter().any(|item| item.label == "青石街"));
         assert!(candidates.iter().all(|item| item.label != "林远"));
+    }
+
+    #[test]
+    fn import_files_rejects_too_many_files_before_creating_chapters() {
+        let files = (0..51)
+            .map(|index| ImportFileEntry {
+                file_name: format!("chapter-{index}.md"),
+                content: "正文".to_string(),
+            })
+            .collect::<Vec<_>>();
+
+        let err = ImportService
+            .import_files(ImportInput {
+                project_root: "F:/unused".to_string(),
+                files,
+            })
+            .expect_err("too many files should fail before project access");
+        assert_eq!(err.code, "IMPORT_TOO_LARGE");
+    }
+
+    #[test]
+    fn import_files_rejects_oversized_total_content_before_creating_chapters() {
+        let err = ImportService
+            .import_files(ImportInput {
+                project_root: "F:/unused".to_string(),
+                files: vec![ImportFileEntry {
+                    file_name: "huge.md".to_string(),
+                    content: "a".repeat(2_000_001),
+                }],
+            })
+            .expect_err("oversized content should fail before project access");
+        assert_eq!(err.code, "IMPORT_TOO_LARGE");
     }
 }

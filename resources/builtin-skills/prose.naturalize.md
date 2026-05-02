@@ -28,6 +28,8 @@ alwaysOn: false
 triggerConditions: [prose.naturalize]
 requiredContexts: [chapter, canon]
 stateWrites: []
+workflowStages: []
+postTasks: [extract_state, review_continuity]
 automationTier: supervised
 sceneTags: [dialogue, emotion]
 affectsLayers: [canon, state, recent_continuity]

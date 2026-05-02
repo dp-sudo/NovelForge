@@ -28,6 +28,8 @@ alwaysOn: false
 triggerConditions: [plot.create_node]
 requiredContexts: [canon, state, window_plan]
 stateWrites: [window.progress]
+workflowStages: [outline_node, link_promise, promote_node]
+postTasks: [review_continuity]
 automationTier: supervised
 sceneTags: []
 affectsLayers: [canon, state, promise, window_plan]
