@@ -12,9 +12,7 @@ use std::time::Duration;
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 
-use crate::adapters::llm_types::{
-    ModelPoolEntry, ModelPoolRecord, ModelRecord, ProviderConfig, TaskRoute,
-};
+use crate::adapters::llm_types::{ModelRecord, ProviderConfig, TaskRoute};
 use crate::errors::AppErrorDto;
 use crate::services::task_routing;
 use uuid::Uuid;
@@ -187,8 +185,6 @@ fn ensure_default_task_routes_initialized(conn: &Connection) -> Result<(), AppEr
             model_id: model_id.clone(),
             fallback_provider_id: None,
             fallback_model_id: None,
-            model_pool_id: None,
-            fallback_model_pool_id: None,
             post_tasks: Vec::new(),
             max_retries: 1,
             created_at: Some(now.clone()),
@@ -534,8 +530,7 @@ pub fn load_task_routes(conn: &Connection) -> Result<Vec<TaskRoute>, AppErrorDto
     let mut stmt = conn
         .prepare(
             "SELECT id, task_type, provider_id, model_id,
-                fallback_provider_id, fallback_model_id, model_pool_id, fallback_model_pool_id,
-                COALESCE(post_tasks_json, '[]'),
+                fallback_provider_id, fallback_model_id, COALESCE(post_tasks_json, '[]'),
                 max_retries, created_at, updated_at
          FROM llm_task_routes ORDER BY task_type",
         )
@@ -552,13 +547,11 @@ pub fn load_task_routes(conn: &Connection) -> Result<Vec<TaskRoute>, AppErrorDto
                 model_id: row.get(3)?,
                 fallback_provider_id: row.get(4)?,
                 fallback_model_id: row.get(5)?,
-                model_pool_id: row.get(6)?,
-                fallback_model_pool_id: row.get(7)?,
-                post_tasks: serde_json::from_str::<Vec<String>>(row.get::<_, String>(8)?.as_str())
+                post_tasks: serde_json::from_str::<Vec<String>>(row.get::<_, String>(6)?.as_str())
                     .unwrap_or_default(),
-                max_retries: row.get(9)?,
-                created_at: Some(row.get::<_, String>(10)?),
-                updated_at: Some(row.get::<_, String>(11)?),
+                max_retries: row.get(7)?,
+                created_at: Some(row.get::<_, String>(8)?),
+                updated_at: Some(row.get::<_, String>(9)?),
             })
         })
         .map_err(|e| {
@@ -582,15 +575,12 @@ pub fn upsert_task_route(
     })?;
     conn.execute(
         "INSERT INTO llm_task_routes (id, task_type, provider_id, model_id,
-         fallback_provider_id, fallback_model_id, model_pool_id, fallback_model_pool_id, post_tasks_json,
-         max_retries, created_at, updated_at)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)
+         fallback_provider_id, fallback_model_id, post_tasks_json, max_retries, created_at, updated_at)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)
          ON CONFLICT(id) DO UPDATE SET
          task_type=excluded.task_type, provider_id=excluded.provider_id,
          model_id=excluded.model_id, fallback_provider_id=excluded.fallback_provider_id,
          fallback_model_id=excluded.fallback_model_id,
-         model_pool_id=excluded.model_pool_id,
-         fallback_model_pool_id=excluded.fallback_model_pool_id,
          post_tasks_json=excluded.post_tasks_json,
          max_retries=excluded.max_retries,
          updated_at=excluded.updated_at",
@@ -601,8 +591,6 @@ pub fn upsert_task_route(
             route.model_id,
             route.fallback_provider_id,
             route.fallback_model_id,
-            route.model_pool_id,
-            route.fallback_model_pool_id,
             post_tasks_json,
             route.max_retries,
             now,
@@ -724,140 +712,6 @@ pub fn load_feedback_rules(conn: &Connection) -> Result<Vec<FeedbackRuleRecord>,
     rows.collect::<Result<Vec<_>, _>>().map_err(|e| {
         AppErrorDto::new("DB_READ_FAILED", "读取回报规则失败", true).with_detail(e.to_string())
     })
-}
-
-pub fn load_model_pools(conn: &Connection) -> Result<Vec<ModelPoolRecord>, AppErrorDto> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT id, display_name, role, enabled, entries_json, fallback_pool_id, created_at, updated_at
-             FROM llm_model_pools
-             ORDER BY role, id",
-        )
-        .map_err(|e| {
-            AppErrorDto::new("DB_READ_FAILED", "无法加载模型池配置", true)
-                .with_detail(e.to_string())
-        })?;
-    let rows = stmt
-        .query_map([], |row| {
-            let entries_raw: String = row.get(4)?;
-            let entries =
-                serde_json::from_str::<Vec<ModelPoolEntry>>(&entries_raw).unwrap_or_default();
-            Ok(ModelPoolRecord {
-                id: row.get(0)?,
-                display_name: row.get(1)?,
-                role: row.get(2)?,
-                enabled: row.get::<_, i64>(3)? != 0,
-                entries,
-                fallback_pool_id: row.get(5)?,
-                created_at: Some(row.get::<_, String>(6)?),
-                updated_at: Some(row.get::<_, String>(7)?),
-            })
-        })
-        .map_err(|e| {
-            AppErrorDto::new("DB_READ_FAILED", "无法加载模型池配置", true)
-                .with_detail(e.to_string())
-        })?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(|e| {
-        AppErrorDto::new("DB_READ_FAILED", "读取模型池配置失败", true).with_detail(e.to_string())
-    })
-}
-
-#[allow(dead_code)]
-pub fn upsert_model_pool(
-    conn: &Connection,
-    pool: &ModelPoolRecord,
-    now: &str,
-) -> Result<(), AppErrorDto> {
-    let entries = normalize_model_pool_entries(&pool.entries);
-    let entries_json = serde_json::to_string(&entries).map_err(|e| {
-        AppErrorDto::new("DB_WRITE_FAILED", "模型池条目序列化失败", true).with_detail(e.to_string())
-    })?;
-    conn.execute(
-        "INSERT INTO llm_model_pools(
-            id, display_name, role, enabled, entries_json, fallback_pool_id, created_at, updated_at
-         ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
-         ON CONFLICT(id) DO UPDATE SET
-            display_name = excluded.display_name,
-            role = excluded.role,
-            enabled = excluded.enabled,
-            entries_json = excluded.entries_json,
-            fallback_pool_id = excluded.fallback_pool_id,
-            updated_at = excluded.updated_at",
-        params![
-            pool.id,
-            pool.display_name,
-            pool.role,
-            if pool.enabled { 1_i64 } else { 0_i64 },
-            entries_json,
-            pool.fallback_pool_id,
-            now,
-            now,
-        ],
-    )
-    .map_err(|e| {
-        AppErrorDto::new("DB_WRITE_FAILED", "无法保存模型池配置", true).with_detail(e.to_string())
-    })?;
-    Ok(())
-}
-
-#[allow(dead_code)]
-pub fn delete_model_pool(conn: &Connection, pool_id: &str) -> Result<(), AppErrorDto> {
-    let normalized = pool_id.trim();
-    if normalized.is_empty() {
-        return Err(AppErrorDto::new("INVALID_INPUT", "模型池ID不能为空", true));
-    }
-
-    conn.execute(
-        "UPDATE llm_task_routes
-         SET model_pool_id = NULL
-         WHERE model_pool_id = ?1",
-        params![normalized],
-    )
-    .map_err(|e| {
-        AppErrorDto::new("DB_WRITE_FAILED", "无法清理任务路由主模型池引用", true)
-            .with_detail(e.to_string())
-    })?;
-    conn.execute(
-        "UPDATE llm_task_routes
-         SET fallback_model_pool_id = NULL
-         WHERE fallback_model_pool_id = ?1",
-        params![normalized],
-    )
-    .map_err(|e| {
-        AppErrorDto::new("DB_WRITE_FAILED", "无法清理任务路由兜底模型池引用", true)
-            .with_detail(e.to_string())
-    })?;
-    conn.execute(
-        "DELETE FROM llm_model_pools WHERE id = ?1",
-        params![normalized],
-    )
-    .map_err(|e| {
-        AppErrorDto::new("DB_DELETE_FAILED", "无法删除模型池配置", true).with_detail(e.to_string())
-    })?;
-    Ok(())
-}
-
-#[allow(dead_code)]
-fn normalize_model_pool_entries(entries: &[ModelPoolEntry]) -> Vec<ModelPoolEntry> {
-    let mut normalized = Vec::new();
-    for entry in entries {
-        let provider_id = entry.provider_id.trim();
-        let model_id = entry.model_id.trim();
-        if provider_id.is_empty() || model_id.is_empty() {
-            continue;
-        }
-        let duplicate = normalized.iter().any(|existing: &ModelPoolEntry| {
-            existing.provider_id == provider_id && existing.model_id == model_id
-        });
-        if duplicate {
-            continue;
-        }
-        normalized.push(ModelPoolEntry {
-            provider_id: provider_id.to_string(),
-            model_id: model_id.to_string(),
-        });
-    }
-    normalized
 }
 
 // ── app_settings CRUD ──
@@ -1129,8 +983,6 @@ mod tests {
             model_id: "deepseek-chat".to_string(),
             fallback_provider_id: None,
             fallback_model_id: None,
-            model_pool_id: None,
-            fallback_model_pool_id: None,
             post_tasks: Vec::new(),
             max_retries: 1,
             created_at: Some(now.clone()),
@@ -1152,40 +1004,5 @@ mod tests {
                 task_type
             );
         }
-    }
-
-    #[test]
-    fn model_pool_upsert_and_load_roundtrip() {
-        let conn = setup_app_conn();
-        let now = crate::infra::time::now_iso();
-        let pool = ModelPoolRecord {
-            id: "drafter".to_string(),
-            display_name: "Drafter Pool".to_string(),
-            role: "drafter".to_string(),
-            enabled: true,
-            entries: vec![
-                ModelPoolEntry {
-                    provider_id: "deepseek".to_string(),
-                    model_id: "deepseek-chat".to_string(),
-                },
-                // duplicate should be deduped on write
-                ModelPoolEntry {
-                    provider_id: "deepseek".to_string(),
-                    model_id: "deepseek-chat".to_string(),
-                },
-            ],
-            fallback_pool_id: Some("reviewer".to_string()),
-            created_at: Some(now.clone()),
-            updated_at: Some(now.clone()),
-        };
-
-        upsert_model_pool(&conn, &pool, &now).expect("upsert model pool");
-        let loaded = load_model_pools(&conn).expect("load model pools");
-        assert_eq!(loaded.len(), 1);
-        assert_eq!(loaded[0].id, "drafter");
-        assert_eq!(loaded[0].entries.len(), 1);
-        assert_eq!(loaded[0].entries[0].provider_id, "deepseek");
-        assert_eq!(loaded[0].entries[0].model_id, "deepseek-chat");
-        assert_eq!(loaded[0].fallback_pool_id.as_deref(), Some("reviewer"));
     }
 }

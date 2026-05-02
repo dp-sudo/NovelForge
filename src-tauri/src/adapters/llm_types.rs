@@ -293,26 +293,6 @@ pub struct RefreshLog {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ModelPoolEntry {
-    pub provider_id: String,
-    pub model_id: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ModelPoolRecord {
-    pub id: String,
-    pub display_name: String,
-    pub role: String,
-    pub enabled: bool,
-    pub entries: Vec<ModelPoolEntry>,
-    pub fallback_pool_id: Option<String>,
-    pub created_at: Option<String>,
-    pub updated_at: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct TaskRoute {
     pub id: String,
     pub task_type: String,
@@ -320,8 +300,6 @@ pub struct TaskRoute {
     pub model_id: String,
     pub fallback_provider_id: Option<String>,
     pub fallback_model_id: Option<String>,
-    pub model_pool_id: Option<String>,
-    pub fallback_model_pool_id: Option<String>,
     #[serde(default)]
     pub post_tasks: Vec<String>,
     pub max_retries: i64,

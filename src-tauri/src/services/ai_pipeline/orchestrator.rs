@@ -334,8 +334,6 @@ impl<'a> PipelineOrchestrator<'a> {
                 meta: Some(json!({
                     "providerId": route.provider_id.clone(),
                     "modelId": route.model_id.clone(),
-                    "modelPoolId": route.model_pool_id.clone(),
-                    "fallbackModelPoolId": route.fallback_model_pool_id.clone(),
                     "postTasks": configured_post_tasks.clone(),
                     "attempts": route.attempts.clone(),
                     "selectedSkills": {
@@ -369,8 +367,6 @@ impl<'a> PipelineOrchestrator<'a> {
                     "taskType": self.canonical_task,
                     "providerId": route.provider_id.clone(),
                     "modelId": route.model_id.clone(),
-                    "modelPoolId": route.model_pool_id.clone(),
-                    "fallbackModelPoolId": route.fallback_model_pool_id.clone(),
                     "postTasks": configured_post_tasks.clone(),
                     "attempts": route.attempts.clone(),
                 },
@@ -514,7 +510,6 @@ impl<'a> PipelineOrchestrator<'a> {
                 meta: Some(json!({
                     "providerId": route.provider_id.clone(),
                     "modelId": route.model_id.clone(),
-                    "modelPoolId": route.model_pool_id.clone(),
                 })),
             },
         );
@@ -735,8 +730,6 @@ impl<'a> PipelineOrchestrator<'a> {
                         "taskType": self.canonical_task,
                         "providerId": route.provider_id.clone(),
                         "modelId": route.model_id.clone(),
-                        "modelPoolId": route.model_pool_id.clone(),
-                        "fallbackModelPoolId": route.fallback_model_pool_id.clone(),
                         "postTasks": configured_post_tasks.clone(),
                         "attempts": route.attempts.clone(),
                     },

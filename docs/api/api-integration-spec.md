@@ -2,7 +2,7 @@
 
 ## 1. 文档信息
 - 版本：v1.1
-- 状态：S23（阶段三：模型池管理、扩展状态 taxonomy、场景感知编排闭环）
+- 状态：S23（阶段三：扩展状态 taxonomy、场景感知编排闭环）
 - 最后更新：2026-05-02
 - 代码基线：`src/api/*`、`src-tauri/src/commands/*`
 
@@ -21,7 +21,7 @@
 - 统一调用：`src/api/tauriClient.ts`
 - 业务模块：
   - `projectApi`, `chapterApi`, `blueprintApi`, `characterApi`, `worldApi`, `glossaryApi`, `plotApi`, `narrativeApi`
-  - `consistencyApi`, `statsApi`, `settingsApi`, `modelPoolApi`, `skillsApi`, `contextApi`, `pipelineApi`, `moduleAiApi`, `exportApi`, `timelineApi`
+  - `consistencyApi`, `statsApi`, `settingsApi`, `skillsApi`, `contextApi`, `pipelineApi`, `moduleAiApi`, `exportApi`, `timelineApi`
 
 ### 3.1 前端函数清单（按文件）
 - `tauriClient.ts`：`invokeCommand`、`registerUnloadCleanup`、`logUI`
@@ -41,8 +41,7 @@
 - `pipelineApi.ts`：`runTaskPipeline`、`cancelTaskPipeline`、`streamTaskPipeline`
 - `moduleAiApi.ts`：`runModuleAiTask`
 - `exportApi.ts`：`exportChapter`、`exportBook`
-- `settingsApi.ts`：`listProviders`、`saveProvider`、`deleteProvider`、`testProviderConnection`、`refreshProviderModels`、`getProviderModels`、`getRefreshLogs`、`listTaskRoutes`、`saveTaskRoute`、`deleteTaskRoute`、`recommendRoutingStrategy`、`applyRoutingStrategyTemplate`、`getProjectRoutingStrategy`、`listPromotionPolicies`、`savePromotionPolicy`、`checkRemoteRegistry`、`applyRegistryUpdate`、`loadEditorSettings`、`saveEditorSettings`、`saveWritingStyle`、`getWritingStyle`、`saveAiStrategyProfile`、`getAiStrategyProfile`、`saveProjectAiStrategy`、`getProjectAiStrategy`、`initProjectRepository`、`getProjectRepositoryStatus`、`commitProjectSnapshot`、`listProjectHistory`、`getLicenseStatus`、`activateLicense`、`checkAppUpdate`、`installAppUpdate`、`getDeprecatedCommandUsageReport`
-- `modelPoolApi.ts`：`listModelPools`、`createModelPool`、`updateModelPool`、`deleteModelPool`
+- `settingsApi.ts`：`listProviders`、`saveProvider`、`deleteProvider`、`testProviderConnection`、`refreshProviderModels`、`getProviderModels`、`getRefreshLogs`、`listTaskRoutes`、`saveTaskRoute`、`deleteTaskRoute`、`listPromotionPolicies`、`savePromotionPolicy`、`checkRemoteRegistry`、`applyRegistryUpdate`、`loadEditorSettings`、`saveEditorSettings`、`saveWritingStyle`、`getWritingStyle`、`saveAiStrategyProfile`、`getAiStrategyProfile`、`saveProjectAiStrategy`、`getProjectAiStrategy`、`initProjectRepository`、`getProjectRepositoryStatus`、`commitProjectSnapshot`、`listProjectHistory`、`getLicenseStatus`、`activateLicense`、`checkAppUpdate`、`installAppUpdate`、`getDeprecatedCommandUsageReport`
 - `skillsApi.ts`：`listSkills`、`getSkill`、`getSkillContent`、`createSkill`、`updateSkill`、`deleteSkill`、`importSkillFile`、`resetBuiltinSkill`、`refreshSkills`
 
 ### 3.2 前端关键类型/接口清单（按文件）
@@ -110,16 +109,11 @@
 - `exportApi.ts`：`exportChapter -> export_chapter`、`exportBook -> export_book`
 - `settingsApi.ts`：
   - Provider/模型：`listProviders -> list_providers`、`saveProvider -> save_provider`、`deleteProvider -> delete_provider`、`testProviderConnection -> test_provider_connection`、`refreshProviderModels -> refresh_provider_models`、`getProviderModels -> get_provider_models`、`getRefreshLogs -> get_refresh_logs`
-  - 路由/注册表：`listTaskRoutes -> list_task_routes`、`saveTaskRoute -> save_task_route`、`deleteTaskRoute -> delete_task_route`、`recommendRoutingStrategy -> recommend_routing_strategy`、`applyRoutingStrategyTemplate -> apply_routing_strategy_template`、`getProjectRoutingStrategy -> get_project_routing_strategy`、`checkRemoteRegistry -> check_remote_registry`、`applyRegistryUpdate -> apply_registry_update`
+  - 路由/注册表：`listTaskRoutes -> list_task_routes`、`saveTaskRoute -> save_task_route`、`deleteTaskRoute -> delete_task_route`、`checkRemoteRegistry -> check_remote_registry`、`applyRegistryUpdate -> apply_registry_update`
   - 晋升策略：`listPromotionPolicies -> list_promotion_policies`、`savePromotionPolicy -> save_promotion_policy`
   - 编辑器/策略：`loadEditorSettings -> load_editor_settings`、`saveEditorSettings -> save_editor_settings`、`saveWritingStyle -> save_writing_style`、`getWritingStyle -> get_writing_style`、`saveAiStrategyProfile -> save_ai_strategy_profile`、`getAiStrategyProfile -> get_ai_strategy_profile`、`saveProjectAiStrategy -> save_ai_strategy_profile`、`getProjectAiStrategy -> get_ai_strategy_profile`
   - Git/授权/更新：`initProjectRepository -> init_project_repository`、`getProjectRepositoryStatus -> get_project_repository_status`、`commitProjectSnapshot -> commit_project_snapshot`、`listProjectHistory -> list_project_history`、`getLicenseStatus -> get_license_status`、`activateLicense -> activate_license`、`checkAppUpdate -> check_app_update`、`installAppUpdate -> install_app_update`
   - 兼容桥审计：`getDeprecatedCommandUsageReport -> get_deprecated_command_usage_report`
-- `modelPoolApi.ts`：
-  - `listModelPools -> list_model_pools`
-  - `createModelPool -> create_model_pool`
-  - `updateModelPool -> update_model_pool`
-  - `deleteModelPool -> delete_model_pool`
 - `skillsApi.ts`：`listSkills -> list_skills`、`getSkill -> get_skill`、`getSkillContent -> get_skill_content`、`createSkill -> create_skill`、`updateSkill -> update_skill`、`deleteSkill -> delete_skill`、`importSkillFile -> import_skill_file`、`resetBuiltinSkill -> reset_builtin_skill`、`refreshSkills -> refresh_skills`
 - `pipelineApi.ts`：
   - `runTaskPipeline -> run_ai_task_pipeline`
@@ -228,15 +222,7 @@
   - `list_task_routes()`
   - `save_task_route(route)`
   - `delete_task_route(routeId)`
-  - `recommend_routing_strategy(input: { projectRoot, projectStage?, taskType? }) -> RoutingStrategyTemplate[]`
-  - `apply_routing_strategy_template(input: { projectRoot, strategyId }) -> TaskRoute[]`
-  - `get_project_routing_strategy(projectRoot) -> string | null`
-  - `route` 结构新增可选字段：`modelPoolId`、`fallbackModelPoolId`、`postTasks`
-- 模型池：
-  - `list_model_pools() -> ModelPoolConfig[]`
-  - `create_model_pool(input: { name, poolType, models }) -> ModelPoolConfig`
-  - `update_model_pool(poolId, config) -> ModelPoolConfig`
-  - `delete_model_pool(poolId) -> void`
+  - `route` 结构包含：`providerId`、`modelId`、`fallbackProviderId`、`fallbackModelId`、`postTasks`
 - Registry：
   - `check_remote_registry(url)`
   - `apply_registry_update(url)`
@@ -299,7 +285,7 @@
     - 被过滤技能会记录 `filteredSkills[{ id, skillClass, reason, missingContexts? }]`；关键 workflow/policy 技能因上下文不足被过滤时会发 `PIPELINE_SKILL_CONTEXT_FILTERED`。
     - 若技能声明 `affectsLayers`，`orchestrator` 会按聚合后的 layer focus 对 `ContinuityPack` 进行裁剪（保留 constitution/lexicon 护栏层）。
     - 若技能命中 `route_override`，仅覆盖本次请求的 provider/model，不修改项目配置。
-    - 默认路由支持 `task -> model pool -> provider/model` 兼容链路；路由解析结果会包含 `modelPoolId` 元信息。
+    - 默认路由解析结果包含最终 provider/model 与 fallback 尝试链元信息。
     - 场景后置链：`SceneClassifier` 判别场景类型后，由 `PostTaskExecutor` 执行 `review_continuity/extract_state/extract_assets`；声明式后置任务来自技能 `postTasks`，并写入 `postTaskSources[{ task, sourceSkillId }]`。
     - 若激活技能声明 `stateWrites`，后端会按优先级 `workflow > extractor > capability > policy > review` 去重回写 `story_state`，并写入 `skillIds/affectsLayers/sourceSkillId` 运行态元数据。
     - 若检测到用户指令改写冻结区条目，后端返回 `PIPELINE_FREEZE_CONFLICT`；若违反承诺区，返回 `PIPELINE_PROMISED_CONFLICT`。

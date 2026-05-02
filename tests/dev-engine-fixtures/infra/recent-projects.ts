@@ -8,6 +8,16 @@ export interface RecentProjectItem {
 }
 
 const MAX_RECENT_ITEMS = 20;
+const TEST_PROJECT_TEMP_PREFIXES = [
+  "novelforge-rust-tests-",
+  "novelforge-task-handlers-",
+  "novelforge-backup-tests-",
+  "novelforge-db-tests-",
+  "novelforge-git-tests-",
+  "novelforge-vector-tests-",
+  "novelforge-ai-service-test-",
+  "novelforge-skill-test-",
+] as const;
 
 function recentProjectsFilePath(): string {
   return path.join(resolveAppDataDir(), "recent-projects.json");
@@ -31,7 +41,9 @@ export async function listRecentProjects(): Promise<RecentProjectItem[]> {
   const raw = await fs.readFile(filePath, "utf-8");
   try {
     const parsed = JSON.parse(raw) as RecentProjectItem[];
-    return Array.isArray(parsed) ? parsed : [];
+    return Array.isArray(parsed)
+      ? parsed.filter((item) => shouldTrackRecentProject(item.projectPath))
+      : [];
   } catch {
     return [];
   }
@@ -50,6 +62,9 @@ async function writeRecentProjects(items: RecentProjectItem[]): Promise<void> {
 }
 
 export async function markRecentProject(projectPath: string): Promise<void> {
+  if (!shouldTrackRecentProject(projectPath)) {
+    return;
+  }
   const list = await listRecentProjects();
   const next = [
     { projectPath, openedAt: new Date().toISOString() },
@@ -76,4 +91,17 @@ function resolveAppDataDir(): string {
     }
   }
   return path.join(os.homedir(), ".novelforge");
+}
+
+function shouldTrackRecentProject(projectPath: string): boolean {
+  return !isTestArtifactRecentProjectPath(projectPath);
+}
+
+function isTestArtifactRecentProjectPath(projectPath: string): boolean {
+  const tempDir = os.tmpdir();
+  if (!projectPath.startsWith(tempDir)) {
+    return false;
+  }
+  const parentName = path.basename(path.dirname(projectPath));
+  return TEST_PROJECT_TEMP_PREFIXES.some((prefix) => parentName.startsWith(prefix));
 }

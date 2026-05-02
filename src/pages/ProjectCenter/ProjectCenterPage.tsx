@@ -7,7 +7,6 @@ import { Input } from "../../components/forms/Input.js";
 import { Select } from "../../components/forms/Select.js";
 import { Modal } from "../../components/dialogs/Modal.js";
 import { clearRecentProjects, createProject, listRecentProjects, openProject, validateProjectName } from "../../api/projectApi.js";
-import { checkProjectIntegrity, type IntegrityReport } from "../../api/chapterApi.js";
 import type { AppErrorDto } from "../../types/error.js";
 
 const GENRES = ["玄幻", "都市", "科幻", "悬疑", "言情", "历史", "奇幻", "轻小说", "剧本", "其他"];
@@ -73,8 +72,6 @@ export function ProjectCenterPage() {
   const [showOpen, setShowOpen] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [recentProjects, setRecentProjects] = useState<Array<{ path: string; name: string; openedAt: string }>>([]);
-  const [integrityLoadingPath, setIntegrityLoadingPath] = useState<string | null>(null);
-  const [integrityReports, setIntegrityReports] = useState<Record<string, IntegrityReport>>({});
 
   const setActiveRoute = useUiStore((s) => s.setActiveRoute);
   const setCurrentProject = useProjectStore((s) => s.setCurrentProject);
@@ -186,23 +183,9 @@ export function ProjectCenterPage() {
     try {
       await clearRecentProjects();
       setRecentProjects([]);
-      setIntegrityReports({});
       setActionError(null);
     } catch (err) {
       setActionError(getErrorMessage(err, "清除最近项目失败"));
-    }
-  }
-
-  async function handleCheckIntegrity(projectPath: string) {
-    setIntegrityLoadingPath(projectPath);
-    setActionError(null);
-    try {
-      const report = await checkProjectIntegrity(projectPath);
-      setIntegrityReports((prev) => ({ ...prev, [projectPath]: report }));
-    } catch (err) {
-      setActionError(getErrorMessage(err, "完整性检查失败"));
-    } finally {
-      setIntegrityLoadingPath(null);
     }
   }
 
@@ -249,32 +232,6 @@ export function ProjectCenterPage() {
                       <div className="text-sm text-surface-100">{p.name}</div>
                       <div className="text-xs text-surface-400 mt-1">打开于 {p.openedAt}</div>
                     </button>
-                    <div className="flex items-center justify-between gap-2">
-                      <button
-                        onClick={() => void handleCheckIntegrity(p.path)}
-                        className="text-xs text-primary hover:text-primary-light transition-colors"
-                        disabled={integrityLoadingPath === p.path}
-                      >
-                        {integrityLoadingPath === p.path ? "检查中..." : "完整性检查"}
-                      </button>
-                      {integrityReports[p.path] && (
-                        <span
-                          className={`text-xs ${
-                            integrityReports[p.path].status === "healthy"
-                              ? "text-success"
-                              : integrityReports[p.path].status === "issues_found"
-                                ? "text-warning"
-                                : "text-error"
-                          }`}
-                        >
-                          {integrityReports[p.path].status === "healthy"
-                            ? "健康"
-                            : integrityReports[p.path].status === "issues_found"
-                              ? `有问题(${integrityReports[p.path].issues.length})`
-                              : `损坏(${integrityReports[p.path].issues.length})`}
-                        </span>
-                      )}
-                    </div>
                   </div>
                 ))}
               </div>

@@ -103,24 +103,10 @@ export interface TaskRoute {
   modelId: string;
   fallbackProviderId?: string;
   fallbackModelId?: string;
-  modelPoolId?: string;
-  fallbackModelPoolId?: string;
   postTasks?: string[];
   maxRetries: number;
   createdAt?: string;
   updatedAt?: string;
-}
-
-export type ProjectStage = "draft" | "revision" | "polish";
-export type RiskLevel = "low" | "medium" | "high";
-
-export interface RoutingStrategyTemplate {
-  id: string;
-  name: string;
-  description: string;
-  projectStage: ProjectStage;
-  taskRiskLevel: RiskLevel;
-  recommendedPools: Record<string, string>;
 }
 
 export interface PromotionPolicy {

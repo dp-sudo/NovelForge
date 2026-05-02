@@ -67,7 +67,7 @@
 6. 若报错，前端按 `errorCode + phase` 映射建议动作并展示。
    - 命中冻结区改写冲突时，后端返回 `PIPELINE_FREEZE_CONFLICT` 并阻断执行（不再仅做持久化降级）。
 7. 用户可触发 `cancel_ai_task_pipeline` 取消进行中的任务。
-8. 章节任务在 `route` 阶段会解析并记录池级决策（`modelPoolId` / `fallbackModelPoolId` / resolved provider-model）。
+8. 章节任务在 `route` 阶段会解析并记录最终的 provider/model 决策与重试链。
 9. 章节任务在 `done` 前会执行“场景判别 + 后置任务链”，并将结果写入 `ai_pipeline_runs.post_task_results` 与 `ai_pipeline_runs.meta_json`（含 `postTaskSources` 来源映射）。
 
 #### 4.3.1 章节链路（Task 10 对齐）
@@ -119,11 +119,7 @@
   - 问题4修复：`list_task_routes` 为纯读接口，仅返回 canonical 去重视图。
 - 路由写入：
   - `save_task_route` 做 canonical、字段 trim、重试次数边界控制（1..8）。
-  - 路由对象新增可选字段：`modelPoolId` / `fallbackModelPoolId` / `postTasks`（兼容旧 provider/model 路由）。
-- 路由策略推荐：
-  - `recommend_routing_strategy`：按项目阶段与任务风险返回模板列表。
-  - `apply_routing_strategy_template`：批量应用模板映射并持久化 `projects.routing_strategy_id`。
-  - `get_project_routing_strategy`：读取项目当前已选策略 ID，用于重开项目自动回放策略。
+  - 路由对象包含 `providerId` / `modelId` / `fallbackProviderId` / `fallbackModelId` / `postTasks`。
 
 ### 4.9 回报事件生命周期
 1. `FeedbackService` 在角色/关系/章节保存链路触发检测并写入 `feedback_events(status=open)`。
@@ -139,7 +135,6 @@
 
 ### 4.7 设置、备份与发布能力
 - Settings 前端已拆分：
-  - `ModelPoolPanel`（模型池增删改查、池内模型配置、fallback 池配置）。
   - `ModelRoutingPanel`（任务路由配置）。
   - `DataOpsPanel`（备份恢复、完整性、语义诊断、Git 快照）。
 - 编辑器设置：`load_editor_settings/save_editor_settings`（app DB）。

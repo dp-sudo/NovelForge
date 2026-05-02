@@ -51,8 +51,6 @@
   - AI Pipeline：`run_ai_task_pipeline`, `cancel_ai_task_pipeline`。
   - 结构化确认：`apply_asset_candidate`, `apply_structured_draft`, `reject_structured_draft`, `get_review_trail`。
   - 回报查询与流转：`get_feedback_events`、`acknowledge_feedback_event`、`resolve_feedback_event`、`ignore_feedback_event`。
-  - 模型池管理：`list_model_pools`, `create_model_pool`, `update_model_pool`, `delete_model_pool`。
-  - 路由策略推荐：`recommend_routing_strategy`、`apply_routing_strategy_template`、`get_project_routing_strategy`。
   - 晋升策略：`list_promotion_policies`, `save_promotion_policy`。
   - 写作风格：`save_writing_style`, `get_writing_style`。
   - 项目级 AI 策略：`save_ai_strategy_profile`, `get_ai_strategy_profile`。
@@ -120,17 +118,15 @@
   - `project/0009_user_review_actions.sql`（审查轨迹事件表）
   - `project/0010_feedback_events.sql`（回报事件 + `ai_pipeline_runs.post_task_results`）
   - `project/0011_feedback_event_lifecycle.sql`（回报生命周期字段：`resolved_at/resolved_by/resolution_note`）
-  - `project/0012_project_routing_strategy.sql`（项目级路由策略 ID：`projects.routing_strategy_id`）
 - 兼容补列：
   - `database.rs::ensure_compatible_schema()` 在打开/初始化时补齐 `projects.writing_style`、`projects.ai_strategy_profile` 等历史缺列。
 
 ### 5.3 应用级数据库（`%LOCALAPPDATA%\\NovelForge\\novelforge.db`）
-- 表：`llm_providers`, `llm_models`, `llm_model_refresh_logs`, `llm_model_pools`, `llm_task_routes`, `llm_model_registry_state`, `app_settings`, `promotion_policies`, `feedback_rules`
+- 表：`llm_providers`, `llm_models`, `llm_model_refresh_logs`, `llm_task_routes`, `llm_model_registry_state`, `app_settings`, `promotion_policies`, `feedback_rules`
 - 迁移现状：
   - `app/0001_init.sql`
   - `app/0002_skill_index.sql`
   - `app/0003_task_route_unique.sql`（canonical + 去重 + `task_type` 唯一索引）
-  - `app/0004_model_pools.sql`（模型池表 + 路由池字段）
   - `app/0005_promotion_policies.sql`（统一晋升策略）
   - `app/0006_feedback_rules.sql`（回报规则 + `llm_task_routes.post_tasks_json`）
 - 编辑器设置通过 `app_settings` 的 `editor_settings` 键持久化。
@@ -145,10 +141,7 @@
 - canonical 函数：`task_routing::canonical_task_type()`。
 - 路由解析：`AiService::resolve_route()`。
 - 未命中核心任务时，可回退 `custom` 路由（若已配置）。
-- 新增池级兼容链路：`task route -> model pool -> provider/model`。
-  - 池表：`llm_model_pools`（`planner/drafter/reviewer/extractor/state`）。
-  - 任务路由可选字段：`model_pool_id`、`fallback_model_pool_id`。
-  - 兼容模式：无池配置时回退原 `provider/model/fallback` 路由。
+- 当前仅保留直接 `provider/model/fallback` 路由。
 
 ### 6.2 Pipeline 编排（`AiPipelineService`）
 - 阶段：`validate -> context -> route -> prompt -> generate -> postprocess -> persist -> done`
@@ -182,7 +175,7 @@
   - route 元信息回传 `postTaskSources`（`{task, sourceSkillId}`），post-task 结果可追溯 `sourceSkillId`。
   - 后置结果写入 `ai_pipeline_runs.post_task_results` 供审计回放。
 - `ai:pipeline:event.meta` 回传所选技能数量、技能 IDs、stateWrites、stateWriteSources、affectsLayers、激活 bundle、推断 scene tag、filteredSkills、workflowOrchestration 与 route override 元信息，便于审计。
-- `ai_pipeline_runs.meta_json` 会记录路由决策（包含 `modelPoolId` 与 fallback 池信息），用于回放与审计。
+- `ai_pipeline_runs.meta_json` 会记录路由决策（最终 provider/model、postTasks 与 attempts），用于回放与审计。
 - 上下文完整性检查：`assess_continuity_pack_completeness` 在关键任务（`chapter.draft/chapter.continue`）强制硬门禁，缺层返回 `PIPELINE_CONTEXT_INCOMPLETE_BLOCKED`；非关键任务是否阻断由 `projects.ai_strategy_profile.enforce_context_completeness` 控制。
 
 ### 6.5 写后回写与来源轨迹
@@ -206,8 +199,7 @@
 - AI：pipeline run/cancel，模块化 AI 任务通过前端 API 薄封装统一转发到 pipeline（legacy stream 命令已移除）。
 - Context：上下文聚合、资产候选采纳、结构化草案确认/否决、审查轨迹查询。
 - Dashboard：统计总览 + 回报事件生命周期面板（open/acknowledged/resolved/ignored + 操作闭环）。
-- Settings：Provider/模型/模型池/路由/registry、编辑器设置、授权、更新。
-- Settings 路由页支持“推荐策略 -> 应用模板 -> 手动覆盖”的池级协同链路。
+- Settings：Provider/模型/路由/registry、编辑器设置、授权、更新。
 - Skills：技能列表/详情/内容读取、创建、编辑、删除、导入、重置、重载。
 - Search/Integrity：关键字+语义检索、索引重建、项目完整性检查。
 

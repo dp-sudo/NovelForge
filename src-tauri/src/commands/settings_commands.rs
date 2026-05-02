@@ -4,8 +4,7 @@ use tauri::State;
 use tauri_plugin_updater::UpdaterExt;
 use uuid::Uuid;
 
-use crate::adapters::llm_types::{ModelPoolEntry, ModelPoolRecord, ProviderConfig, TaskRoute};
-use crate::domain::routing_strategy::RoutingStrategyTemplate;
+use crate::adapters::llm_types::{ProviderConfig, TaskRoute};
 use crate::errors::AppErrorDto;
 use crate::infra::app_database;
 use crate::infra::app_database::PromotionPolicyRecord;
@@ -335,98 +334,6 @@ pub async fn get_refresh_logs(
     state.model_registry_service.get_refresh_logs(&provider_id)
 }
 
-// ── Model pool commands ──
-
-#[derive(Debug, Clone, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CreateModelPoolInput {
-    pub name: String,
-    pub pool_type: String,
-    pub models: Vec<ModelPoolEntry>,
-}
-
-#[tauri::command]
-pub async fn list_model_pools(
-    _state: State<'_, AppState>,
-) -> Result<Vec<ModelPoolRecord>, AppErrorDto> {
-    crate::services::ai_service::AiService::list_model_pools()
-}
-
-#[tauri::command]
-pub async fn create_model_pool(
-    input: CreateModelPoolInput,
-    _state: State<'_, AppState>,
-) -> Result<ModelPoolRecord, AppErrorDto> {
-    crate::services::ai_service::AiService::create_model_pool(
-        &input.name,
-        &input.pool_type,
-        input.models,
-    )
-}
-
-#[tauri::command]
-pub async fn update_model_pool(
-    pool_id: String,
-    config: ModelPoolRecord,
-    _state: State<'_, AppState>,
-) -> Result<ModelPoolRecord, AppErrorDto> {
-    crate::services::ai_service::AiService::update_model_pool(&pool_id, config)
-}
-
-#[tauri::command]
-pub async fn delete_model_pool(
-    pool_id: String,
-    _state: State<'_, AppState>,
-) -> Result<(), AppErrorDto> {
-    crate::services::ai_service::AiService::delete_model_pool(&pool_id)
-}
-
-#[derive(Debug, Clone, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RecommendRoutingStrategyInput {
-    pub project_root: String,
-    pub project_stage: Option<String>,
-    pub task_type: Option<String>,
-}
-
-#[derive(Debug, Clone, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ApplyRoutingStrategyTemplateInput {
-    pub project_root: String,
-    pub strategy_id: String,
-}
-
-#[tauri::command]
-pub async fn recommend_routing_strategy(
-    input: RecommendRoutingStrategyInput,
-    _state: State<'_, AppState>,
-) -> Result<Vec<RoutingStrategyTemplate>, AppErrorDto> {
-    crate::services::ai_service::AiService::recommend_routing_strategy(
-        &input.project_root,
-        input.project_stage.as_deref(),
-        input.task_type.as_deref(),
-    )
-}
-
-#[tauri::command]
-pub async fn apply_routing_strategy_template(
-    input: ApplyRoutingStrategyTemplateInput,
-    _state: State<'_, AppState>,
-) -> Result<Vec<TaskRoute>, AppErrorDto> {
-    crate::services::ai_service::AiService::apply_routing_strategy_template(
-        &input.project_root,
-        &input.strategy_id,
-    )
-}
-
-#[tauri::command]
-pub async fn get_project_routing_strategy(
-    project_root: String,
-    _state: State<'_, AppState>,
-) -> Result<Option<String>, AppErrorDto> {
-    crate::services::ai_service::AiService::get_project_routing_strategy_id(&project_root)
-}
-
 // ── Task route commands ──
 
 #[tauri::command]
@@ -465,16 +372,6 @@ pub async fn save_task_route(
     } else {
         None
     };
-    r.model_pool_id = r
-        .model_pool_id
-        .as_ref()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty());
-    r.fallback_model_pool_id = r
-        .fallback_model_pool_id
-        .as_ref()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty());
     r.post_tasks = r
         .post_tasks
         .iter()
@@ -494,31 +391,11 @@ pub async fn save_task_route(
     let existing_same_task = existing_routes.iter().find(|existing| {
         task_routing::canonical_task_type(&existing.task_type).as_ref() == r.task_type
     });
-    if r.model_pool_id.is_some() {
-        if r.provider_id.is_empty() {
-            r.provider_id = existing_same_task
-                .map(|existing| existing.provider_id.clone())
-                .unwrap_or_default();
-        }
-        if r.model_id.is_empty() {
-            r.model_id = existing_same_task
-                .map(|existing| existing.model_id.clone())
-                .unwrap_or_default();
-        }
-    }
     if r.provider_id.is_empty() {
         return Err(invalid_input_error("供应商不能为空"));
     }
     if r.model_id.is_empty() {
         return Err(invalid_input_error("模型ID不能为空"));
-    }
-    if let Some(existing) = existing_same_task {
-        if r.model_pool_id.is_none() {
-            r.model_pool_id = existing.model_pool_id.clone();
-        }
-        if r.fallback_model_pool_id.is_none() {
-            r.fallback_model_pool_id = existing.fallback_model_pool_id.clone();
-        }
     }
     match (r.id.is_empty(), existing_same_task) {
         (true, Some(existing)) => {
@@ -671,8 +548,6 @@ mod tests {
             model_id: "model".to_string(),
             fallback_provider_id: None,
             fallback_model_id: None,
-            model_pool_id: None,
-            fallback_model_pool_id: None,
             post_tasks: Vec::new(),
             max_retries: 1,
             created_at: None,
