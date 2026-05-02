@@ -102,12 +102,10 @@ pub async fn open_project(
     if let Ok(Some(strategy_id)) =
         crate::services::ai_service::AiService::get_project_routing_strategy_id(&input.project_root)
     {
-        if let Err(err) =
-            crate::services::ai_service::AiService::apply_routing_strategy_template(
-                &input.project_root,
-                &strategy_id,
-            )
-        {
+        if let Err(err) = crate::services::ai_service::AiService::apply_routing_strategy_template(
+            &input.project_root,
+            &strategy_id,
+        ) {
             log::warn!(
                 "[ROUTING_STRATEGY] auto-apply on open failed: strategy={} detail={}",
                 strategy_id,

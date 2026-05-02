@@ -861,6 +861,24 @@ fn resolve_project_scoped_path(
     })
 }
 
+fn sanitize_snapshot_title(title: Option<&str>) -> String {
+    let mut sanitized = title.unwrap_or("untitled").trim().to_string();
+    while sanitized.contains("..") {
+        sanitized = sanitized.replace("..", "");
+    }
+    sanitized = sanitized
+        .chars()
+        .filter(|ch| !ch.is_control() && *ch != '/' && *ch != '\\')
+        .collect::<String>()
+        .trim()
+        .to_string();
+    let mut limited = sanitized.chars().take(100).collect::<String>();
+    if limited.is_empty() {
+        limited = "untitled".to_string();
+    }
+    limited
+}
+
 fn strip_frontmatter_content(content: &str) -> String {
     if !content.starts_with("---\n") {
         return content.to_string();
@@ -911,8 +929,7 @@ fn load_chapter_links_for_frontmatter(
     let mut stmt = conn
         .prepare("SELECT target_type, target_id FROM chapter_links WHERE chapter_id = ?1")
         .map_err(|e| {
-            AppErrorDto::new("DB_READ_FAILED", "无法读取章节关联", true)
-                .with_detail(e.to_string())
+            AppErrorDto::new("DB_READ_FAILED", "无法读取章节关联", true).with_detail(e.to_string())
         })?;
 
     let rows = stmt
@@ -920,8 +937,7 @@ fn load_chapter_links_for_frontmatter(
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         })
         .map_err(|e| {
-            AppErrorDto::new("DB_READ_FAILED", "无法读取章节关联", true)
-                .with_detail(e.to_string())
+            AppErrorDto::new("DB_READ_FAILED", "无法读取章节关联", true).with_detail(e.to_string())
         })?;
 
     let mut plot_nodes = Vec::new();
@@ -995,9 +1011,7 @@ fn yaml_safe_string(value: &str) -> String {
         return value.to_string();
     }
     // Double-quote and escape backslash / double-quote characters.
-    let escaped = trimmed
-        .replace('\\', "\\\\")
-        .replace('"', "\\\"");
+    let escaped = trimmed.replace('\\', "\\\\").replace('"', "\\\"");
     format!("\"{}\"", escaped)
 }
 
@@ -1101,7 +1115,7 @@ impl ChapterService {
             AppErrorDto::new("SNAPSHOT_FAILED", "创建快照目录失败", true).with_detail(e.to_string())
         })?;
 
-        let safe_title = title.unwrap_or("snapshot");
+        let safe_title = sanitize_snapshot_title(title);
         let file_name = format!("{}-{}.md", now.replace([':', '.'], "-"), safe_title);
         let snapshot_path = snapshot_dir.join(&file_name);
         write_file_atomic(&snapshot_path, &content).map_err(|e| {
@@ -1634,5 +1648,19 @@ mod tests {
 
         remove_temp_workspace(&workspace);
     }
-}
 
+    #[test]
+    fn sanitize_snapshot_title_removes_traversal_fragments() {
+        let sanitized = super::sanitize_snapshot_title(Some("../../../evil"));
+        assert_eq!(sanitized, "evil");
+        assert!(!sanitized.contains('/'));
+        assert!(!sanitized.contains('\\'));
+        assert!(!sanitized.contains(".."));
+    }
+
+    #[test]
+    fn sanitize_snapshot_title_falls_back_to_untitled() {
+        let sanitized = super::sanitize_snapshot_title(Some("   ../\\\u{0008}\n"));
+        assert_eq!(sanitized, "untitled");
+    }
+}

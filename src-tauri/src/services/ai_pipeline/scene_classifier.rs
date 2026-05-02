@@ -84,7 +84,11 @@ fn estimate_dialogue_ratio(text: &str) -> f32 {
     dialogue_chars as f32 / total_chars as f32
 }
 
-fn extract_features(user_instruction: &str, selected_text: Option<&str>, chapter_content: Option<&str>) -> SceneFeatures {
+fn extract_features(
+    user_instruction: &str,
+    selected_text: Option<&str>,
+    chapter_content: Option<&str>,
+) -> SceneFeatures {
     let combined = format!(
         "{}\n{}\n{}",
         user_instruction,
@@ -113,40 +117,15 @@ fn extract_features(user_instruction: &str, selected_text: Option<&str>, chapter
     let action_hits = count_hits(
         &lowered,
         &[
-            "action",
-            "chase",
-            "run",
-            "rush",
-            "move",
-            "行动",
-            "追逐",
-            "逃离",
-            "潜入",
-            "移动",
-            "突袭",
-            "翻身",
-            "闪避",
-            "挥刀",
-            "跃起",
+            "action", "chase", "run", "rush", "move", "行动", "追逐", "逃离", "潜入", "移动",
+            "突袭", "翻身", "闪避", "挥刀", "跃起",
         ],
     );
     let combat_hits = count_hits(
         &lowered,
         &[
-            "combat",
-            "battle",
-            "fight",
-            "skirmish",
-            "战斗",
-            "厮杀",
-            "交锋",
-            "搏斗",
-            "决战",
-            "反击",
-            "受伤",
-            "流血",
-            "重伤",
-            "骨折",
+            "combat", "battle", "fight", "skirmish", "战斗", "厮杀", "交锋", "搏斗", "决战",
+            "反击", "受伤", "流血", "重伤", "骨折",
         ],
     );
     let exposition_hits = count_hits(
@@ -204,11 +183,20 @@ impl SceneClassifier {
         let features = extract_features(user_instruction, selected_text, chapter_content);
         let mut matched_features = Vec::new();
         let mut scores = vec![
-            (SceneType::Dialogue, features.dialogue_hits as f32 + features.dialogue_ratio * 10.0),
-            (SceneType::Action, features.action_hits as f32 + features.action_density * 120.0),
+            (
+                SceneType::Dialogue,
+                features.dialogue_hits as f32 + features.dialogue_ratio * 10.0,
+            ),
+            (
+                SceneType::Action,
+                features.action_hits as f32 + features.action_density * 120.0,
+            ),
             (SceneType::Exposition, features.exposition_hits as f32),
             (SceneType::Introspection, features.introspection_hits as f32),
-            (SceneType::Combat, features.combat_hits as f32 + features.action_density * 40.0),
+            (
+                SceneType::Combat,
+                features.combat_hits as f32 + features.action_density * 40.0,
+            ),
         ];
 
         if features.dialogue_ratio >= 0.6 {
@@ -228,15 +216,24 @@ impl SceneClassifier {
             }
         }
 
-        if features.exposition_hits >= 2 && features.dialogue_ratio <= 0.35 && features.action_density <= 0.01 {
+        if features.exposition_hits >= 2
+            && features.dialogue_ratio <= 0.35
+            && features.action_density <= 0.01
+        {
             matched_features.push(format!("exposition_hits={}", features.exposition_hits));
-            if let Some((_, score)) = scores.iter_mut().find(|(ty, _)| *ty == SceneType::Exposition) {
+            if let Some((_, score)) = scores
+                .iter_mut()
+                .find(|(ty, _)| *ty == SceneType::Exposition)
+            {
                 *score += 6.0;
             }
         }
 
         if features.introspection_hits >= 2 && features.action_hits <= 2 {
-            matched_features.push(format!("introspection_hits={}", features.introspection_hits));
+            matched_features.push(format!(
+                "introspection_hits={}",
+                features.introspection_hits
+            ));
             if let Some((_, score)) = scores
                 .iter_mut()
                 .find(|(ty, _)| *ty == SceneType::Introspection)
@@ -249,7 +246,9 @@ impl SceneClassifier {
         let (scene, top_score) = scores.first().copied().unwrap_or((SceneType::Action, 0.0));
         let second_score = scores.get(1).map(|(_, score)| *score).unwrap_or(0.0);
         let spread = (top_score - second_score).max(0.0);
-        let confidence = ((0.55 + spread / 20.0).clamp(0.2, 0.99) + features.dialogue_ratio.min(0.2)).clamp(0.2, 0.99);
+        let confidence = ((0.55 + spread / 20.0).clamp(0.2, 0.99)
+            + features.dialogue_ratio.min(0.2))
+        .clamp(0.2, 0.99);
 
         if matched_features.is_empty() {
             matched_features.push(format!(
@@ -292,10 +291,7 @@ impl SceneClassifier {
     pub fn default_post_tasks(scene_type: &str) -> Vec<String> {
         match scene_type.trim().to_ascii_lowercase().as_str() {
             "dialogue" => vec!["extract_state".to_string()],
-            "combat" => vec![
-                "review_continuity".to_string(),
-                "extract_state".to_string(),
-            ],
+            "combat" => vec!["review_continuity".to_string(), "extract_state".to_string()],
             "exposition" => vec!["extract_assets".to_string()],
             "introspection" => vec!["extract_state".to_string()],
             _ => vec!["extract_state".to_string()],
@@ -331,10 +327,7 @@ mod tests {
         let defaults = SceneClassifier::default_post_tasks(&classified.scene_type);
         assert_eq!(
             defaults,
-            vec![
-                "review_continuity".to_string(),
-                "extract_state".to_string()
-            ]
+            vec!["review_continuity".to_string(), "extract_state".to_string()]
         );
     }
 

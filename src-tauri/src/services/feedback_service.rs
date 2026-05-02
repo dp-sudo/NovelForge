@@ -55,8 +55,7 @@ fn open_project_database(project_root: &str) -> Result<Connection, AppErrorDto> 
 }
 
 fn feedback_query_error(err: impl ToString) -> AppErrorDto {
-    AppErrorDto::new("FEEDBACK_QUERY_FAILED", "查询回报事件失败", true)
-        .with_detail(err.to_string())
+    AppErrorDto::new("FEEDBACK_QUERY_FAILED", "查询回报事件失败", true).with_detail(err.to_string())
 }
 
 fn feedback_write_error(err: impl ToString) -> AppErrorDto {
@@ -70,12 +69,18 @@ fn feedback_state_error(code: &'static str, message: &'static str) -> AppErrorDt
 fn normalize_event_id(event_id: &str) -> Result<&str, AppErrorDto> {
     let normalized = event_id.trim();
     if normalized.is_empty() {
-        return Err(feedback_state_error("FEEDBACK_EVENT_ID_REQUIRED", "事件ID不能为空"));
+        return Err(feedback_state_error(
+            "FEEDBACK_EVENT_ID_REQUIRED",
+            "事件ID不能为空",
+        ));
     }
     Ok(normalized)
 }
 
-fn normalize_resolution_note(value: &str, field_label: &'static str) -> Result<String, AppErrorDto> {
+fn normalize_resolution_note(
+    value: &str,
+    field_label: &'static str,
+) -> Result<String, AppErrorDto> {
     let normalized = value.trim();
     if normalized.is_empty() {
         return Err(feedback_state_error(
@@ -93,7 +98,8 @@ fn default_feedback_rules() -> Vec<app_database::FeedbackRuleRecord> {
             rule_type: "character_overflow".to_string(),
             threshold_value: 10,
             enabled: true,
-            suggestion_template: "角色数量超过阈值，建议回收边缘角色并强化核心角色关系。".to_string(),
+            suggestion_template: "角色数量超过阈值，建议回收边缘角色并强化核心角色关系。"
+                .to_string(),
             created_at: None,
             updated_at: None,
         },
@@ -102,7 +108,8 @@ fn default_feedback_rules() -> Vec<app_database::FeedbackRuleRecord> {
             rule_type: "relationship_complexity".to_string(),
             threshold_value: 30,
             enabled: true,
-            suggestion_template: "关系网络复杂度升高，建议拆分卷级关系主线并补充关系图约束。".to_string(),
+            suggestion_template: "关系网络复杂度升高，建议拆分卷级关系主线并补充关系图约束。"
+                .to_string(),
             created_at: None,
             updated_at: None,
         },
@@ -111,7 +118,8 @@ fn default_feedback_rules() -> Vec<app_database::FeedbackRuleRecord> {
             rule_type: "foreshadow_unfulfilled".to_string(),
             threshold_value: 1,
             enabled: true,
-            suggestion_template: "检测到伏笔兑现风险，建议新增回收章节计划或调整窗口目标。".to_string(),
+            suggestion_template: "检测到伏笔兑现风险，建议新增回收章节计划或调整窗口目标。"
+                .to_string(),
             created_at: None,
             updated_at: None,
         },
@@ -235,7 +243,10 @@ impl FeedbackService {
                     | FeedbackEventStatus::Ignored
             ),
             FeedbackEventStatus::Acknowledged => {
-                matches!(target, FeedbackEventStatus::Resolved | FeedbackEventStatus::Ignored)
+                matches!(
+                    target,
+                    FeedbackEventStatus::Resolved | FeedbackEventStatus::Ignored
+                )
             }
             FeedbackEventStatus::Resolved | FeedbackEventStatus::Ignored => false,
         };
@@ -250,8 +261,12 @@ impl FeedbackService {
 
     fn build_closed_loop_note(rule_type: &str, note: &str) -> String {
         let followup = match rule_type.trim().to_ascii_lowercase().as_str() {
-            "character_overflow" => Some("闭环动作：已登记蓝图规划修正任务（blueprint.generate_step）。"),
-            "relationship_complexity" => Some("闭环动作：已登记关系图生成任务（relationship.review）。"),
+            "character_overflow" => {
+                Some("闭环动作：已登记蓝图规划修正任务（blueprint.generate_step）。")
+            }
+            "relationship_complexity" => {
+                Some("闭环动作：已登记关系图生成任务（relationship.review）。")
+            }
             _ => None,
         };
         match followup {
@@ -279,11 +294,7 @@ impl FeedbackService {
             target_status,
             FeedbackEventStatus::Resolved | FeedbackEventStatus::Ignored
         ) {
-            (
-                Some(now.clone()),
-                Some("user".to_string()),
-                resolution_note,
-            )
+            (Some(now.clone()), Some("user".to_string()), resolution_note)
         } else {
             (None, None, None)
         };
@@ -331,7 +342,8 @@ impl FeedbackService {
         let normalized_note = normalize_resolution_note(note, "解决备注不能为空")?;
         let conn = open_project_database(project_root)?;
         let project_id = get_project_id(&conn)?;
-        let existing = Self::get_feedback_event_by_id(&conn, &project_id, normalize_event_id(event_id)?)?;
+        let existing =
+            Self::get_feedback_event_by_id(&conn, &project_id, normalize_event_id(event_id)?)?;
         let final_note = Self::build_closed_loop_note(&existing.rule_type, &normalized_note);
         self.transition_feedback_event_status(
             project_root,
@@ -458,7 +470,10 @@ impl FeedbackService {
         Ok(())
     }
 
-    fn detect_foreshadow_unfulfilled(project_root: &str, chapter_id: &str) -> Result<(), AppErrorDto> {
+    fn detect_foreshadow_unfulfilled(
+        project_root: &str,
+        chapter_id: &str,
+    ) -> Result<(), AppErrorDto> {
         let rules = load_rule_map();
         let Some(rule) = rules.get("foreshadow_unfulfilled") else {
             return Ok(());

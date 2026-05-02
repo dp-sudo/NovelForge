@@ -81,9 +81,9 @@ impl StoryStateService {
             ("character", "appearance") => StoryStateTaxonomy::CharacterAppearance,
             ("character", "knowledge") => StoryStateTaxonomy::CharacterKnowledge,
             ("scene", "environment") => StoryStateTaxonomy::SceneEnvironment,
-            ("scene", "danger_level")
-            | ("scene", "danger-level")
-            | ("scene", "dangerlevel") => StoryStateTaxonomy::SceneDangerLevel,
+            ("scene", "danger_level") | ("scene", "danger-level") | ("scene", "dangerlevel") => {
+                StoryStateTaxonomy::SceneDangerLevel
+            }
             ("scene", "spatial_constraint")
             | ("scene", "spatial-constraint")
             | ("scene", "spatialconstraint") => StoryStateTaxonomy::SceneSpatialConstraint,

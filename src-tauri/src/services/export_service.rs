@@ -334,13 +334,7 @@ fn write_export_output(
         ExportFormat::Docx => write_docx_output(&resolved, chapters, options)?,
         ExportFormat::Pdf => write_pdf_output(&resolved, chapters, options)?,
         ExportFormat::Epub => {
-            write_epub_output(
-                &resolved,
-                chapters,
-                options,
-                project_name,
-                project_language,
-            )?
+            write_epub_output(&resolved, chapters, options, project_name, project_language)?
         }
     }
 

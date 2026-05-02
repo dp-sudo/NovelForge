@@ -209,12 +209,8 @@ impl SkillRegistry {
         if self.builtin_dir.exists() {
             let builtin_ids = self.list_builtin_ids();
             for entry in fs::read_dir(&self.builtin_dir).map_err(|e| {
-                AppErrorDto::new(
-                    "SKILLS_READ_BUILTIN_FAILED",
-                    "无法读取内置技能目录",
-                    true,
-                )
-                .with_detail(e.to_string())
+                AppErrorDto::new("SKILLS_READ_BUILTIN_FAILED", "无法读取内置技能目录", true)
+                    .with_detail(e.to_string())
             })? {
                 let entry = entry.map_err(|e| {
                     AppErrorDto::new("SKILLS_ENTRY_FAILED", "无法读取内置技能条目", true)
@@ -276,12 +272,8 @@ impl SkillRegistry {
         }
 
         for entry in fs::read_dir(&self.skills_dir).map_err(|e| {
-            AppErrorDto::new(
-                "SKILLS_READ_DIR_FAILED",
-                "无法读取技能目录",
-                true,
-            )
-            .with_detail(e.to_string())
+            AppErrorDto::new("SKILLS_READ_DIR_FAILED", "无法读取技能目录", true)
+                .with_detail(e.to_string())
         })? {
             let entry = entry.map_err(|e| {
                 AppErrorDto::new("SKILLS_ENTRY_FAILED", "无法读取技能条目", true)
@@ -345,12 +337,8 @@ impl SkillRegistry {
         let active_bundle_ids = normalize_string_set(&selection.active_bundle_ids);
         let scene_tags = normalize_string_set(&selection.scene_tags);
         let available_contexts = normalize_string_set(&selection.available_contexts);
-        let runtime_tier = normalize_optional_string(
-            selection
-                .automation_tier
-                .clone()
-                .unwrap_or_default(),
-        );
+        let runtime_tier =
+            normalize_optional_string(selection.automation_tier.clone().unwrap_or_default());
 
         for skill in guard.iter() {
             let explicit = explicit_skill_ids.contains(&skill.id.trim().to_ascii_lowercase());
@@ -367,8 +355,11 @@ impl SkillRegistry {
                 let normalized = bundle_id.trim();
                 !normalized.is_empty() && active_bundle_ids.contains(normalized)
             });
-            let activation_source =
-                explicit || skill.always_on || matched_by_trigger || matched_by_route || matched_by_bundle;
+            let activation_source = explicit
+                || skill.always_on
+                || matched_by_trigger
+                || matched_by_route
+                || matched_by_bundle;
             if !activation_source {
                 continue;
             }
@@ -417,6 +408,7 @@ impl SkillRegistry {
 
     /// Read the full .md content of a skill (for editing).
     pub fn read_skill_content(&self, id: &str) -> Result<Option<String>, AppErrorDto> {
+        validate_id(id)?;
         let path = self.skills_dir.join(format!("{}.md", id));
         if !path.exists() {
             return Ok(None);
@@ -466,6 +458,7 @@ impl SkillRegistry {
         body: Option<&str>,
         manifest_patch: Option<SkillManifestPatch>,
     ) -> Result<SkillManifest, AppErrorDto> {
+        validate_id(id)?;
         let path = self.skills_dir.join(format!("{}.md", id));
         if !path.exists() {
             return Err(AppErrorDto::new(
@@ -497,17 +490,14 @@ impl SkillRegistry {
 
     /// Delete a skill file (only user/imported skills).
     pub fn delete_skill(&self, id: &str) -> Result<(), AppErrorDto> {
+        validate_id(id)?;
         let guard = self.manifests.read().map_err(|e| {
             AppErrorDto::new("SKILLS_LOCK_FAILED", "技能注册表锁定失败", false)
                 .with_detail(e.to_string())
         })?;
 
         let skill = guard.iter().find(|s| s.id == id).ok_or_else(|| {
-            AppErrorDto::new(
-                "SKILLS_NOT_FOUND",
-                &format!("未找到技能 '{}'", id),
-                true,
-            )
+            AppErrorDto::new("SKILLS_NOT_FOUND", &format!("未找到技能 '{}'", id), true)
         })?;
 
         if skill.source == "builtin" {
@@ -532,6 +522,7 @@ impl SkillRegistry {
 
     /// Reset a built-in skill to its original content.
     pub fn reset_builtin(&self, id: &str) -> Result<SkillManifest, AppErrorDto> {
+        validate_id(id)?;
         // Validate: builtin must exist in builtin dir
         let src = self.builtin_dir.join(format!("{}.md", id));
         if !src.exists() {
@@ -558,6 +549,7 @@ impl SkillRegistry {
     pub fn import_file(&self, file_path: &str) -> Result<SkillManifest, AppErrorDto> {
         let src = Path::new(file_path);
         let sf = Self::parse_file(src)?;
+        validate_id(&sf.manifest.id)?;
 
         // Validate ID uniqueness
         if self.get_skill(&sf.manifest.id)?.is_some() {
@@ -609,12 +601,8 @@ impl SkillRegistry {
         let (frontmatter_str, body) = split_frontmatter(&content)?;
 
         let mut manifest: SkillManifest = serde_yaml::from_str(frontmatter_str).map_err(|e| {
-            AppErrorDto::new(
-                "SKILLS_PARSE_FAILED",
-                "无法解析技能 frontmatter",
-                true,
-            )
-            .with_detail(e.to_string())
+            AppErrorDto::new("SKILLS_PARSE_FAILED", "无法解析技能 frontmatter", true)
+                .with_detail(e.to_string())
         })?;
 
         // Auto-set source if missing
@@ -772,7 +760,8 @@ fn task_pattern_matches(pattern: &str, canonical_task: &str) -> bool {
 }
 
 fn normalize_string_set(items: &[String]) -> std::collections::HashSet<String> {
-    items.iter()
+    items
+        .iter()
         .map(|item| item.trim().to_ascii_lowercase())
         .filter(|item| !item.is_empty())
         .collect()
@@ -892,12 +881,23 @@ fn render_skill_file(manifest: &SkillManifest, body: &str) -> String {
     format!("---\n{}---\n{}\n", yaml, body.trim())
 }
 
+pub fn validate_skill_id(id: &str) -> Result<(), AppErrorDto> {
+    validate_id(id)
+}
+
 /// Validate skill ID: only alphanumeric, dots, hyphens, underscores.
 fn validate_id(id: &str) -> Result<(), AppErrorDto> {
     if id.is_empty() {
         return Err(AppErrorDto::new(
             "SKILLS_INVALID_ID",
             "技能ID不能为空",
+            true,
+        ));
+    }
+    if id.contains("..") || id.contains('/') || id.contains('\\') {
+        return Err(AppErrorDto::new(
+            "SKILLS_INVALID_ID",
+            "技能ID不能包含路径分隔符或父目录片段",
             true,
         ));
     }
@@ -1221,5 +1221,33 @@ mod tests {
                 "window_plan".to_string()
             ]
         );
+    }
+
+    #[test]
+    fn validate_skill_id_rejects_path_traversal_fragments() {
+        let err = validate_skill_id("../evil").expect_err("id should be rejected");
+        assert_eq!(err.code, "SKILLS_INVALID_ID");
+    }
+
+    #[test]
+    fn import_file_rejects_manifest_id_with_path_traversal() {
+        let registry = create_test_registry("import-invalid-id");
+        let manifest = build_manifest("../evil", "workflow");
+        let skill_file = render_skill_file(&manifest, "body");
+        let external_path = std::env::temp_dir().join(format!(
+            "novelforge-skill-import-invalid-{}.md",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        std::fs::write(&external_path, skill_file).expect("write external skill file");
+
+        let err = registry
+            .import_file(external_path.to_string_lossy().as_ref())
+            .expect_err("import should reject traversal id");
+        assert_eq!(err.code, "SKILLS_INVALID_ID");
+
+        let _ = std::fs::remove_file(external_path);
     }
 }

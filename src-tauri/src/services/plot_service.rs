@@ -105,12 +105,11 @@ impl PlotService {
         let project_id = get_project_id(&conn)?;
         let id = Uuid::new_v4().to_string();
         let now = now_iso();
-        let rc = serde_json::to_string(&input.related_characters.unwrap_or_default()).map_err(
-            |e| {
+        let rc =
+            serde_json::to_string(&input.related_characters.unwrap_or_default()).map_err(|e| {
                 AppErrorDto::new("SERIALIZE_ERROR", "序列化关联角色失败", true)
                     .with_detail(e.to_string())
-            },
-        )?;
+            })?;
         let status = input.status.unwrap_or_else(|| "planning".to_string());
         conn.execute(
             "INSERT INTO plot_nodes(id, project_id, title, node_type, sort_order, goal, conflict, emotional_curve, status, related_characters, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",

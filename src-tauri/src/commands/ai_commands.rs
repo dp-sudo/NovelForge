@@ -126,6 +126,7 @@ pub async fn register_ai_provider(
         "register_ai_provider",
         source.as_deref(),
     );
+    crate::services::settings_service::validate_provider_base_url_security(&config.base_url)?;
     state.ai_service.register_provider(config).await;
     Ok(())
 }

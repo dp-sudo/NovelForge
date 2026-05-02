@@ -222,14 +222,12 @@ fn run_pending(
                         label, migration.version, detail
                     );
                 } else {
-                    return Err(
-                        AppErrorDto::new(
-                            "MIGRATION_FAILED",
-                            &format!("{}: migration '{}' failed", label, migration.version),
-                            true,
-                        )
-                        .with_detail(detail),
-                    );
+                    return Err(AppErrorDto::new(
+                        "MIGRATION_FAILED",
+                        &format!("{}: migration '{}' failed", label, migration.version),
+                        true,
+                    )
+                    .with_detail(detail));
                 }
             }
         }

@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use std::sync::{Arc, RwLock};
 use std::time::Instant;
 
@@ -19,6 +19,7 @@ use crate::services::skill_registry::SkillRegistry;
 use crate::services::task_routing;
 
 const PIPELINE_EVENT_NAME: &str = "ai:pipeline:event";
+const MAX_CANCELLED_REQUESTS: usize = 1000;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -100,10 +101,16 @@ pub struct AiPipelineEvent {
 #[derive(Clone, Default)]
 pub struct AiPipelineService {
     // 问题3修复(职责拆分): 业务编排仅负责协调，审计/Prompt/任务处理下沉到独立模块。
-    cancelled_requests: Arc<RwLock<HashSet<String>>>,
+    cancelled_requests: Arc<RwLock<CancelledRequestState>>,
     audit_store: PipelineAuditStore,
     prompt_resolver: PromptResolver,
     task_handlers: TaskHandlers,
+}
+
+#[derive(Default)]
+struct CancelledRequestState {
+    ids: HashSet<String>,
+    order: VecDeque<String>,
 }
 
 impl AiPipelineService {
@@ -237,7 +244,15 @@ impl AiPipelineService {
             ));
         }
         if let Ok(mut guard) = self.cancelled_requests.write() {
-            guard.insert(trimmed.to_string());
+            if !guard.ids.contains(trimmed) {
+                guard.ids.insert(trimmed.to_string());
+                guard.order.push_back(trimmed.to_string());
+                if guard.order.len() > MAX_CANCELLED_REQUESTS {
+                    if let Some(oldest) = guard.order.pop_front() {
+                        guard.ids.remove(&oldest);
+                    }
+                }
+            }
         }
         Ok(())
     }
@@ -256,13 +271,15 @@ impl AiPipelineService {
     fn is_cancelled(&self, request_id: &str) -> bool {
         self.cancelled_requests
             .read()
-            .map(|guard| guard.contains(request_id))
+            .map(|guard| guard.ids.contains(request_id))
             .unwrap_or(false)
     }
 
     fn clear_cancellation(&self, request_id: &str) {
         if let Ok(mut guard) = self.cancelled_requests.write() {
-            guard.remove(request_id);
+            if guard.ids.remove(request_id) {
+                guard.order.retain(|id| id != request_id);
+            }
         }
     }
 }
@@ -289,6 +306,21 @@ mod tests {
         let err = service
             .check_cancelled("req-1")
             .expect_err("should be cancelled");
+        assert_eq!(err.code, "PIPELINE_CANCELLED");
+    }
+
+    #[test]
+    fn cancel_evicts_oldest_when_capacity_exceeded() {
+        let service = AiPipelineService::default();
+        for index in 0..1001 {
+            service
+                .cancel_ai_task_pipeline(&format!("req-{index}"))
+                .expect("cancel should succeed");
+        }
+        assert!(service.check_cancelled("req-0").is_ok());
+        let err = service
+            .check_cancelled("req-1000")
+            .expect_err("latest request should still be cancelled");
         assert_eq!(err.code, "PIPELINE_CANCELLED");
     }
 }

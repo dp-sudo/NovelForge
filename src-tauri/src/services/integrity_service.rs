@@ -270,7 +270,7 @@ mod tests {
         assert!(report.issues.is_empty());
         assert_eq!(
             report.summary.schema_version,
-            "0007_blueprint_certainty_zones"
+            "0012_project_routing_strategy"
         );
 
         remove_temp_workspace(&ws);

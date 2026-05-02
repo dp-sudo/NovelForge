@@ -103,12 +103,11 @@ impl WorldService {
         let project_id = get_project_id(&conn)?;
         let id = Uuid::new_v4().to_string();
         let now = now_iso();
-        let related = serde_json::to_string(&input.related_entities.unwrap_or_default()).map_err(
-            |e| {
+        let related =
+            serde_json::to_string(&input.related_entities.unwrap_or_default()).map_err(|e| {
                 AppErrorDto::new("SERIALIZE_ERROR", "序列化关联实体失败", true)
                     .with_detail(e.to_string())
-            },
-        )?;
+            })?;
         conn.execute(
             "INSERT INTO world_rules(id, project_id, title, category, description, constraint_level, related_entities, examples, contradiction_policy, is_deleted, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,0,?10,?11)",
             params![id, project_id, input.title, input.category, input.description, input.constraint_level, related, input.examples, input.contradiction_policy, now, now],

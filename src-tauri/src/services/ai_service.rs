@@ -11,9 +11,9 @@ use crate::adapters::{
 };
 use crate::domain::routing_strategy::{ProjectStage, RiskLevel, RoutingStrategyTemplate};
 use crate::errors::AppErrorDto;
-use crate::infra::{app_database, credential_manager};
 use crate::infra::database::open_database;
 use crate::infra::time::now_iso;
+use crate::infra::{app_database, credential_manager};
 use crate::services::project_service::get_project_id;
 use crate::services::skill_registry::{RouteOverride, SkillRegistry};
 use crate::services::task_routing;
@@ -324,9 +324,8 @@ impl AiService {
             RoutingStrategyTemplate {
                 id: "stage-revision-balanced".to_string(),
                 name: "修订阶段：生成+审查均衡".to_string(),
-                description:
-                    "章节任务走 Drafter，审查任务走 Reviewer，蓝图与计划任务走 Planner。"
-                        .to_string(),
+                description: "章节任务走 Drafter，审查任务走 Reviewer，蓝图与计划任务走 Planner。"
+                    .to_string(),
                 project_stage: ProjectStage::Revision,
                 task_risk_level: RiskLevel::Medium,
                 recommended_pools: Self::pool_mapping(&[
@@ -377,9 +376,8 @@ impl AiService {
             RoutingStrategyTemplate {
                 id: "risk-high-critical-planner".to_string(),
                 name: "高风险任务：关键规划加固".to_string(),
-                description:
-                    "关键任务（蓝图/主线/章节计划）优先 Planner，其余任务保持平衡。"
-                        .to_string(),
+                description: "关键任务（蓝图/主线/章节计划）优先 Planner，其余任务保持平衡。"
+                    .to_string(),
                 project_stage: ProjectStage::Revision,
                 task_risk_level: RiskLevel::High,
                 recommended_pools: Self::pool_mapping(&[
@@ -424,9 +422,11 @@ impl AiService {
                 .with_detail(err.to_string())
         })?;
         let raw_profile: Option<String> = conn
-            .query_row("SELECT ai_strategy_profile FROM projects LIMIT 1", [], |row| {
-                row.get::<_, Option<String>>(0)
-            })
+            .query_row(
+                "SELECT ai_strategy_profile FROM projects LIMIT 1",
+                [],
+                |row| row.get::<_, Option<String>>(0),
+            )
             .ok()
             .flatten();
         let Some(raw_profile) = raw_profile else {
@@ -440,7 +440,11 @@ impl AiService {
         let mode = parsed
             .get("chapterGenerationMode")
             .and_then(|value| value.as_str())
-            .or_else(|| parsed.get("chapter_generation_mode").and_then(|value| value.as_str()))
+            .or_else(|| {
+                parsed
+                    .get("chapter_generation_mode")
+                    .and_then(|value| value.as_str())
+            })
             .unwrap_or("draft_only");
         let stage = match mode {
             "plan_scene_draft" => ProjectStage::Polish,
@@ -474,7 +478,11 @@ impl AiService {
         let mut scored = Self::built_in_routing_strategy_templates()
             .into_iter()
             .map(|template| {
-                let stage_score = if template.project_stage == stage { 100_i64 } else { 20_i64 };
+                let stage_score = if template.project_stage == stage {
+                    100_i64
+                } else {
+                    20_i64
+                };
                 let risk_score = if template.task_risk_level == risk {
                     50_i64
                 } else if template.task_risk_level == RiskLevel::High && risk == RiskLevel::Medium {
@@ -489,7 +497,9 @@ impl AiService {
         Ok(scored.into_iter().map(|(_, template)| template).collect())
     }
 
-    pub fn get_project_routing_strategy_id(project_root: &str) -> Result<Option<String>, AppErrorDto> {
+    pub fn get_project_routing_strategy_id(
+        project_root: &str,
+    ) -> Result<Option<String>, AppErrorDto> {
         let normalized_root = project_root.trim();
         if normalized_root.is_empty() {
             return Ok(None);
@@ -498,9 +508,11 @@ impl AiService {
             AppErrorDto::new("DB_OPEN_FAILED", "无法打开项目数据库", false)
                 .with_detail(err.to_string())
         })?;
-        let value = conn.query_row("SELECT routing_strategy_id FROM projects LIMIT 1", [], |row| {
-            row.get::<_, Option<String>>(0)
-        });
+        let value = conn.query_row(
+            "SELECT routing_strategy_id FROM projects LIMIT 1",
+            [],
+            |row| row.get::<_, Option<String>>(0),
+        );
         match value {
             Ok(item) => Ok(item.filter(|value| !value.trim().is_empty())),
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
@@ -517,7 +529,11 @@ impl AiService {
     ) -> Result<Vec<TaskRoute>, AppErrorDto> {
         let normalized_root = project_root.trim();
         if normalized_root.is_empty() {
-            return Err(AppErrorDto::new("PROJECT_INVALID_PATH", "项目目录不能为空", true));
+            return Err(AppErrorDto::new(
+                "PROJECT_INVALID_PATH",
+                "项目目录不能为空",
+                true,
+            ));
         }
         let template = Self::find_strategy_template(strategy_id).ok_or_else(|| {
             AppErrorDto::new("ROUTING_STRATEGY_NOT_FOUND", "路由策略模板不存在", true)
@@ -543,11 +559,9 @@ impl AiService {
             }) else {
                 continue;
             };
-            let Some(primary_entry) = pool
-                .entries
-                .iter()
-                .find(|entry| !entry.provider_id.trim().is_empty() && !entry.model_id.trim().is_empty())
-            else {
+            let Some(primary_entry) = pool.entries.iter().find(|entry| {
+                !entry.provider_id.trim().is_empty() && !entry.model_id.trim().is_empty()
+            }) else {
                 continue;
             };
 
@@ -614,7 +628,11 @@ impl AiService {
     ) -> Result<ModelPoolRecord, AppErrorDto> {
         let normalized_role = pool_type.trim().to_ascii_lowercase();
         if normalized_role.is_empty() {
-            return Err(AppErrorDto::new("INVALID_INPUT", "模型池类型不能为空", true));
+            return Err(AppErrorDto::new(
+                "INVALID_INPUT",
+                "模型池类型不能为空",
+                true,
+            ));
         }
         let conn = app_database::open_or_create()?;
         let existing = app_database::load_model_pools(&conn)?
@@ -655,10 +673,18 @@ impl AiService {
         record.role = record.role.trim().to_ascii_lowercase();
         record.display_name = record.display_name.trim().to_string();
         if record.role.is_empty() {
-            return Err(AppErrorDto::new("INVALID_INPUT", "模型池类型不能为空", true));
+            return Err(AppErrorDto::new(
+                "INVALID_INPUT",
+                "模型池类型不能为空",
+                true,
+            ));
         }
         if record.display_name.is_empty() {
-            return Err(AppErrorDto::new("INVALID_INPUT", "模型池名称不能为空", true));
+            return Err(AppErrorDto::new(
+                "INVALID_INPUT",
+                "模型池名称不能为空",
+                true,
+            ));
         }
         record.fallback_pool_id = record
             .fallback_pool_id

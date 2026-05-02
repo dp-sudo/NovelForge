@@ -111,7 +111,13 @@ mod tests {
             "chapter.plan",
             PersistMode::DerivedReview
         ));
-        assert!(!should_persist_task_output("chapter.plan", PersistMode::None));
-        assert!(should_persist_task_output("chapter.plan", PersistMode::Formal));
+        assert!(!should_persist_task_output(
+            "chapter.plan",
+            PersistMode::None
+        ));
+        assert!(should_persist_task_output(
+            "chapter.plan",
+            PersistMode::Formal
+        ));
     }
 }

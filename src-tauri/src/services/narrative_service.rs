@@ -388,9 +388,7 @@ mod tests {
     #[test]
     fn narrative_methods_reject_blank_project_root() {
         let ns = NarrativeService;
-        let err = ns
-            .list("   ")
-            .expect_err("blank root should be rejected");
+        let err = ns.list("   ").expect_err("blank root should be rejected");
         assert_eq!(err.code, "PROJECT_INVALID_PATH");
     }
 }

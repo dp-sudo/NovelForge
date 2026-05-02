@@ -15,6 +15,8 @@ use crate::infra::path_utils::resolve_project_relative_path;
 use crate::infra::time::now_iso;
 use crate::services::project_service::ProjectJson;
 
+const MAX_RESTORE_BYTES: u64 = 100 * 1024 * 1024;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BackupResult {
@@ -194,6 +196,24 @@ impl BackupService {
         let backup_file = normalize_backup_file_path(backup_path)?;
         let root = Path::new(&normalized_root);
         let current_project = read_project_json(root)?;
+        let backup_size = fs::metadata(&backup_file)
+            .map(|meta| meta.len())
+            .map_err(|e| {
+                AppErrorDto::new("RESTORE_FAILED", "读取备份文件信息失败", true)
+                    .with_detail(e.to_string())
+            })?;
+        if backup_size > MAX_RESTORE_BYTES {
+            return Err(AppErrorDto::new(
+                "BACKUP_TOO_LARGE",
+                "备份文件体积超出限制，已拒绝恢复",
+                true,
+            )
+            .with_detail(format!(
+                "backupSizeBytes={}, maxAllowedBytes={}",
+                backup_size, MAX_RESTORE_BYTES
+            ))
+            .with_suggested_action("请选择小于 100MB 的备份文件后重试"));
+        }
 
         let file = fs::File::open(&backup_file).map_err(|e| {
             AppErrorDto::new("RESTORE_FAILED", "打开备份文件失败", true).with_detail(e.to_string())
@@ -220,6 +240,7 @@ impl BackupService {
         }
 
         let mut restored = 0usize;
+        let mut total_uncompressed: u64 = 0;
         for i in 0..archive.len() {
             let mut entry = archive.by_index(i).map_err(|e| {
                 AppErrorDto::new("RESTORE_FAILED", "读取备份条目失败", true)
@@ -245,12 +266,28 @@ impl BackupService {
                         .with_detail(e.to_string())
                 })?;
             }
+            let entry_size = entry.size();
+            if entry_size > MAX_RESTORE_BYTES
+                || total_uncompressed.saturating_add(entry_size) > MAX_RESTORE_BYTES
+            {
+                return Err(AppErrorDto::new(
+                    "BACKUP_TOO_LARGE",
+                    "备份内容体积超出限制，已拒绝恢复",
+                    true,
+                )
+                .with_detail(format!(
+                    "entry={}, entrySizeBytes={}, accumulatedBytes={}, maxAllowedBytes={}",
+                    name, entry_size, total_uncompressed, MAX_RESTORE_BYTES
+                ))
+                .with_suggested_action("请选择体积更小的备份文件后重试"));
+            }
 
             let mut content = Vec::new();
             entry.read_to_end(&mut content).map_err(|e| {
                 AppErrorDto::new("RESTORE_FAILED", "读取备份内容失败", true)
                     .with_detail(e.to_string())
             })?;
+            total_uncompressed = total_uncompressed.saturating_add(content.len() as u64);
 
             write_bytes_atomic(&target_path, &content).map_err(|e| {
                 AppErrorDto::new("RESTORE_FAILED", "写入恢复文件失败", true)
@@ -392,8 +429,8 @@ mod tests {
             })
             .expect("create project root");
         let project_root = PathBuf::from(&project.project_root);
-        let project_json = fs::read_to_string(project_root.join("project.json"))
-            .expect("read project json");
+        let project_json =
+            fs::read_to_string(project_root.join("project.json")).expect("read project json");
 
         let backup_path = workspace.join("malicious.zip");
         let file = fs::File::create(&backup_path).expect("create backup file");
@@ -481,6 +518,37 @@ mod tests {
             .restore_backup(&project_b.project_root, &backup.file_path)
             .expect_err("cross-project restore should be rejected");
         assert_eq!(err.code, "RESTORE_PROJECT_MISMATCH");
+
+        remove_temp_workspace(&workspace);
+    }
+
+    #[test]
+    fn restore_rejects_oversized_backup_file() {
+        let workspace = create_temp_workspace();
+        let project_service = ProjectService;
+        let project = project_service
+            .create_project(CreateProjectInput {
+                name: "超大备份".to_string(),
+                author: None,
+                genre: "测试".to_string(),
+                target_words: None,
+                save_directory: workspace.to_string_lossy().to_string(),
+            })
+            .expect("create project");
+
+        let backup_path = workspace.join("oversized.zip");
+        let file = fs::File::create(&backup_path).expect("create oversized backup");
+        file.set_len(200_u64 * 1024 * 1024)
+            .expect("set oversized file length");
+
+        let service = BackupService;
+        let err = service
+            .restore_backup(
+                project.project_root.as_str(),
+                backup_path.to_string_lossy().as_ref(),
+            )
+            .expect_err("oversized backup should be rejected");
+        assert_eq!(err.code, "BACKUP_TOO_LARGE");
 
         remove_temp_workspace(&workspace);
     }

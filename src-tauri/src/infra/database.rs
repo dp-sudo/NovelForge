@@ -31,6 +31,7 @@ pub fn initialize_database(project_root: &Path) -> SqlResult<()> {
     }
 
     let conn = Connection::open(db_path)?;
+    enable_foreign_keys(&conn)?;
     // Run migrations (will create tables and track versions)
     let result = crate::infra::migrator::run_project_pending(&conn).map_err(|e| {
         let detail = e
@@ -48,6 +49,7 @@ pub fn initialize_database(project_root: &Path) -> SqlResult<()> {
 pub fn open_database(project_root: &Path) -> SqlResult<Connection> {
     validate_project_root(project_root)?;
     let conn = Connection::open(get_database_path(project_root))?;
+    enable_foreign_keys(&conn)?;
     // Run pending migrations on open (idempotent)
     let result = crate::infra::migrator::run_project_pending(&conn).map_err(|e| {
         let detail = e
@@ -60,6 +62,10 @@ pub fn open_database(project_root: &Path) -> SqlResult<Connection> {
     }
     ensure_compatible_schema(&conn)?;
     Ok(conn)
+}
+
+fn enable_foreign_keys(conn: &Connection) -> SqlResult<()> {
+    conn.execute_batch("PRAGMA foreign_keys = ON;")
 }
 
 fn ensure_compatible_schema(conn: &Connection) -> SqlResult<()> {
@@ -107,7 +113,7 @@ mod tests {
     use rusqlite::Connection;
     use uuid::Uuid;
 
-    use super::{get_database_path, open_database};
+    use super::{get_database_path, initialize_database, open_database};
 
     fn create_temp_workspace() -> PathBuf {
         let workspace =
@@ -204,7 +210,11 @@ mod tests {
         assert!(column_exists(&upgraded, "chapters", "volume_id"));
         assert!(column_exists(&upgraded, "feedback_events", "resolved_at"));
         assert!(column_exists(&upgraded, "feedback_events", "resolved_by"));
-        assert!(column_exists(&upgraded, "feedback_events", "resolution_note"));
+        assert!(column_exists(
+            &upgraded,
+            "feedback_events",
+            "resolution_note"
+        ));
 
         remove_temp_workspace(&workspace);
     }
@@ -222,5 +232,19 @@ mod tests {
         assert!(!get_database_path(&relative_root).exists());
 
         let _ = fs::remove_dir_all(relative_root);
+    }
+
+    #[test]
+    fn open_database_enables_foreign_keys() {
+        let workspace = create_temp_workspace();
+        initialize_database(&workspace).expect("initialize database");
+
+        let conn = open_database(&workspace).expect("open database");
+        let foreign_keys: i64 = conn
+            .query_row("PRAGMA foreign_keys", [], |row| row.get(0))
+            .expect("query foreign_keys pragma");
+        assert_eq!(foreign_keys, 1);
+
+        remove_temp_workspace(&workspace);
     }
 }

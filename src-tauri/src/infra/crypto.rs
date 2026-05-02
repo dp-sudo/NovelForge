@@ -40,8 +40,7 @@ fn hostname_info() -> Option<String> {
 pub fn encrypt(plaintext: &str) -> Result<String, AppErrorDto> {
     let key = derive_key();
     let cipher = Aes256Gcm::new_from_slice(&key).map_err(|e| {
-        AppErrorDto::new("CRYPTO_INIT_FAILED", "无法初始化加密器", false)
-            .with_detail(e.to_string())
+        AppErrorDto::new("CRYPTO_INIT_FAILED", "无法初始化加密器", false).with_detail(e.to_string())
     })?;
 
     let mut nonce_bytes = [0u8; 12];
@@ -49,8 +48,7 @@ pub fn encrypt(plaintext: &str) -> Result<String, AppErrorDto> {
     let nonce = Nonce::from_slice(&nonce_bytes);
 
     let ciphertext = cipher.encrypt(nonce, plaintext.as_bytes()).map_err(|e| {
-        AppErrorDto::new("CRYPTO_ENCRYPT_FAILED", "加密失败", false)
-            .with_detail(e.to_string())
+        AppErrorDto::new("CRYPTO_ENCRYPT_FAILED", "加密失败", false).with_detail(e.to_string())
     })?;
 
     let mut result = nonce_bytes.to_vec();
@@ -76,8 +74,7 @@ pub fn decrypt(encoded: &str) -> Result<String, AppErrorDto> {
 
     let key = derive_key();
     let cipher = Aes256Gcm::new_from_slice(&key).map_err(|e| {
-        AppErrorDto::new("CRYPTO_INIT_FAILED", "无法初始化解密器", false)
-            .with_detail(e.to_string())
+        AppErrorDto::new("CRYPTO_INIT_FAILED", "无法初始化解密器", false).with_detail(e.to_string())
     })?;
 
     let plaintext = cipher.decrypt(nonce, ciphertext).map_err(|_| {

@@ -150,9 +150,7 @@ impl GitService {
         output
             .lines()
             .find_map(|line| parse_log_line(line.trim()))
-            .ok_or_else(|| {
-                AppErrorDto::new("GIT_LOG_PARSE_FAILED", "无法解析 Git 提交记录", true)
-            })
+            .ok_or_else(|| AppErrorDto::new("GIT_LOG_PARSE_FAILED", "无法解析 Git 提交记录", true))
     }
 
     fn ensure_local_identity(&self, project_root: &str) -> Result<(), AppErrorDto> {
@@ -203,12 +201,8 @@ fn run_git(project_root: &str, args: &[&str]) -> Result<String, AppErrorDto> {
         .output()
         .map_err(|err| {
             if err.kind() == std::io::ErrorKind::NotFound {
-                AppErrorDto::new(
-                    "GIT_NOT_INSTALLED",
-                    "当前系统未安装 Git 可执行程序",
-                    true,
-                )
-                .with_detail(err.to_string())
+                AppErrorDto::new("GIT_NOT_INSTALLED", "当前系统未安装 Git 可执行程序", true)
+                    .with_detail(err.to_string())
             } else {
                 AppErrorDto::new("GIT_COMMAND_FAILED", "执行 Git 命令失败", true)
                     .with_detail(err.to_string())
@@ -225,12 +219,10 @@ fn run_git(project_root: &str, args: &[&str]) -> Result<String, AppErrorDto> {
     } else {
         stderr
     };
-    Err(AppErrorDto::new(
-        "GIT_COMMAND_FAILED",
-        "Git 命令返回非零退出状态",
-        true,
+    Err(
+        AppErrorDto::new("GIT_COMMAND_FAILED", "Git 命令返回非零退出状态", true)
+            .with_detail(format!("git {}: {}", args.join(" "), detail)),
     )
-    .with_detail(format!("git {}: {}", args.join(" "), detail)))
 }
 
 fn parse_log_line(line: &str) -> Option<GitCommitRecord> {
@@ -357,4 +349,3 @@ mod tests {
         assert_eq!(err.code, "PROJECT_INVALID_PATH");
     }
 }
-

@@ -126,9 +126,13 @@ impl PostTaskExecutor {
         let mut results = Vec::new();
         for task in merged {
             let result = match task.as_str() {
-                "review_continuity" => self.review_continuity(project_root, chapter_id, context_service),
+                "review_continuity" => {
+                    self.review_continuity(project_root, chapter_id, context_service)
+                }
                 "extract_assets" => self.extract_assets(project_root, chapter_id, context_service),
-                "extract_state" => self.extract_state(project_root, chapter_id, scene_type, normalized_output),
+                "extract_state" => {
+                    self.extract_state(project_root, chapter_id, scene_type, normalized_output)
+                }
                 _ => PostTaskResult {
                     task_type: task.clone(),
                     status: "skipped".to_string(),

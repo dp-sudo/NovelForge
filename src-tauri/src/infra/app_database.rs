@@ -66,6 +66,7 @@ pub fn open_or_create() -> Result<Connection, AppErrorDto> {
         AppErrorDto::new("APP_DB_OPEN_FAILED", "无法打开应用数据库", true)
             .with_detail(e.to_string())
     })?;
+    enable_foreign_keys(&conn)?;
     // Run migrations (will create tables and track versions if not already done)
     let result = crate::infra::migrator::run_app_pending(&conn)?;
     for v in &result.applied {
@@ -75,6 +76,14 @@ pub fn open_or_create() -> Result<Connection, AppErrorDto> {
     // 问题4修复(单一初始化入口): 默认任务路由仅在 app-db 初始化阶段补齐。
     ensure_default_task_routes_initialized(&conn)?;
     Ok(conn)
+}
+
+fn enable_foreign_keys(conn: &Connection) -> Result<(), AppErrorDto> {
+    conn.execute_batch("PRAGMA foreign_keys = ON;")
+        .map_err(|e| {
+            AppErrorDto::new("APP_DB_OPEN_FAILED", "无法启用应用数据库外键约束", false)
+                .with_detail(e.to_string())
+        })
 }
 
 fn normalize_task_routes(routes: Vec<TaskRoute>) -> Vec<TaskRoute> {
@@ -540,10 +549,8 @@ pub fn load_task_routes(conn: &Connection) -> Result<Vec<TaskRoute>, AppErrorDto
                 fallback_model_id: row.get(5)?,
                 model_pool_id: row.get(6)?,
                 fallback_model_pool_id: row.get(7)?,
-                post_tasks: serde_json::from_str::<Vec<String>>(
-                    row.get::<_, String>(8)?.as_str(),
-                )
-                .unwrap_or_default(),
+                post_tasks: serde_json::from_str::<Vec<String>>(row.get::<_, String>(8)?.as_str())
+                    .unwrap_or_default(),
                 max_retries: row.get(9)?,
                 created_at: Some(row.get::<_, String>(10)?),
                 updated_at: Some(row.get::<_, String>(11)?),
@@ -820,8 +827,7 @@ pub fn delete_model_pool(conn: &Connection, pool_id: &str) -> Result<(), AppErro
         params![normalized],
     )
     .map_err(|e| {
-        AppErrorDto::new("DB_DELETE_FAILED", "无法删除模型池配置", true)
-            .with_detail(e.to_string())
+        AppErrorDto::new("DB_DELETE_FAILED", "无法删除模型池配置", true).with_detail(e.to_string())
     })?;
     Ok(())
 }
@@ -1058,6 +1064,7 @@ mod tests {
         let conn = Connection::open_in_memory().expect("open in-memory app db");
         crate::infra::migrator::run_app_pending(&conn).expect("run app migrations");
         ensure_schema_compatibility(&conn).expect("ensure schema compatibility");
+        enable_foreign_keys(&conn).expect("enable foreign keys");
         conn
     }
 
@@ -1083,6 +1090,15 @@ mod tests {
             models_path: None,
             last_model_refresh_at: None,
         }
+    }
+
+    #[test]
+    fn setup_app_conn_enables_foreign_keys() {
+        let conn = setup_app_conn();
+        let foreign_keys: i64 = conn
+            .query_row("PRAGMA foreign_keys", [], |row| row.get(0))
+            .expect("query foreign_keys pragma");
+        assert_eq!(foreign_keys, 1);
     }
 
     #[test]

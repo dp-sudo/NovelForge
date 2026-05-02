@@ -4,8 +4,9 @@ use crate::services::context_service::{CharacterSummary, WorldRuleSummary};
 
 type CertaintyZones = BlueprintCertaintyZones;
 
-const MUTATION_INTENT_KEYWORDS: &[&str] =
-    &["修改", "更改", "重写", "推翻", "删除", "改动", "替换", "取消", "放弃", "不再"];
+const MUTATION_INTENT_KEYWORDS: &[&str] = &[
+    "修改", "更改", "重写", "推翻", "删除", "改动", "替换", "取消", "放弃", "不再",
+];
 const PROMISE_BREAK_KEYWORDS: &[&str] = &["取消", "放弃", "违背", "跳过", "不再", "不兑现"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -161,7 +162,13 @@ fn resolve_world_rule_match(
     world_rules
         .iter()
         .find(|item| item.id.trim().eq_ignore_ascii_case(normalized_id.as_str()))
-        .map(|rule| ("world_rule".to_string(), rule.id.clone(), rule.title.clone()))
+        .map(|rule| {
+            (
+                "world_rule".to_string(),
+                rule.id.clone(),
+                rule.title.clone(),
+            )
+        })
 }
 
 fn detect_zone_conflict(
@@ -294,9 +301,7 @@ pub fn freeze_conflict_error(conflict: &FreezeConflict) -> AppErrorDto {
         CertaintyConflictType::Frozen => {
             "请在蓝图对应步骤的确定性分区调整冻结项，或修改指令避免改写冻结事实"
         }
-        CertaintyConflictType::Promised => {
-            "请保持承诺项兑现，或先在蓝图对应步骤调整承诺区后再执行"
-        }
+        CertaintyConflictType::Promised => "请保持承诺项兑现，或先在蓝图对应步骤调整承诺区后再执行",
     };
     error.with_suggested_action(suggested_action)
 }
@@ -392,7 +397,10 @@ mod tests {
         .expect("should detect world rule id conflict");
         assert_eq!(conflict.conflict_type, CertaintyConflictType::Frozen);
         assert_eq!(conflict.matched_entity_type.as_deref(), Some("world_rule"));
-        assert_eq!(conflict.matched_entity_id.as_deref(), Some("wr-immutable-1"));
+        assert_eq!(
+            conflict.matched_entity_id.as_deref(),
+            Some("wr-immutable-1")
+        );
     }
 
     #[test]

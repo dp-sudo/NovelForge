@@ -26,13 +26,31 @@ impl GeminiAdapter {
 
     fn endpoint_url(&self, model: &str, stream: bool) -> String {
         let base = self.config.base_url.trim_end_matches('/');
-        let key = self.config.api_key.as_deref().unwrap_or("");
         let action = if stream {
             "streamGenerateContent"
         } else {
             "generateContent"
         };
-        format!("{}/models/{}:{}?key={}", base, model, action, key)
+        format!("{}/models/{}:{}", base, model, action)
+    }
+
+    fn models_endpoint_url(&self) -> String {
+        let base = self.config.base_url.trim_end_matches('/');
+        format!("{}/models", base)
+    }
+
+    fn with_api_key(&self, request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        let key = self
+            .config
+            .api_key
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        if let Some(value) = key {
+            request.header("x-goog-api-key", value)
+        } else {
+            request
+        }
     }
 
     fn build_request_body(&self, req: &UnifiedGenerateRequest) -> serde_json::Value {
@@ -218,8 +236,7 @@ impl LlmService for GeminiAdapter {
         let body = self.build_request_body(&req);
 
         let response = self
-            .client
-            .post(&url)
+            .with_api_key(self.client.post(&url))
             .json(&body)
             .send()
             .await
@@ -253,8 +270,7 @@ impl LlmService for GeminiAdapter {
         let body = self.build_request_body(&req);
 
         let response = self
-            .client
-            .post(&url)
+            .with_api_key(self.client.post(&url))
             .json(&body)
             .send()
             .await
@@ -298,17 +314,19 @@ impl LlmService for GeminiAdapter {
     }
 
     async fn test_connection(&self) -> Result<(), LlmError> {
-        let base = self.config.base_url.trim_end_matches('/');
-        let key = self.config.api_key.as_deref().unwrap_or("");
-        let url = format!("{}/models?key={}", base, key);
+        let url = self.models_endpoint_url();
 
-        let response = self.client.get(&url).send().await.map_err(|e| {
-            if e.is_timeout() {
-                LlmError::NetworkTimeout
-            } else {
-                LlmError::NetworkError
-            }
-        })?;
+        let response = self
+            .with_api_key(self.client.get(&url))
+            .send()
+            .await
+            .map_err(|e| {
+                if e.is_timeout() {
+                    LlmError::NetworkTimeout
+                } else {
+                    LlmError::NetworkError
+                }
+            })?;
 
         if response.status().is_success() {
             return Ok(());
@@ -337,17 +355,19 @@ impl LlmService for GeminiAdapter {
     }
 
     async fn fetch_models(&self) -> Result<Vec<String>, LlmError> {
-        let base = self.config.base_url.trim_end_matches('/');
-        let key = self.config.api_key.as_deref().unwrap_or("");
-        let url = format!("{}/models?key={}", base, key);
+        let url = self.models_endpoint_url();
 
-        let response = self.client.get(&url).send().await.map_err(|e| {
-            if e.is_timeout() {
-                LlmError::NetworkTimeout
-            } else {
-                LlmError::NetworkError
-            }
-        })?;
+        let response = self
+            .with_api_key(self.client.get(&url))
+            .send()
+            .await
+            .map_err(|e| {
+                if e.is_timeout() {
+                    LlmError::NetworkTimeout
+                } else {
+                    LlmError::NetworkError
+                }
+            })?;
 
         if !response.status().is_success() {
             return Ok(self

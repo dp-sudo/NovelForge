@@ -184,15 +184,13 @@ fn validate_certainty_zone_conflicts(
         .cloned()
         .collect::<Vec<_>>()
         .join("；");
-    Err(
-        AppErrorDto::new(
-            "BLUEPRINT_CERTAINTY_ZONES_OVERLAP",
-            "确定性分区冲突：同一条目不能同时出现在多个分区",
-            true,
-        )
-        .with_detail(detail)
-        .with_suggested_action("请将冲突条目只保留在一个分区（冻结区/承诺区/探索区）后再保存"),
+    Err(AppErrorDto::new(
+        "BLUEPRINT_CERTAINTY_ZONES_OVERLAP",
+        "确定性分区冲突：同一条目不能同时出现在多个分区",
+        true,
     )
+    .with_detail(detail)
+    .with_suggested_action("请将冲突条目只保留在一个分区（冻结区/承诺区/探索区）后再保存"))
 }
 
 fn json_value_to_zone_items(value: &Value) -> Vec<String> {
@@ -681,7 +679,10 @@ mod tests {
             .expect("certainty zones should be persisted");
         assert_eq!(certainty.frozen, vec!["终局真相".to_string()]);
         assert_eq!(certainty.promised, vec!["主角将直面宗门审判".to_string()]);
-        assert_eq!(certainty.exploratory, vec!["支线人物立场可变化".to_string()]);
+        assert_eq!(
+            certainty.exploratory,
+            vec!["支线人物立场可变化".to_string()]
+        );
 
         remove_temp_workspace(&ws);
     }
@@ -778,7 +779,10 @@ mod tests {
             .expect("certainty zones should be parsed from legacy text");
         assert_eq!(certainty.frozen, vec!["终局真相".to_string()]);
         assert_eq!(certainty.promised, vec!["主角将直面宗门审判".to_string()]);
-        assert_eq!(certainty.exploratory, vec!["支线人物立场可变化".to_string()]);
+        assert_eq!(
+            certainty.exploratory,
+            vec!["支线人物立场可变化".to_string()]
+        );
 
         remove_temp_workspace(&ws);
     }

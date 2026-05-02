@@ -133,12 +133,8 @@ impl SettingsService {
     /// Save editor settings.
     pub fn save_editor_settings(&self, settings: &EditorSettings) -> Result<(), AppErrorDto> {
         let json = serde_json::to_string(settings).map_err(|e| {
-            AppErrorDto::new(
-                "SERIALIZE_FAILED",
-                "无法序列化编辑器设置",
-                false,
-            )
-            .with_detail(e.to_string())
+            AppErrorDto::new("SERIALIZE_FAILED", "无法序列化编辑器设置", false)
+                .with_detail(e.to_string())
         })?;
         let now = crate::infra::time::now_iso();
         let conn = app_database::open_or_create()?;
@@ -264,6 +260,32 @@ fn delete_provider_with_secret(
     Ok(())
 }
 
+pub fn validate_provider_base_url_security(base_url: &str) -> Result<(), AppErrorDto> {
+    let normalized = base_url.trim().trim_end_matches('/');
+    if normalized.is_empty() {
+        return Err(AppErrorDto::new(
+            "INVALID_BASE_URL",
+            "供应商服务地址不能为空",
+            true,
+        ));
+    }
+    let parsed = reqwest::Url::parse(normalized).map_err(|err| {
+        AppErrorDto::new("INVALID_BASE_URL", "供应商服务地址无效", true)
+            .with_detail(err.to_string())
+    })?;
+    if parsed.scheme() == "https" {
+        return Ok(());
+    }
+    if parsed.scheme() == "http" && is_loopback_host(parsed.host_str()) {
+        return Ok(());
+    }
+    Err(AppErrorDto::new(
+        "INVALID_BASE_URL_SCHEME",
+        "供应商服务地址必须使用 https://（仅 localhost/loopback 允许 http://）",
+        true,
+    ))
+}
+
 fn validate_provider_config(config: &mut ProviderConfig) -> Result<(), AppErrorDto> {
     config.id = config.id.trim().to_string();
     config.display_name = config.display_name.trim().to_string();
@@ -293,21 +315,7 @@ fn validate_provider_config(config: &mut ProviderConfig) -> Result<(), AppErrorD
             true,
         ));
     }
-    let parsed = reqwest::Url::parse(&config.base_url).map_err(|err| {
-        AppErrorDto::new("INVALID_BASE_URL", "供应商服务地址无效", true)
-            .with_detail(err.to_string())
-    })?;
-    if parsed.scheme() == "https" {
-        // secure default
-    } else if parsed.scheme() == "http" && is_loopback_host(parsed.host_str()) {
-        // allow local development endpoints
-    } else {
-        return Err(AppErrorDto::new(
-            "INVALID_BASE_URL_SCHEME",
-            "供应商服务地址必须使用 https://（仅 localhost/loopback 允许 http://）",
-            true,
-        ));
-    }
+    validate_provider_base_url_security(&config.base_url)?;
 
     if config.timeout_ms == 0 {
         config.timeout_ms = 120_000;
@@ -473,6 +481,13 @@ mod tests {
     }
 
     #[test]
+    fn reject_file_scheme_provider_base_url() {
+        let err = validate_provider_base_url_security("file:///etc/passwd")
+            .expect_err("file scheme should be rejected");
+        assert_eq!(err.code, "INVALID_BASE_URL_SCHEME");
+    }
+
+    #[test]
     fn persist_provider_with_secret_skips_secret_write_when_db_write_fails() {
         let mut conn = setup_app_conn();
         conn.execute_batch(
@@ -496,15 +511,10 @@ mod tests {
         )
         .expect_err("db write failure should bubble");
         assert_eq!(err.code, "DB_WRITE_FAILED");
-        assert!(
-            app_database::load_provider(&conn, &config.id)
-                .expect("load provider")
-                .is_none()
-        );
-        assert_eq!(
-            secrets.load_api_key(&config.id).expect("load secret"),
-            None
-        );
+        assert!(app_database::load_provider(&conn, &config.id)
+            .expect("load provider")
+            .is_none());
+        assert_eq!(secrets.load_api_key(&config.id).expect("load secret"), None);
     }
 
     #[test]
@@ -528,11 +538,9 @@ mod tests {
         let err = delete_provider_with_secret(&mut conn, &secrets, &config.id)
             .expect_err("db delete failure should bubble");
         assert_eq!(err.code, "DB_DELETE_FAILED");
-        assert!(
-            app_database::load_provider(&conn, &config.id)
-                .expect("load provider")
-                .is_some()
-        );
+        assert!(app_database::load_provider(&conn, &config.id)
+            .expect("load provider")
+            .is_some());
         assert_eq!(
             secrets.load_api_key(&config.id).expect("load secret"),
             Some("sk-existing".to_string())

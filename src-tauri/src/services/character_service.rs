@@ -146,17 +146,15 @@ impl CharacterService {
         let project_id = get_project_id(&conn)?;
         let id = Uuid::new_v4().to_string();
         let now = now_iso();
-        let aliases =
-            serde_json::to_string(&input.aliases.unwrap_or_default()).map_err(|e| {
-                AppErrorDto::new("SERIALIZE_ERROR", "序列化角色别名失败", true)
-                    .with_detail(e.to_string())
-            })?;
-        let locked = serde_json::to_string(&input.locked_fields.unwrap_or_default()).map_err(
-            |e| {
+        let aliases = serde_json::to_string(&input.aliases.unwrap_or_default()).map_err(|e| {
+            AppErrorDto::new("SERIALIZE_ERROR", "序列化角色别名失败", true)
+                .with_detail(e.to_string())
+        })?;
+        let locked =
+            serde_json::to_string(&input.locked_fields.unwrap_or_default()).map_err(|e| {
                 AppErrorDto::new("SERIALIZE_ERROR", "序列化角色锁定字段失败", true)
                     .with_detail(e.to_string())
-            },
-        )?;
+            })?;
         conn.execute(
             "INSERT INTO characters(id, project_id, name, aliases, role_type, age, gender, identity_text, appearance, motivation, desire, fear, flaw, arc_stage, locked_fields, notes, is_deleted, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,0,?17,?18)",
             params![id, project_id, input.name, aliases, input.role_type, input.age, input.gender, input.identity_text, input.appearance, input.motivation, input.desire, input.fear, input.flaw, input.arc_stage, locked, input.notes, now, now],
@@ -260,7 +258,8 @@ impl CharacterService {
             .map_err(update_character_error)?;
         }
         if let Some(locked_fields) = &input.locked_fields {
-            let locked_json = serde_json::to_string(locked_fields).map_err(update_character_error)?;
+            let locked_json =
+                serde_json::to_string(locked_fields).map_err(update_character_error)?;
             conn.execute(
                 "UPDATE characters SET locked_fields = ?1, updated_at = ?2 WHERE id = ?3",
                 params![locked_json, now, input.id],
@@ -325,13 +324,13 @@ fn delete_character_error(err: impl ToString) -> AppErrorDto {
 
 #[cfg(test)]
 mod tests {
+    use rusqlite::params;
     use std::fs;
     use std::path::PathBuf;
-    use rusqlite::params;
     use uuid::Uuid;
 
-    use crate::infra::database::open_database;
     use super::{CharacterService, CreateCharacterInput, RelationshipService};
+    use crate::infra::database::open_database;
     use crate::services::project_service::{CreateProjectInput, ProjectService};
 
     fn create_temp_workspace() -> PathBuf {
@@ -430,9 +429,7 @@ mod tests {
     #[test]
     fn character_methods_reject_blank_project_root() {
         let cs = CharacterService;
-        let err = cs
-            .list("   ")
-            .expect_err("blank root should be rejected");
+        let err = cs.list("   ").expect_err("blank root should be rejected");
         assert_eq!(err.code, "PROJECT_INVALID_PATH");
     }
 
@@ -445,7 +442,6 @@ mod tests {
         assert_eq!(err.code, "PROJECT_INVALID_PATH");
     }
 }
-
 
 // ── Character Relationships ──
 
@@ -503,14 +499,14 @@ impl RelationshipService {
 
         let rows = if let Some(cid) = character_id {
             stmt.query_map(params![cid], relationship_from_row)
-            .map_err(query_relationships_error)?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(query_relationships_error)?
+                .map_err(query_relationships_error)?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(query_relationships_error)?
         } else {
             stmt.query_map([], relationship_from_row)
-            .map_err(query_relationships_error)?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(query_relationships_error)?
+                .map_err(query_relationships_error)?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(query_relationships_error)?
         };
 
         Ok(rows)

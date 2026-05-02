@@ -127,18 +127,16 @@ impl PromotionService {
         reason: Option<&str>,
     ) -> Result<(), AppErrorDto> {
         if !policy.enabled || policy.policy_mode.eq_ignore_ascii_case("deny") {
-            return Err(
-                AppErrorDto::new(
-                    "PROMOTION_BLOCKED_BY_POLICY",
-                    "晋升策略阻止了当前晋升操作",
-                    true,
-                )
-                .with_detail(format!(
-                    "targetType={}, sourceKind={}, policyId={}",
-                    target_type, source_kind, policy.id
-                ))
-                .with_suggested_action("请在设置页调整晋升策略后重试"),
-            );
+            return Err(AppErrorDto::new(
+                "PROMOTION_BLOCKED_BY_POLICY",
+                "晋升策略阻止了当前晋升操作",
+                true,
+            )
+            .with_detail(format!(
+                "targetType={}, sourceKind={}, policyId={}",
+                target_type, source_kind, policy.id
+            ))
+            .with_suggested_action("请在设置页调整晋升策略后重试"));
         }
         if policy.require_reason
             && reason

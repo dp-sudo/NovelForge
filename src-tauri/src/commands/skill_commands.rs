@@ -1,12 +1,11 @@
 use tauri::State;
 
 use crate::errors::AppErrorDto;
-use crate::services::skill_registry::{SkillManifest, SkillManifestPatch};
+use crate::services::skill_registry::{validate_skill_id, SkillManifest, SkillManifestPatch};
 use crate::state::AppState;
 
 fn skills_lock_error(err: impl ToString) -> AppErrorDto {
-    AppErrorDto::new("SKILLS_LOCK_FAILED", "技能注册表锁定失败", false)
-        .with_detail(err.to_string())
+    AppErrorDto::new("SKILLS_LOCK_FAILED", "技能注册表锁定失败", false).with_detail(err.to_string())
 }
 
 fn skill_not_found_error(id: &str) -> AppErrorDto {
@@ -31,6 +30,7 @@ pub async fn get_skill(
     id: String,
     state: State<'_, AppState>,
 ) -> Result<SkillManifest, AppErrorDto> {
+    validate_skill_id(&id)?;
     state
         .skill_registry
         .read()
@@ -46,6 +46,7 @@ pub async fn get_skill_content(
     id: String,
     state: State<'_, AppState>,
 ) -> Result<String, AppErrorDto> {
+    validate_skill_id(&id)?;
     state
         .skill_registry
         .read()
@@ -124,6 +125,7 @@ pub async fn update_skill(
     input: UpdateSkillInput,
     state: State<'_, AppState>,
 ) -> Result<SkillManifest, AppErrorDto> {
+    validate_skill_id(&input.id)?;
     let reg = state.skill_registry.write().map_err(skills_lock_error)?;
     reg.update_skill(&input.id, input.body.as_deref(), input.manifest)
 }
@@ -132,6 +134,7 @@ pub async fn update_skill(
 
 #[tauri::command]
 pub async fn delete_skill(id: String, state: State<'_, AppState>) -> Result<(), AppErrorDto> {
+    validate_skill_id(&id)?;
     let reg = state.skill_registry.write().map_err(skills_lock_error)?;
     reg.delete_skill(&id)
 }
@@ -154,6 +157,7 @@ pub async fn reset_builtin_skill(
     id: String,
     state: State<'_, AppState>,
 ) -> Result<SkillManifest, AppErrorDto> {
+    validate_skill_id(&id)?;
     let reg = state.skill_registry.write().map_err(skills_lock_error)?;
     reg.reset_builtin(&id)
 }

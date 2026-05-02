@@ -40,12 +40,8 @@ impl ModelRegistryService {
         let adapter = build_adapter(&config)?;
 
         let live_model_names = adapter.fetch_models().await.map_err(|e| {
-            AppErrorDto::new(
-                "MODEL_FETCH_FAILED",
-                "无法从供应商获取模型列表",
-                true,
-            )
-            .with_detail(format!("{:?}", e))
+            AppErrorDto::new("MODEL_FETCH_FAILED", "无法从供应商获取模型列表", true)
+                .with_detail(format!("{:?}", e))
         })?;
 
         let capabilities = adapter
@@ -206,12 +202,8 @@ impl ModelRegistryService {
 
         let mut conn = app_database::open_or_create()?;
         let tx = conn.transaction().map_err(|e| {
-            AppErrorDto::new(
-                "DB_TRANSACTION_FAILED",
-                "无法启动注册表更新事务",
-                false,
-            )
-            .with_detail(e.to_string())
+            AppErrorDto::new("DB_TRANSACTION_FAILED", "无法启动注册表更新事务", false)
+                .with_detail(e.to_string())
         })?;
 
         let mut total_added = 0i64;
@@ -275,12 +267,8 @@ impl ModelRegistryService {
         );
 
         tx.commit().map_err(|e| {
-            AppErrorDto::new(
-                "DB_TRANSACTION_FAILED",
-                "无法提交注册表更新事务",
-                false,
-            )
-            .with_detail(e.to_string())
+            AppErrorDto::new("DB_TRANSACTION_FAILED", "无法提交注册表更新事务", false)
+                .with_detail(e.to_string())
         })?;
 
         Ok(RegistryApplyResult {
@@ -377,8 +365,7 @@ struct RegistrySigning {
 
 fn validate_registry_url(url: &str) -> Result<reqwest::Url, AppErrorDto> {
     let parsed = reqwest::Url::parse(url).map_err(|e| {
-        AppErrorDto::new("INVALID_REGISTRY_URL", "注册表地址无效", true)
-            .with_detail(e.to_string())
+        AppErrorDto::new("INVALID_REGISTRY_URL", "注册表地址无效", true).with_detail(e.to_string())
     })?;
 
     let scheme = parsed.scheme();
@@ -416,12 +403,8 @@ async fn fetch_registry_payload(url: &str) -> Result<String, AppErrorDto> {
         })?;
 
     let response = client.get(url).send().await.map_err(|e| {
-        AppErrorDto::new(
-            "REGISTRY_FETCH_FAILED",
-            "无法获取远程注册表",
-            true,
-        )
-        .with_detail(e.to_string())
+        AppErrorDto::new("REGISTRY_FETCH_FAILED", "无法获取远程注册表", true)
+            .with_detail(e.to_string())
     })?;
 
     if !response.status().is_success() {
@@ -443,12 +426,8 @@ async fn fetch_registry_payload(url: &str) -> Result<String, AppErrorDto> {
     }
 
     let bytes = response.bytes().await.map_err(|e| {
-        AppErrorDto::new(
-            "REGISTRY_FETCH_FAILED",
-            "无法读取注册表内容",
-            true,
-        )
-        .with_detail(e.to_string())
+        AppErrorDto::new("REGISTRY_FETCH_FAILED", "无法读取注册表内容", true)
+            .with_detail(e.to_string())
     })?;
     decode_registry_payload_bytes(bytes.as_ref())
 }
@@ -463,12 +442,8 @@ fn decode_registry_payload_bytes(bytes: &[u8]) -> Result<String, AppErrorDto> {
     }
 
     String::from_utf8(bytes.to_vec()).map_err(|e| {
-        AppErrorDto::new(
-            "REGISTRY_PARSE_FAILED",
-            "注册表内容不是有效 UTF-8",
-            false,
-        )
-        .with_detail(e.to_string())
+        AppErrorDto::new("REGISTRY_PARSE_FAILED", "注册表内容不是有效 UTF-8", false)
+            .with_detail(e.to_string())
     })
 }
 
@@ -476,20 +451,12 @@ fn parse_registry_payload(
     payload: &str,
 ) -> Result<(RegistryDocument, serde_json::Value), AppErrorDto> {
     let json = serde_json::from_str::<serde_json::Value>(payload).map_err(|e| {
-        AppErrorDto::new(
-            "REGISTRY_PARSE_FAILED",
-            "注册表 JSON 结构无效",
-            false,
-        )
-        .with_detail(e.to_string())
+        AppErrorDto::new("REGISTRY_PARSE_FAILED", "注册表 JSON 结构无效", false)
+            .with_detail(e.to_string())
     })?;
     let registry = serde_json::from_value::<RegistryDocument>(json.clone()).map_err(|e| {
-        AppErrorDto::new(
-            "REGISTRY_PARSE_FAILED",
-            "注册表 JSON 结构无效",
-            false,
-        )
-        .with_detail(e.to_string())
+        AppErrorDto::new("REGISTRY_PARSE_FAILED", "注册表 JSON 结构无效", false)
+            .with_detail(e.to_string())
     })?;
     Ok((registry, json))
 }
@@ -573,12 +540,8 @@ fn verify_registry_signature(
                 ));
             }
             let signature = Signature::from_slice(&signature_bytes).map_err(|e| {
-                AppErrorDto::new(
-                    "REGISTRY_SIGNATURE_INVALID",
-                    "注册表签名无法解析",
-                    false,
-                )
-                .with_detail(e.to_string())
+                AppErrorDto::new("REGISTRY_SIGNATURE_INVALID", "注册表签名无法解析", false)
+                    .with_detail(e.to_string())
             })?;
 
             let public_key_b64 = resolve_registry_public_key(registry, host).ok_or_else(|| {
@@ -614,24 +577,16 @@ fn verify_registry_signature(
                 )
             })?;
             let verifying_key = VerifyingKey::from_bytes(&key_array).map_err(|e| {
-                AppErrorDto::new(
-                    "REGISTRY_SIGNATURE_INVALID",
-                    "注册表公钥无法解析",
-                    false,
-                )
-                .with_detail(e.to_string())
+                AppErrorDto::new("REGISTRY_SIGNATURE_INVALID", "注册表公钥无法解析", false)
+                    .with_detail(e.to_string())
             })?;
 
             let signed_payload = canonical_unsigned_registry_payload(registry_json)?;
             verifying_key
                 .verify(signed_payload.as_bytes(), &signature)
                 .map_err(|e| {
-                    AppErrorDto::new(
-                        "REGISTRY_SIGNATURE_INVALID",
-                        "注册表签名校验失败",
-                        false,
-                    )
-                    .with_detail(e.to_string())
+                    AppErrorDto::new("REGISTRY_SIGNATURE_INVALID", "注册表签名校验失败", false)
+                        .with_detail(e.to_string())
                 })
         }
         "none" => {
@@ -662,11 +617,7 @@ fn canonical_unsigned_registry_payload(
         .and_then(|root| root.get_mut("signing"))
         .and_then(|value| value.as_object_mut())
         .ok_or_else(|| {
-            AppErrorDto::new(
-                "REGISTRY_SIGNATURE_INVALID",
-                "注册表签名载荷缺失",
-                false,
-            )
+            AppErrorDto::new("REGISTRY_SIGNATURE_INVALID", "注册表签名载荷缺失", false)
         })?;
     signing.insert(
         "signature".to_string(),
@@ -675,12 +626,8 @@ fn canonical_unsigned_registry_payload(
 
     unsigned.sort_all_objects();
     serde_json::to_string(&unsigned).map_err(|e| {
-        AppErrorDto::new(
-            "REGISTRY_SIGNATURE_INVALID",
-            "注册表载荷序列化失败",
-            false,
-        )
-        .with_detail(e.to_string())
+        AppErrorDto::new("REGISTRY_SIGNATURE_INVALID", "注册表载荷序列化失败", false)
+            .with_detail(e.to_string())
     })
 }
 
