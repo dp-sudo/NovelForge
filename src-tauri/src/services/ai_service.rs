@@ -2,17 +2,14 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use tokio::sync::{mpsc, RwLock};
-use uuid::Uuid;
 
 use crate::adapters::{
     anthropic::AnthropicAdapter, gemini::GeminiAdapter, llm_service::LlmService, llm_types::*,
     openai_compatible::OpenAiCompatibleAdapter,
 };
 use crate::errors::AppErrorDto;
-use crate::infra::database::open_database;
-use crate::infra::time::now_iso;
 use crate::infra::{app_database, credential_manager};
-use crate::services::skill_registry::{SkillRegistry, SkillTaskRouteOverride};
+use crate::services::skill_registry::SkillRegistry;
 use crate::services::task_routing;
 
 const PIPELINE_STREAM_ERROR_PREFIX: &str = "__NF_PIPELINE_ERROR__:";
@@ -301,6 +298,7 @@ impl AiService {
 
     /// Execute text generation with task routing + fallback.
     /// Optionally accepts a SkillRegistry for skill taskRoute override support.
+    #[allow(dead_code)]
     pub async fn generate_text(
         &self,
         req: UnifiedGenerateRequest,
@@ -377,6 +375,7 @@ impl AiService {
     /// Start streaming generation with task routing.
     /// Returns an mpsc receiver that yields StreamChunks.
     /// Optionally accepts a SkillRegistry for skill taskRoute override support.
+    #[allow(dead_code)]
     pub async fn stream_generate(
         &self,
         req: UnifiedGenerateRequest,
@@ -484,74 +483,6 @@ impl AiService {
         })?;
         adapter.test_connection().await.map_err(Into::into)
     }
-
-    /// Record an AI request in the project database for traceability.
-    pub fn log_ai_request(
-        &self,
-        project_root: &str,
-        task_type: &str,
-        provider: Option<&str>,
-        model: Option<&str>,
-        prompt_preview: &str,
-        status: &str,
-    ) -> Result<String, AppErrorDto> {
-        let conn = open_database(std::path::Path::new(project_root)).map_err(|err| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(err.to_string())
-        })?;
-
-        let project_id = crate::services::project_service::get_project_id(&conn)?;
-        let request_id = Uuid::new_v4().to_string();
-        let now = now_iso();
-
-        // Truncate prompt preview for logging
-        let preview: String = prompt_preview.chars().take(240).collect();
-
-        conn.execute(
-            "INSERT INTO ai_requests(id, project_id, task_type, provider, model, prompt_preview, status, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            rusqlite::params![request_id, project_id, task_type, provider, model, preview, status, now],
-        ).map_err(|err| {
-            AppErrorDto::new("AI_LOG_FAILED", "记录 AI 请求失败", false)
-                .with_detail(err.to_string())
-        })?;
-
-        Ok(request_id)
-    }
-
-    /// Update an AI request record with completion info.
-    pub fn complete_ai_request(
-        &self,
-        project_root: &str,
-        request_id: &str,
-        status: &str,
-        error_code: Option<&str>,
-        error_message: Option<&str>,
-    ) {
-        if let Ok(conn) = open_database(std::path::Path::new(project_root)) {
-            let now = now_iso();
-            let _ = conn.execute(
-                "UPDATE ai_requests SET status = ?1, error_code = ?2, error_message = ?3, completed_at = ?4 WHERE id = ?5",
-                rusqlite::params![status, error_code, error_message, now, request_id],
-            );
-        }
-    }
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AiPreviewResult {
-    pub request_id: String,
-    pub preview: String,
-    pub used_context: Vec<String>,
-    pub risks: Vec<String>,
-}
-
-#[derive(Debug, Clone, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GeneratePreviewInput {
-    pub task_type: String,
-    pub user_instruction: String,
-    pub chapter_id: Option<String>,
-    pub selected_text: Option<String>,
 }
 
 #[cfg(test)]

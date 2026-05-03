@@ -1,7 +1,7 @@
 use tauri::State;
 
 use crate::errors::AppErrorDto;
-use crate::services::glossary_service::{CreateGlossaryTermInput, GlossaryService};
+use crate::services::glossary_service::CreateGlossaryTermInput;
 use crate::state::AppState;
 
 #[tauri::command]

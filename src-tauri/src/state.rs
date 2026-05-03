@@ -8,6 +8,7 @@ use crate::services::blueprint_service::BlueprintService;
 use crate::services::chapter_service::{ChapterService, VolumeService};
 use crate::services::character_service::{CharacterService, RelationshipService};
 use crate::services::consistency_service::ConsistencyService;
+use crate::services::constitution_service::ConstitutionService;
 use crate::services::context_service::ContextService;
 use crate::services::dashboard_service::DashboardService;
 use crate::services::export_service::ExportService;
@@ -23,6 +24,7 @@ use crate::services::project_service::ProjectService;
 use crate::services::search_service::SearchService;
 use crate::services::settings_service::SettingsService;
 use crate::services::skill_registry::SkillRegistry;
+use crate::services::state_tracker_service::StateTrackerService;
 use crate::services::vector_service::VectorService;
 use crate::services::world_service::WorldService;
 
@@ -37,6 +39,7 @@ pub struct AppState {
     pub import_service: ImportService,
     pub relationship_service: RelationshipService,
     pub consistency_service: ConsistencyService,
+    pub constitution_service: ConstitutionService,
     pub context_service: ContextService,
     pub dashboard_service: DashboardService,
     pub export_service: ExportService,
@@ -51,6 +54,7 @@ pub struct AppState {
     pub search_service: SearchService,
     pub settings_service: SettingsService,
     pub skill_registry: Arc<RwLock<SkillRegistry>>,
+    pub state_tracker_service: StateTrackerService,
     pub vector_service: VectorService,
     pub world_service: WorldService,
 }
@@ -69,6 +73,7 @@ impl AppState {
             import_service: ImportService::default(),
             relationship_service: RelationshipService::default(),
             consistency_service: ConsistencyService::default(),
+            constitution_service: ConstitutionService::default(),
             context_service: ContextService::default(),
             dashboard_service: DashboardService::default(),
             export_service: ExportService::default(),
@@ -83,6 +88,7 @@ impl AppState {
             search_service: SearchService::default(),
             settings_service: SettingsService::default(),
             vector_service: VectorService::default(),
+            state_tracker_service: StateTrackerService::default(),
             world_service: WorldService::default(),
         }
     }

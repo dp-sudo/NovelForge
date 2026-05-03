@@ -40,16 +40,6 @@ pub struct ChapterRecord {
     pub updated_at: String,
 }
 
-impl ChapterRecord {
-    pub fn display_title(&self) -> String {
-        if self.title.is_empty() {
-            format!("#{}", self.chapter_index)
-        } else {
-            format!("#{} {}", self.chapter_index, self.title)
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TimelineEntryRecord {

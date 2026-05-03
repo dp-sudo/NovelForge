@@ -29,7 +29,6 @@ struct Migration {
 /// Result of running pending migrations.
 pub struct MigrationResult {
     pub applied: Vec<String>,
-    pub skipped: Vec<String>,
 }
 
 /// Return the ordered list of project-db migrations embedded at compile time.
@@ -163,7 +162,6 @@ fn run_pending(
         );
         return Ok(MigrationResult {
             applied: vec![],
-            skipped: applied_versions,
         });
     }
 
@@ -194,7 +192,6 @@ fn run_pending(
 
     Ok(MigrationResult {
         applied,
-        skipped: applied_versions,
     })
 }
 

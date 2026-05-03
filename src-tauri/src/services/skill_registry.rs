@@ -51,6 +51,7 @@ fn default_strategy() -> String {
 }
 
 /// Parsed skill file: metadata + body text.
+#[allow(dead_code)]
 pub struct SkillFile {
     pub manifest: SkillManifest,
     pub body: String,
@@ -382,12 +383,6 @@ impl SkillRegistry {
             manifest,
             body: body.to_string(),
         })
-    }
-
-    /// Render manifest + body back into .md file content.
-    fn render_to_string(manifest: &SkillManifest, body: &str) -> String {
-        let yaml = serde_yaml::to_string(manifest).unwrap_or_default();
-        format!("---\n{}---\n{}", yaml, body)
     }
 }
 

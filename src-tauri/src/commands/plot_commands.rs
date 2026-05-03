@@ -1,7 +1,7 @@
 use tauri::State;
 
 use crate::errors::AppErrorDto;
-use crate::services::plot_service::{CreatePlotNodeInput, PlotService};
+use crate::services::plot_service::CreatePlotNodeInput;
 use crate::state::AppState;
 
 #[tauri::command]

@@ -1,7 +1,7 @@
 use tauri::State;
 
 use crate::errors::AppErrorDto;
-use crate::services::blueprint_service::{BlueprintService, SaveBlueprintStepInput};
+use crate::services::blueprint_service::SaveBlueprintStepInput;
 use crate::state::AppState;
 
 #[tauri::command]

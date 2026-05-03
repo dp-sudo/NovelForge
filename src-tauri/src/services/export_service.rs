@@ -16,12 +16,10 @@ use crate::infra::time::now_iso;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[allow(dead_code)]
 pub struct ExportOptions {
     pub include_chapter_title: Option<bool>,
     pub include_chapter_summary: Option<bool>,
     pub separate_by_volume: Option<bool>,
-    pub include_world_settings: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -91,8 +89,7 @@ impl ExportService {
             include_chapter_title: None,
             include_chapter_summary: None,
             separate_by_volume: None,
-            include_world_settings: None,
-        });
+            });
 
         let project_root_path = Path::new(project_root);
         let conn = open_database(project_root_path).map_err(|err| {
@@ -169,8 +166,7 @@ impl ExportService {
             include_chapter_title: None,
             include_chapter_summary: None,
             separate_by_volume: None,
-            include_world_settings: None,
-        });
+            });
 
         let project_root_path = Path::new(project_root);
         let conn = open_database(project_root_path).map_err(|err| {
@@ -963,7 +959,6 @@ mod tests {
                     include_chapter_title: Some(true),
                     include_chapter_summary: Some(true),
                     separate_by_volume: None,
-                    include_world_settings: None,
                 }),
             )
             .expect("export chapter");
@@ -979,7 +974,6 @@ mod tests {
                     include_chapter_title: Some(true),
                     include_chapter_summary: Some(false),
                     separate_by_volume: None,
-                    include_world_settings: None,
                 }),
             )
             .expect("export book");
@@ -1029,7 +1023,6 @@ mod tests {
                     include_chapter_title: Some(true),
                     include_chapter_summary: Some(true),
                     separate_by_volume: None,
-                    include_world_settings: None,
                 }),
             )
             .expect("export docx");
@@ -1046,7 +1039,6 @@ mod tests {
                     include_chapter_title: Some(true),
                     include_chapter_summary: Some(false),
                     separate_by_volume: None,
-                    include_world_settings: None,
                 }),
             )
             .expect("export pdf");
@@ -1063,7 +1055,6 @@ mod tests {
                     include_chapter_title: Some(true),
                     include_chapter_summary: Some(true),
                     separate_by_volume: None,
-                    include_world_settings: None,
                 }),
             )
             .expect("export epub");
@@ -1073,3 +1064,4 @@ mod tests {
         remove_temp_workspace(&workspace);
     }
 }
+

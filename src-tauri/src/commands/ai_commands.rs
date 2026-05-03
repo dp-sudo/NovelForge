@@ -52,6 +52,8 @@ fn spawn_pipeline_run(
     let app = app_handle.clone();
     let pipeline_service = state.ai_pipeline_service.clone();
     let ai_service = state.ai_service.clone();
+    let constitution_service = state.constitution_service.clone();
+    let state_tracker_service = state.state_tracker_service.clone();
     let skill_registry = state.skill_registry.clone();
     tokio::spawn(async move {
         let context_service = ContextService;
@@ -60,6 +62,8 @@ fn spawn_pipeline_run(
                 &app,
                 &ai_service,
                 &context_service,
+                &constitution_service,
+                &state_tracker_service,
                 &skill_registry,
                 request_id.clone(),
                 input,
@@ -370,6 +374,8 @@ async fn run_pipeline_text_result(
             app_handle,
             &state.ai_service,
             &context_service,
+            &state.constitution_service,
+            &state.state_tracker_service,
             &state.skill_registry,
             input,
         )

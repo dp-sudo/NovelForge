@@ -1,6 +1,5 @@
 mod adapters;
 mod commands;
-mod domain;
 mod errors;
 mod infra;
 mod services;
@@ -226,6 +225,14 @@ pub fn run() {
             commands::context_commands::apply_structured_draft,
             commands::context_commands::update_review_queue_item_status,
             commands::context_commands::list_review_work_items,
+            commands::constitution_commands::list_constitution_rules,
+            commands::constitution_commands::create_constitution_rule,
+            commands::constitution_commands::update_constitution_rule,
+            commands::constitution_commands::delete_constitution_rule,
+            commands::constitution_commands::validate_constitution,
+            commands::constitution_commands::list_constitution_violations,
+            commands::constitution_commands::update_violation_status,
+            commands::constitution_commands::get_constitution_prompt_text,
             commands::dashboard_commands::get_dashboard_stats,
             commands::search_commands::search_project,
             commands::search_commands::search_project_semantic,
@@ -247,6 +254,11 @@ pub fn run() {
             commands::import_commands::create_backup,
             commands::import_commands::list_backups,
             commands::import_commands::restore_backup,
+            commands::state_tracker_commands::create_state_snapshot,
+            commands::state_tracker_commands::get_latest_state_snapshot,
+            commands::state_tracker_commands::list_state_snapshots,
+            commands::state_tracker_commands::delete_state_snapshot,
+            commands::state_tracker_commands::get_state_prompt_text,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

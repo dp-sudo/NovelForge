@@ -14,7 +14,10 @@ use crate::errors::AppErrorDto;
 use crate::infra::database::open_database;
 use crate::infra::time::now_iso;
 use crate::services::ai_service::{AiService, TaskRouteResolution};
+use crate::services::capability_pack_service::CapabilityPackService;
+use crate::services::constitution_service::ConstitutionService;
 use crate::services::context_service::{CollectedContext, ContextService};
+use crate::services::state_tracker_service::StateTrackerService;
 use crate::services::glossary_service::CreateGlossaryTermInput;
 use crate::services::narrative_service::CreateObligationInput;
 use crate::services::project_service::get_project_id;
@@ -160,6 +163,8 @@ impl AiPipelineService {
         app_handle: &tauri::AppHandle,
         ai_service: &AiService,
         context_service: &ContextService,
+        constitution_service: &ConstitutionService,
+        state_tracker_service: &StateTrackerService,
         skill_registry: &Arc<RwLock<SkillRegistry>>,
         input: RunAiTaskPipelineInput,
     ) -> Result<RunAiTaskPipelineResult, AppErrorDto> {
@@ -168,6 +173,8 @@ impl AiPipelineService {
             app_handle,
             ai_service,
             context_service,
+            constitution_service,
+            state_tracker_service,
             skill_registry,
             request_id,
             input,
@@ -180,6 +187,8 @@ impl AiPipelineService {
         app_handle: &tauri::AppHandle,
         ai_service: &AiService,
         context_service: &ContextService,
+        constitution_service: &ConstitutionService,
+        state_tracker_service: &StateTrackerService,
         skill_registry: &Arc<RwLock<SkillRegistry>>,
         request_id: String,
         input: RunAiTaskPipelineInput,
@@ -201,6 +210,8 @@ impl AiPipelineService {
                     app_handle,
                     ai_service,
                     context_service,
+                    constitution_service,
+                    state_tracker_service,
                     skill_registry,
                     &request_id,
                     &canonical_task,
@@ -314,6 +325,8 @@ impl AiPipelineService {
         app_handle: &tauri::AppHandle,
         ai_service: &AiService,
         context_service: &ContextService,
+        constitution_service: &ConstitutionService,
+        state_tracker_service: &StateTrackerService,
         skill_registry: &Arc<RwLock<SkillRegistry>>,
         request_id: &str,
         canonical_task: &str,
@@ -476,11 +489,29 @@ impl AiPipelineService {
                 phase: PHASE_COMPOSE_PROMPT,
                 error: err,
             })?;
+        let constitution_rules_text = constitution_service
+            .collect_rules_for_prompt(&input.project_root)
+            .unwrap_or_default();
+        let state_snapshot_text = input
+            .chapter_id
+            .as_deref()
+            .map(|ch_id| {
+                state_tracker_service
+                    .collect_state_for_prompt(&input.project_root, ch_id)
+                    .unwrap_or_default()
+            })
+            .unwrap_or_default();
+        let capability_pack_service = CapabilityPackService;
+        let resolved_pack = capability_pack_service.resolve_pack(&task_contract, &context);
+        let capability_pack_text = capability_pack_service.format_for_prompt(&resolved_pack);
         let compiled_prompt = Self::compose_compiled_prompt(
             canonical_task,
             &task_contract,
             &context_compilation_snapshot,
             &prompt,
+            &constitution_rules_text,
+            &state_snapshot_text,
+            &capability_pack_text,
         );
         self.check_cancelled(request_id).map_err(|err| StageError {
             phase: PHASE_COMPOSE_PROMPT,
@@ -953,6 +984,9 @@ impl AiPipelineService {
         contract: &task_routing::TaskExecutionContract,
         context_manifest: &Value,
         raw_prompt: &str,
+        constitution_rules_text: &str,
+        state_snapshot_text: &str,
+        capability_pack_text: &str,
     ) -> String {
         let mut lines = Vec::new();
         lines.push("# NovelForge 生产系统协议".to_string());
@@ -973,6 +1007,18 @@ impl AiPipelineService {
         ));
         lines.push("- 规则：优先遵守故事宪法、再遵守正式资产、最后才扩展动态状态。".to_string());
         lines.push(String::new());
+        if !constitution_rules_text.is_empty() {
+            lines.push(constitution_rules_text.to_string());
+            lines.push(String::new());
+        }
+        if !state_snapshot_text.is_empty() {
+            lines.push(state_snapshot_text.to_string());
+            lines.push(String::new());
+        }
+        if !capability_pack_text.is_empty() {
+            lines.push(capability_pack_text.to_string());
+            lines.push(String::new());
+        }
         lines.push("# 上下文编译清单(JSON)".to_string());
         lines.push(context_manifest.to_string());
         lines.push(String::new());
