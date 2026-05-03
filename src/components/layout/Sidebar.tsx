@@ -18,6 +18,9 @@ const navItems: NavItem[] = [
   { route: "timeline", label: "时间线", icon: "🕒" },
   { route: "relationships", label: "关系图", icon: "🕸️" },
   { route: "chapters", label: "章节", icon: "📑" },
+  { route: "constitution", label: "宪法", icon: "📜" },
+  { route: "state-tracker", label: "状态", icon: "📸" },
+  { route: "review-board", label: "审查", icon: "✅" },
   { route: "consistency", label: "检查", icon: "🔍" },
   { route: "export", label: "导出", icon: "📤" },
   { route: "settings", label: "设置", icon: "⚙️" }

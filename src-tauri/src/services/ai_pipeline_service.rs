@@ -17,12 +17,12 @@ use crate::services::ai_service::{AiService, TaskRouteResolution};
 use crate::services::capability_pack_service::CapabilityPackService;
 use crate::services::constitution_service::ConstitutionService;
 use crate::services::context_service::{CollectedContext, ContextService};
-use crate::services::state_tracker_service::StateTrackerService;
 use crate::services::glossary_service::CreateGlossaryTermInput;
 use crate::services::narrative_service::CreateObligationInput;
 use crate::services::project_service::get_project_id;
 use crate::services::prompt_builder::PromptBuilder;
 use crate::services::skill_registry::SkillRegistry;
+use crate::services::state_tracker_service::StateTrackerService;
 use crate::services::task_routing;
 use crate::services::{
     blueprint_service::{BlueprintService, SaveBlueprintStepInput},
@@ -633,7 +633,7 @@ impl AiPipelineService {
             },
         );
         let review_checklist =
-            Self::build_review_checklist(&context, canonical_task, &task_contract, &normalized);
+            Self::build_review_checklist(&input.project_root, constitution_service, &context, canonical_task, &task_contract, &normalized);
         self.emit_event(
             app_handle,
             AiPipelineEvent {
@@ -990,7 +990,9 @@ impl AiPipelineService {
     ) -> String {
         let mut lines = Vec::new();
         lines.push("# NovelForge 生产系统协议".to_string());
-        lines.push("你在长篇小说生产操作系统内执行任务，不追求字数最大化，追求正确层级推进。".to_string());
+        lines.push(
+            "你在长篇小说生产操作系统内执行任务，不追求字数最大化，追求正确层级推进。".to_string(),
+        );
         lines.push(format!("- taskType: {}", task_type));
         lines.push(format!(
             "- authorityLayer: {}",
@@ -1028,6 +1030,8 @@ impl AiPipelineService {
     }
 
     fn build_review_checklist(
+        project_root: &str,
+        constitution_service: &ConstitutionService,
         context: &CollectedContext,
         task_type: &str,
         contract: &task_routing::TaskExecutionContract,
@@ -1047,19 +1051,41 @@ impl AiPipelineService {
         if banned_hits.is_empty() {
             items.push(ReviewChecklistItem {
                 key: "banned_terms".to_string(),
-                title: "禁用词检查".to_string(),
+                title: "全局禁用词检查".to_string(),
                 severity: "high".to_string(),
                 status: "pass".to_string(),
-                message: "未检测到禁用词".to_string(),
+                message: "未检测到全局禁用词".to_string(),
             });
         } else {
             items.push(ReviewChecklistItem {
                 key: "banned_terms".to_string(),
-                title: "禁用词检查".to_string(),
+                title: "全局禁用词检查".to_string(),
                 severity: "high".to_string(),
                 status: "attention".to_string(),
-                message: format!("检测到禁用词：{}", banned_hits.join("、")),
+                message: format!("检测到全局禁用词：{}", banned_hits.join("、")),
             });
+        }
+
+        if let Ok(validation) = constitution_service.validate_text(project_root, normalized, None, None) {
+            if validation.violations_found > 0 {
+                for (idx, violation) in validation.violations.into_iter().enumerate() {
+                    items.push(ReviewChecklistItem {
+                        key: format!("constitution_violation_{}", idx),
+                        title: "故事宪法违规".to_string(),
+                        severity: if violation.severity == "blocker" { "critical".to_string() } else { "high".to_string() },
+                        status: "attention".to_string(),
+                        message: violation.violation_text,
+                    });
+                }
+            } else {
+                items.push(ReviewChecklistItem {
+                    key: "constitution_check".to_string(),
+                    title: "故事宪法检查".to_string(),
+                    severity: "high".to_string(),
+                    status: "pass".to_string(),
+                    message: format!("已通过 {} 项活动宪法规则检查", validation.total_rules_checked),
+                });
+            }
         }
 
         let min_len = if matches!(
@@ -1088,7 +1114,10 @@ impl AiPipelineService {
             });
         }
 
-        if matches!(task_type, "chapter.draft" | "chapter.continue" | "chapter.rewrite") {
+        if matches!(
+            task_type,
+            "chapter.draft" | "chapter.continue" | "chapter.rewrite"
+        ) {
             let has_dialogue = normalized.contains('“') || normalized.contains('"');
             let has_action = normalized.contains('。') || normalized.contains('！');
             let status = if has_dialogue && has_action {
@@ -1138,7 +1167,8 @@ impl AiPipelineService {
         let project_id = get_project_id(&conn)?;
         let now = now_iso();
         let checkpoint_id = Uuid::new_v4().to_string();
-        let checklist_json = serde_json::to_string(&review_checklist.items).unwrap_or("[]".to_string());
+        let checklist_json =
+            serde_json::to_string(&review_checklist.items).unwrap_or("[]".to_string());
         let persisted_records_json =
             serde_json::to_string(persisted_records).unwrap_or("[]".to_string());
         let context_manifest_json = context_manifest.to_string();
@@ -1286,11 +1316,11 @@ impl AiPipelineService {
 
     fn state_layer_key(layer: task_routing::StoryStateLayer) -> &'static str {
         match layer {
-            task_routing::StoryStateLayer::ConstitutionState => "constitution_state",
-            task_routing::StoryStateLayer::AssetState => "asset_state",
-            task_routing::StoryStateLayer::DynamicSceneState => "dynamic_scene_state",
-            task_routing::StoryStateLayer::ReviewState => "review_state",
-            task_routing::StoryStateLayer::CustomState => "custom_state",
+            task_routing::StoryStateLayer::Constitution => "constitution_state",
+            task_routing::StoryStateLayer::Asset => "asset_state",
+            task_routing::StoryStateLayer::DynamicScene => "dynamic_scene_state",
+            task_routing::StoryStateLayer::Review => "review_state",
+            task_routing::StoryStateLayer::Custom => "custom_state",
         }
     }
 
@@ -1317,7 +1347,7 @@ impl AiPipelineService {
                     normalized_output,
                     input.user_instruction.as_str(),
                 )?;
-                let id = CharacterService::default().create(project_root, create_input)?;
+                let id = CharacterService.create(project_root, create_input)?;
                 records.push(PersistedRecord {
                     entity_type: "character".to_string(),
                     entity_id: id,
@@ -1329,7 +1359,7 @@ impl AiPipelineService {
                     normalized_output,
                     input.user_instruction.as_str(),
                 )?;
-                let id = WorldService::default().create(project_root, create_input)?;
+                let id = WorldService.create(project_root, create_input)?;
                 records.push(PersistedRecord {
                     entity_type: "world_rule".to_string(),
                     entity_id: id,
@@ -1342,7 +1372,7 @@ impl AiPipelineService {
                     normalized_output,
                     input.user_instruction.as_str(),
                 )?;
-                let id = PlotService::default().create(project_root, create_input)?;
+                let id = PlotService.create(project_root, create_input)?;
                 records.push(PersistedRecord {
                     entity_type: "plot_node".to_string(),
                     entity_id: id,
@@ -1362,7 +1392,7 @@ impl AiPipelineService {
                             true,
                         )
                     })?;
-                let saved = BlueprintService::default().save_step(
+                let saved = BlueprintService.save_step(
                     project_root,
                     SaveBlueprintStepInput {
                         step_key: step_key.to_string(),
@@ -1389,8 +1419,11 @@ impl AiPipelineService {
                             true,
                         )
                     })?;
-                let batch_size =
-                    self.persist_ai_consistency_issues(project_root, chapter_id, normalized_output)?;
+                let batch_size = self.persist_ai_consistency_issues(
+                    project_root,
+                    chapter_id,
+                    normalized_output,
+                )?;
                 records.push(PersistedRecord {
                     entity_type: "consistency_issue_batch".to_string(),
                     entity_id: format!("{}:{}", chapter_id, request_id),
@@ -1402,7 +1435,7 @@ impl AiPipelineService {
                     normalized_output,
                     input.user_instruction.as_str(),
                 )?;
-                let id = GlossaryService::default().create(project_root, create_input)?;
+                let id = GlossaryService.create(project_root, create_input)?;
                 records.push(PersistedRecord {
                     entity_type: "glossary_term".to_string(),
                     entity_id: id,
@@ -1414,7 +1447,7 @@ impl AiPipelineService {
                     normalized_output,
                     input.user_instruction.as_str(),
                 )?;
-                let id = NarrativeService::default().create(project_root, create_input)?;
+                let id = NarrativeService.create(project_root, create_input)?;
                 records.push(PersistedRecord {
                     entity_type: "narrative_obligation".to_string(),
                     entity_id: id,
@@ -1444,7 +1477,11 @@ impl AiPipelineService {
         let aliases = Self::pick_string_array(&root, &["aliases", "alias", "别名"]);
         Ok(CreateCharacterInput {
             name,
-            aliases: if aliases.is_empty() { None } else { Some(aliases) },
+            aliases: if aliases.is_empty() {
+                None
+            } else {
+                Some(aliases)
+            },
             role_type,
             age: None,
             gender: None,
@@ -1452,21 +1489,16 @@ impl AiPipelineService {
                 &root,
                 &["identityText", "identity_text", "identity", "身份"],
             ),
-            appearance: Self::pick_optional_string(
-                &root,
-                &["appearance", "looks", "外貌"],
-            ),
-            motivation: Self::pick_optional_string(
-                &root,
-                &["motivation", "核心动机", "drive"],
-            ),
+            appearance: Self::pick_optional_string(&root, &["appearance", "looks", "外貌"]),
+            motivation: Self::pick_optional_string(&root, &["motivation", "核心动机", "drive"]),
             desire: Self::pick_optional_string(&root, &["desire", "欲望"]),
             fear: Self::pick_optional_string(&root, &["fear", "恐惧"]),
             flaw: Self::pick_optional_string(&root, &["flaw", "缺陷"]),
             arc_stage: Self::pick_optional_string(&root, &["arcStage", "arc_stage", "成长弧线"]),
             locked_fields: None,
-            notes: Self::pick_optional_string(&root, &["notes", "remark", "备注"])
-                .or_else(|| (!fallback_instruction.trim().is_empty()).then(|| fallback_instruction.to_string())),
+            notes: Self::pick_optional_string(&root, &["notes", "remark", "备注"]).or_else(|| {
+                (!fallback_instruction.trim().is_empty()).then(|| fallback_instruction.to_string())
+            }),
         })
     }
 
@@ -1475,16 +1507,8 @@ impl AiPipelineService {
         fallback_instruction: &str,
     ) -> Result<CreateWorldRuleInput, AppErrorDto> {
         let root = Self::extract_output_object(normalized_output, Some("worldRule"))?;
-        let title = Self::pick_string(
-            &root,
-            &["title", "name", "设定名"],
-            Some("未命名设定"),
-        );
-        let category = Self::pick_string(
-            &root,
-            &["category", "type", "类别"],
-            Some("世界规则"),
-        );
+        let title = Self::pick_string(&root, &["title", "name", "设定名"], Some("未命名设定"));
+        let category = Self::pick_string(&root, &["category", "type", "类别"], Some("世界规则"));
         let description = Self::pick_string(
             &root,
             &["description", "summary", "desc", "描述"],
@@ -1493,14 +1517,17 @@ impl AiPipelineService {
         let constraint_level = Self::normalize_constraint_level(
             Self::pick_optional_string(
                 &root,
-                &["constraintLevel", "constraint_level", "strictness", "约束等级"],
+                &[
+                    "constraintLevel",
+                    "constraint_level",
+                    "strictness",
+                    "约束等级",
+                ],
             )
             .as_deref(),
         );
-        let related_entities = Self::pick_string_array(
-            &root,
-            &["relatedEntities", "related_entities", "entities"],
-        );
+        let related_entities =
+            Self::pick_string_array(&root, &["relatedEntities", "related_entities", "entities"]);
         Ok(CreateWorldRuleInput {
             title,
             category,
@@ -1534,8 +1561,9 @@ impl AiPipelineService {
                 Some("开端"),
             ),
             sort_order,
-            goal: Self::pick_optional_string(&root, &["goal", "objective", "目标"])
-                .or_else(|| (!fallback_instruction.trim().is_empty()).then(|| fallback_instruction.to_string())),
+            goal: Self::pick_optional_string(&root, &["goal", "objective", "目标"]).or_else(|| {
+                (!fallback_instruction.trim().is_empty()).then(|| fallback_instruction.to_string())
+            }),
             conflict: Self::pick_optional_string(&root, &["conflict", "冲突"]),
             emotional_curve: Self::pick_optional_string(
                 &root,
@@ -1559,11 +1587,7 @@ impl AiPipelineService {
         fallback_instruction: &str,
     ) -> Result<CreateGlossaryTermInput, AppErrorDto> {
         let root = Self::extract_output_object(normalized_output, Some("glossaryTerm"))?;
-        let term = Self::pick_string(
-            &root,
-            &["term", "name", "词条"],
-            Some("未命名名词"),
-        );
+        let term = Self::pick_string(&root, &["term", "name", "词条"], Some("未命名名词"));
         let term_type = Self::pick_string(
             &root,
             &["termType", "term_type", "type", "类型"],
@@ -1573,12 +1597,18 @@ impl AiPipelineService {
         Ok(CreateGlossaryTermInput {
             term,
             term_type,
-            aliases: if aliases.is_empty() { None } else { Some(aliases) },
+            aliases: if aliases.is_empty() {
+                None
+            } else {
+                Some(aliases)
+            },
             description: Self::pick_optional_string(
                 &root,
                 &["description", "summary", "desc", "描述"],
             )
-            .or_else(|| (!fallback_instruction.trim().is_empty()).then(|| fallback_instruction.to_string())),
+            .or_else(|| {
+                (!fallback_instruction.trim().is_empty()).then(|| fallback_instruction.to_string())
+            }),
             locked: Some(Self::pick_bool(&root, &["locked"], false)),
             banned: Some(Self::pick_bool(&root, &["banned"], false)),
         })
@@ -1589,10 +1619,8 @@ impl AiPipelineService {
         fallback_instruction: &str,
     ) -> Result<CreateObligationInput, AppErrorDto> {
         let root = Self::extract_output_object(normalized_output, Some("obligation"))?;
-        let related_entities = Self::pick_string_array(
-            &root,
-            &["relatedEntities", "related_entities", "entities"],
-        );
+        let related_entities =
+            Self::pick_string_array(&root, &["relatedEntities", "related_entities", "entities"]);
         Ok(CreateObligationInput {
             obligation_type: Self::pick_string(
                 &root,
@@ -1669,11 +1697,10 @@ impl AiPipelineService {
                 &["issueType", "issue_type", "type"],
                 Some("prose_style"),
             );
-            let severity =
-                Self::normalize_consistency_severity(Self::pick_optional_string(
-                    issue_obj,
-                    &["severity", "level"],
-                ));
+            let severity = Self::normalize_consistency_severity(Self::pick_optional_string(
+                issue_obj,
+                &["severity", "level"],
+            ));
             let source_text = Self::pick_string(
                 issue_obj,
                 &["sourceText", "source_text", "snippet"],
@@ -1761,10 +1788,7 @@ impl AiPipelineService {
         })
     }
 
-    fn pick_optional_string(
-        obj: &serde_json::Map<String, Value>,
-        keys: &[&str],
-    ) -> Option<String> {
+    fn pick_optional_string(obj: &serde_json::Map<String, Value>, keys: &[&str]) -> Option<String> {
         for key in keys {
             if let Some(value) = obj.get(*key) {
                 match value {
@@ -1872,7 +1896,10 @@ impl AiPipelineService {
             .unwrap_or_else(|| "medium".to_string())
             .trim()
             .to_ascii_lowercase();
-        if matches!(value.as_str(), "blocker" | "high" | "medium" | "low" | "info") {
+        if matches!(
+            value.as_str(),
+            "blocker" | "high" | "medium" | "low" | "info"
+        ) {
             value
         } else {
             "medium".to_string()
@@ -1930,14 +1957,12 @@ impl AiPipelineService {
         let user_instruction = input.user_instruction.trim();
 
         match canonical_task {
-            "chapter.draft" | "chapter.continue" => {
-                if chapter_id.is_empty() {
-                    return Err(AppErrorDto::new(
-                        "PIPELINE_CHAPTER_ID_REQUIRED",
-                        "该任务需要 chapterId",
-                        true,
-                    ));
-                }
+            "chapter.draft" | "chapter.continue" if chapter_id.is_empty() => {
+                return Err(AppErrorDto::new(
+                    "PIPELINE_CHAPTER_ID_REQUIRED",
+                    "该任务需要 chapterId",
+                    true,
+                ));
             }
             "chapter.plan" => {}
             "chapter.rewrite" | "prose.naturalize" => {
@@ -1960,14 +1985,12 @@ impl AiPipelineService {
             | "world.create_rule"
             | "plot.create_node"
             | "glossary.create_term"
-            | "narrative.create_obligation" => {
-                if user_instruction.is_empty() {
-                    return Err(AppErrorDto::new(
-                        "PIPELINE_USER_INSTRUCTION_REQUIRED",
-                        "该任务需要 userInstruction",
-                        true,
-                    ));
-                }
+            | "narrative.create_obligation" if user_instruction.is_empty() => {
+                return Err(AppErrorDto::new(
+                    "PIPELINE_USER_INSTRUCTION_REQUIRED",
+                    "该任务需要 userInstruction",
+                    true,
+                ));
             }
             "consistency.scan" => {
                 if chapter_id.is_empty() {
@@ -2203,8 +2226,12 @@ impl AiPipelineService {
             ],
         )
         .map_err(|err| {
-            AppErrorDto::new("PIPELINE_AUDIT_INSERT_FAILED", "记录 v2 run ledger 失败", false)
-                .with_detail(err.to_string())
+            AppErrorDto::new(
+                "PIPELINE_AUDIT_INSERT_FAILED",
+                "记录 v2 run ledger 失败",
+                false,
+            )
+            .with_detail(err.to_string())
         })?;
         Ok(())
     }
@@ -2252,7 +2279,15 @@ impl AiPipelineService {
                  updated_at = ?5,
                  completed_at = ?6
              WHERE id = ?7",
-            params![status, phase, error_code, error_message, &now, &now, request_id],
+            params![
+                status,
+                phase,
+                error_code,
+                error_message,
+                &now,
+                &now,
+                request_id
+            ],
         );
     }
 

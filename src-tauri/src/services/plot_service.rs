@@ -25,7 +25,7 @@ pub struct PlotNodeRecord {
     pub updated_at: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct CreatePlotNodeInput {
     pub title: String,
@@ -187,20 +187,5 @@ mod tests {
         assert_eq!(nodes[0].title, "高潮");
 
         remove_temp_workspace(&ws);
-    }
-}
-
-impl Default for CreatePlotNodeInput {
-    fn default() -> Self {
-        Self {
-            title: String::new(),
-            node_type: String::new(),
-            sort_order: 0,
-            goal: None,
-            conflict: None,
-            emotional_curve: None,
-            status: None,
-            related_characters: None,
-        }
     }
 }

@@ -181,10 +181,7 @@ impl CapabilityPackService {
 
         let pacing = if has_conflict { "fast" } else { "moderate" };
 
-        let mut constraints = vec![
-            "服务于冲突推进".to_string(),
-            "保持叙事视角一致".to_string(),
-        ];
+        let mut constraints = vec!["服务于冲突推进".to_string(), "保持叙事视角一致".to_string()];
         if context.related_context.characters.len() > 3 {
             constraints.push("多角色场景注意视角焦点".to_string());
         }
@@ -217,7 +214,10 @@ impl CapabilityPackService {
             pack_label: "资产构建包".to_string(),
             description_logic: DescriptionLogic {
                 density: 5,
-                focus_elements: vec!["结构化字段完整性".to_string(), "与现有资产一致性".to_string()],
+                focus_elements: vec![
+                    "结构化字段完整性".to_string(),
+                    "与现有资产一致性".to_string(),
+                ],
                 avoid_elements: vec!["过度文学化描述".to_string()],
             },
             emotional_tone: EmotionalTone {
@@ -316,9 +316,8 @@ impl CapabilityPackService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::services::context_service::{
-        CollectedContext, GlobalContext, RelatedContext,
-    };
+    use crate::services::context_service::{CollectedContext, GlobalContext, RelatedContext};
+    use crate::services::task_routing;
 
     fn minimal_context() -> CollectedContext {
         CollectedContext {

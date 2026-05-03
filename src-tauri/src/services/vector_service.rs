@@ -328,8 +328,8 @@ fn split_long_piece(text: &str) -> Vec<String> {
 
 fn strip_chapter_markdown(raw: &str) -> String {
     let mut body = raw;
-    if raw.starts_with("---") {
-        if let Some(end) = raw[3..].find("\n---") {
+    if let Some(stripped) = raw.strip_prefix("---") {
+        if let Some(end) = stripped.find("\n---") {
             let offset = 3 + end + "\n---".len();
             body = raw.get(offset..).unwrap_or(raw);
         }

@@ -2,8 +2,7 @@ use tauri::State;
 
 use crate::errors::AppErrorDto;
 use crate::services::character_service::{
-    CreateCharacterInput, CreateRelationshipInput,
-    UpdateCharacterInput,
+    CreateCharacterInput, CreateRelationshipInput, UpdateCharacterInput,
 };
 use crate::state::AppState;
 

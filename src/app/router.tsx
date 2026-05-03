@@ -16,6 +16,9 @@ import { RelationshipsPage } from "../pages/Relationships/RelationshipsPage";
 import { ChaptersPage } from "../pages/Chapters/ChaptersPage";
 import { EditorPage } from "../pages/Editor/EditorPage";
 import { ConsistencyPage } from "../pages/Consistency/ConsistencyPage";
+import { ConstitutionPage } from "../pages/Constitution/ConstitutionPage";
+import { StateTrackerPage } from "../pages/StateTracker/StateTrackerPage";
+import { ReviewBoardPage } from "../pages/ReviewBoard/ReviewBoardPage";
 import { ExportPage } from "../pages/Export/ExportPage";
 import { SettingsPage } from "../pages/Settings/SettingsPage";
 
@@ -33,6 +36,9 @@ const routeMap: Record<AppRoute, ComponentType> = {
   chapters: ChaptersPage,
   editor: EditorPage,
   consistency: ConsistencyPage,
+  constitution: ConstitutionPage,
+  "state-tracker": StateTrackerPage,
+  "review-board": ReviewBoardPage,
   export: ExportPage,
   settings: SettingsPage
 };

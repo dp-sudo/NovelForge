@@ -32,7 +32,7 @@ pub struct CharacterRecord {
     pub updated_at: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateCharacterInput {
     pub name: String,
@@ -352,27 +352,6 @@ mod tests {
         assert_eq!(chars[0].name, "沈烬");
 
         remove_temp_workspace(&ws);
-    }
-}
-
-impl Default for CreateCharacterInput {
-    fn default() -> Self {
-        Self {
-            name: String::new(),
-            role_type: String::new(),
-            aliases: None,
-            age: None,
-            gender: None,
-            identity_text: None,
-            appearance: None,
-            motivation: None,
-            desire: None,
-            fear: None,
-            flaw: None,
-            arc_stage: None,
-            locked_fields: None,
-            notes: None,
-        }
     }
 }
 

@@ -89,7 +89,7 @@ impl ExportService {
             include_chapter_title: None,
             include_chapter_summary: None,
             separate_by_volume: None,
-            });
+        });
 
         let project_root_path = Path::new(project_root);
         let conn = open_database(project_root_path).map_err(|err| {
@@ -166,7 +166,7 @@ impl ExportService {
             include_chapter_title: None,
             include_chapter_summary: None,
             separate_by_volume: None,
-            });
+        });
 
         let project_root_path = Path::new(project_root);
         let conn = open_database(project_root_path).map_err(|err| {
@@ -1064,4 +1064,3 @@ mod tests {
         remove_temp_workspace(&workspace);
     }
 }
-

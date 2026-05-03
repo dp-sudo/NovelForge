@@ -14,6 +14,9 @@ export type AppRoute =
   | "chapters"
   | "editor"
   | "consistency"
+  | "constitution"
+  | "state-tracker"
+  | "review-board"
   | "export"
   | "settings";
 

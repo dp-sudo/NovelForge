@@ -70,10 +70,7 @@ pub struct ConstitutionValidationResult {
 pub struct ConstitutionService;
 
 impl ConstitutionService {
-    pub fn list(
-        &self,
-        project_root: &str,
-    ) -> Result<Vec<ConstitutionRule>, AppErrorDto> {
+    pub fn list(&self, project_root: &str) -> Result<Vec<ConstitutionRule>, AppErrorDto> {
         let conn = open_database(Path::new(project_root)).map_err(|e| {
             AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
         })?;
@@ -152,8 +149,7 @@ impl ConstitutionService {
             ],
         )
         .map_err(|e| {
-            AppErrorDto::new("INSERT_FAILED", "创建宪法规则失败", true)
-                .with_detail(e.to_string())
+            AppErrorDto::new("INSERT_FAILED", "创建宪法规则失败", true).with_detail(e.to_string())
         })?;
         Ok(id)
     }
@@ -216,8 +212,7 @@ impl ConstitutionService {
             .collect();
 
         conn.execute(&sql, params.as_slice()).map_err(|e| {
-            AppErrorDto::new("UPDATE_FAILED", "更新宪法规则失败", true)
-                .with_detail(e.to_string())
+            AppErrorDto::new("UPDATE_FAILED", "更新宪法规则失败", true).with_detail(e.to_string())
         })?;
         Ok(())
     }
@@ -231,8 +226,7 @@ impl ConstitutionService {
             params![id],
         )
         .map_err(|e| {
-            AppErrorDto::new("DELETE_FAILED", "删除宪法规则失败", true)
-                .with_detail(e.to_string())
+            AppErrorDto::new("DELETE_FAILED", "删除宪法规则失败", true).with_detail(e.to_string())
         })?;
         // Also clean up related violations
         conn.execute(
@@ -240,8 +234,7 @@ impl ConstitutionService {
             params![id],
         )
         .map_err(|e| {
-            AppErrorDto::new("DELETE_FAILED", "清理违反记录失败", true)
-                .with_detail(e.to_string())
+            AppErrorDto::new("DELETE_FAILED", "清理违反记录失败", true).with_detail(e.to_string())
         })?;
         Ok(())
     }
@@ -294,9 +287,7 @@ impl ConstitutionService {
         let mut violations = Vec::new();
 
         for (rule_id, rule_type, rule_content, enforcement_level) in &rules {
-            if let Some(violation_text) =
-                self.check_rule_violation(text, rule_type, rule_content)
-            {
+            if let Some(violation_text) = self.check_rule_violation(text, rule_type, rule_content) {
                 let severity = match enforcement_level.as_str() {
                     "must" => "blocker",
                     "should" => "warning",
@@ -410,20 +401,15 @@ impl ConstitutionService {
             params![status, note, now, violation_id],
         )
         .map_err(|e| {
-            AppErrorDto::new("UPDATE_FAILED", "更新违反状态失败", true)
-                .with_detail(e.to_string())
+            AppErrorDto::new("UPDATE_FAILED", "更新违反状态失败", true).with_detail(e.to_string())
         })?;
         Ok(())
     }
 
     /// Collect active rules as formatted text for prompt injection.
-    pub fn collect_rules_for_prompt(
-        &self,
-        project_root: &str,
-    ) -> Result<String, AppErrorDto> {
+    pub fn collect_rules_for_prompt(&self, project_root: &str) -> Result<String, AppErrorDto> {
         let rules = self.list(project_root)?;
-        let active_rules: Vec<&ConstitutionRule> =
-            rules.iter().filter(|r| r.is_active).collect();
+        let active_rules: Vec<&ConstitutionRule> = rules.iter().filter(|r| r.is_active).collect();
         if active_rules.is_empty() {
             return Ok(String::new());
         }
@@ -471,10 +457,7 @@ impl ConstitutionService {
                     let markers = ["他想着", "她心想", "他暗道"];
                     for m in markers {
                         if text.contains(m) {
-                            return Some(format!(
-                                "第一人称视角下出现第三人称叙述：{}",
-                                m
-                            ));
+                            return Some(format!("第一人称视角下出现第三人称叙述：{}", m));
                         }
                     }
                     None
@@ -482,10 +465,7 @@ impl ConstitutionService {
                     let markers = ["我想着", "我心想", "我暗道"];
                     for m in markers {
                         if text.contains(m) {
-                            return Some(format!(
-                                "第三人称视角下出现第一人称叙述：{}",
-                                m
-                            ));
+                            return Some(format!("第三人称视角下出现第一人称叙述：{}", m));
                         }
                     }
                     None
@@ -608,12 +588,7 @@ mod tests {
         .expect("create rule");
 
         let result = cs
-            .validate_text(
-                &project_root,
-                "这一刻，命运的齿轮开始转动。",
-                None,
-                None,
-            )
+            .validate_text(&project_root, "这一刻，命运的齿轮开始转动。", None, None)
             .expect("validate");
 
         assert_eq!(result.total_rules_checked, 1);
@@ -641,7 +616,12 @@ mod tests {
         .expect("create rule");
 
         let result = cs
-            .validate_text(&project_root, "他推开门，走进了那间昏暗的房间。", None, None)
+            .validate_text(
+                &project_root,
+                "他推开门，走进了那间昏暗的房间。",
+                None,
+                None,
+            )
             .expect("validate");
 
         assert_eq!(result.violations_found, 0);

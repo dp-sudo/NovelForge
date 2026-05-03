@@ -337,12 +337,7 @@ pub async fn ai_generate_narrative_obligation(
     input: AiNarrativeInput,
     state: State<'_, AppState>,
 ) -> Result<String, AppErrorDto> {
-    crate::infra::logger::log_ai_call(
-        "narrative",
-        "default",
-        "narrative.create_obligation",
-        None,
-    );
+    crate::infra::logger::log_ai_call("narrative", "default", "narrative.create_obligation", None);
     run_pipeline_text_result(
         &app_handle,
         &state,

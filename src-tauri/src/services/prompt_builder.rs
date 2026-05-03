@@ -193,7 +193,7 @@ impl PromptBuilder {
 
         parts.push("# 任务".to_string());
         parts.push(match user_instruction.trim() {
-            i if i.is_empty() => "改写选中的文本，让表达更自然、更具体、更有画面感。".to_string(),
+            "" => "改写选中的文本，让表达更自然、更具体、更有画面感。".to_string(),
             _ => format!("根据以下要求改写选中的文本：{}", user_instruction),
         });
         parts.push(String::new());
@@ -229,31 +229,27 @@ impl PromptBuilder {
 
     /// Build a de-AI-ify prompt.
     pub fn build_naturalize(_context: &CollectedContext, selected_text: &str) -> String {
-        let mut parts = vec![];
-
-        parts.push("# 角色".to_string());
-        parts.push("你是中文小说文本修订编辑，擅长去除模板化 AI 腔，保持事实不变。".to_string());
-        parts.push(String::new());
-
-        parts.push("# 任务".to_string());
-        parts.push("改写选中的文本，让表达更自然、更具体、更有动作和画面感。".to_string());
-        parts.push(String::new());
-
-        parts.push("# 原文".to_string());
-        parts.push(selected_text.to_string());
-        parts.push(String::new());
-
-        parts.push("# 约束".to_string());
-        parts.push("1. 不改变事实。".to_string());
-        parts.push("2. 不改变人物关系。".to_string());
-        parts.push("3. 不新增重大设定。".to_string());
-        parts.push("4. 不改变叙事视角。".to_string());
-        parts.push("5. 减少空泛感叹和总结。".to_string());
-        parts.push("6. 保留原文核心信息。".to_string());
-        parts.push(String::new());
-
-        parts.push("# 输出".to_string());
-        parts.push("只输出改写后的文本。".to_string());
+        let parts = vec![
+            "# 角色".to_string(),
+            "你是中文小说文本修订编辑，擅长去除模板化 AI 腔，保持事实不变。".to_string(),
+            String::new(),
+            "# 任务".to_string(),
+            "改写选中的文本，让表达更自然、更具体、更有动作和画面感。".to_string(),
+            String::new(),
+            "# 原文".to_string(),
+            selected_text.to_string(),
+            String::new(),
+            "# 约束".to_string(),
+            "1. 不改变事实。".to_string(),
+            "2. 不改变人物关系。".to_string(),
+            "3. 不新增重大设定。".to_string(),
+            "4. 不改变叙事视角。".to_string(),
+            "5. 减少空泛感叹和总结。".to_string(),
+            "6. 保留原文核心信息。".to_string(),
+            String::new(),
+            "# 输出".to_string(),
+            "只输出改写后的文本。".to_string(),
+        ];
 
         parts.join("\n")
     }
@@ -694,7 +690,7 @@ impl PromptBuilder {
   "locked": false,
   "banned": false
 }"#
-                .to_string(),
+            .to_string(),
         );
         parts.join("\n")
     }
@@ -735,18 +731,20 @@ impl PromptBuilder {
   "severity": "low|medium|high",
   "relatedEntities": ["实体1", "实体2"]
 }"#
-                .to_string(),
+            .to_string(),
         );
         parts.join("\n")
     }
 
     pub fn build_timeline_review(context: &CollectedContext, user_instruction: &str) -> String {
-        let mut parts = vec![];
-        parts.push("# 角色".to_string());
-        parts.push("你是小说时间线审阅编辑。".to_string());
-        parts.push(String::new());
-        parts.push("# 任务".to_string());
-        parts.push("结合已有蓝图与上下文，给出时间线风险与修复建议。".to_string());
+        let parts = vec![
+            "# 角色".to_string(),
+            "你是小说时间线审阅编辑。".to_string(),
+            String::new(),
+            "# 任务".to_string(),
+            "结合已有蓝图与上下文，给出时间线风险与修复建议。".to_string(),
+        ];
+        let mut parts = parts;
         if !user_instruction.trim().is_empty() {
             parts.push(format!("附加要求：{}", user_instruction.trim()));
         }
@@ -768,16 +766,15 @@ impl PromptBuilder {
         parts.join("\n")
     }
 
-    pub fn build_relationship_review(
-        context: &CollectedContext,
-        user_instruction: &str,
-    ) -> String {
-        let mut parts = vec![];
-        parts.push("# 角色".to_string());
-        parts.push("你是角色关系审阅编辑。".to_string());
-        parts.push(String::new());
-        parts.push("# 任务".to_string());
-        parts.push("评估当前角色关系与剧情推进的一致性，并给出可执行建议。".to_string());
+    pub fn build_relationship_review(context: &CollectedContext, user_instruction: &str) -> String {
+        let parts = vec![
+            "# 角色".to_string(),
+            "你是角色关系审阅编辑。".to_string(),
+            String::new(),
+            "# 任务".to_string(),
+            "评估当前角色关系与剧情推进的一致性，并给出可执行建议。".to_string(),
+        ];
+        let mut parts = parts;
         if !user_instruction.trim().is_empty() {
             parts.push(format!("附加要求：{}", user_instruction.trim()));
         }
@@ -812,12 +809,14 @@ impl PromptBuilder {
     }
 
     pub fn build_dashboard_review(context: &CollectedContext, user_instruction: &str) -> String {
-        let mut parts = vec![];
-        parts.push("# 角色".to_string());
-        parts.push("你是小说项目运营分析助手。".to_string());
-        parts.push(String::new());
-        parts.push("# 任务".to_string());
-        parts.push("生成当前项目进展诊断，指出优先风险与下一步行动。".to_string());
+        let parts = vec![
+            "# 角色".to_string(),
+            "你是小说项目运营分析助手。".to_string(),
+            String::new(),
+            "# 任务".to_string(),
+            "生成当前项目进展诊断，指出优先风险与下一步行动。".to_string(),
+        ];
+        let mut parts = parts;
         if !user_instruction.trim().is_empty() {
             parts.push(format!("附加要求：{}", user_instruction.trim()));
         }
@@ -835,12 +834,14 @@ impl PromptBuilder {
     }
 
     pub fn build_export_review(context: &CollectedContext, user_instruction: &str) -> String {
-        let mut parts = vec![];
-        parts.push("# 角色".to_string());
-        parts.push("你是出版交付审阅助手。".to_string());
-        parts.push(String::new());
-        parts.push("# 任务".to_string());
-        parts.push("在导出前给出可执行的内容质检清单和修复优先级。".to_string());
+        let parts = vec![
+            "# 角色".to_string(),
+            "你是出版交付审阅助手。".to_string(),
+            String::new(),
+            "# 任务".to_string(),
+            "在导出前给出可执行的内容质检清单和修复优先级。".to_string(),
+        ];
+        let mut parts = parts;
         if !user_instruction.trim().is_empty() {
             parts.push(format!("附加要求：{}", user_instruction.trim()));
         }

@@ -31,9 +31,7 @@ pub async fn update_constitution_rule(
     input: UpdateConstitutionRuleInput,
     state: State<'_, AppState>,
 ) -> Result<(), AppErrorDto> {
-    state
-        .constitution_service
-        .update(&project_root, &id, input)
+    state.constitution_service.update(&project_root, &id, input)
 }
 
 #[tauri::command]

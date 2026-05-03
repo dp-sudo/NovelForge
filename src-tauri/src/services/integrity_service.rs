@@ -301,7 +301,7 @@ mod tests {
             .expect("check_project failed");
         assert_eq!(report.status, "healthy");
         assert!(report.issues.is_empty());
-        assert_eq!(report.summary.schema_version, "0005_story_os_v2_governance");
+        assert_eq!(report.summary.schema_version, "0007_story_state_tracker");
 
         remove_temp_workspace(&ws);
     }

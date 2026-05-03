@@ -1,5 +1,5 @@
-use std::borrow::Cow;
 use serde::Serialize;
+use std::borrow::Cow;
 
 pub const CORE_TASK_ROUTE_TYPES: &[&str] = &[
     "chapter.draft",
@@ -53,11 +53,11 @@ pub enum StoryAuthorityLayer {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StoryStateLayer {
-    ConstitutionState,
-    AssetState,
-    DynamicSceneState,
-    ReviewState,
-    CustomState,
+    Constitution,
+    Asset,
+    DynamicScene,
+    Review,
+    Custom,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -102,12 +102,10 @@ pub fn canonical_task_type<'a>(task_type: &'a str) -> Cow<'a, str> {
         "glossary_create_term" | "glossary.create" | "glossary.create_term" => {
             Cow::Borrowed("glossary.create_term")
         }
-        "narrative_create_obligation"
-        | "narrative.create"
-        | "narrative.create_obligation" => Cow::Borrowed("narrative.create_obligation"),
-        "timeline_review" | "timeline.scan" | "timeline.review" => {
-            Cow::Borrowed("timeline.review")
+        "narrative_create_obligation" | "narrative.create" | "narrative.create_obligation" => {
+            Cow::Borrowed("narrative.create_obligation")
         }
+        "timeline_review" | "timeline.scan" | "timeline.review" => Cow::Borrowed("timeline.review"),
         "relationship_review" | "relationships.review" | "relationship.review" => {
             Cow::Borrowed("relationship.review")
         }
@@ -136,7 +134,7 @@ pub fn task_execution_contract(task_type: &str) -> TaskExecutionContract {
     match canonical.as_ref() {
         "blueprint.generate_step" => TaskExecutionContract {
             authority_layer: StoryAuthorityLayer::StoryConstitution,
-            state_layer: StoryStateLayer::ConstitutionState,
+            state_layer: StoryStateLayer::Constitution,
             capability_pack: "blueprint-planning-pack",
             review_gate: ReviewGateMode::ManualRecommended,
         },
@@ -146,17 +144,14 @@ pub fn task_execution_contract(task_type: &str) -> TaskExecutionContract {
         | "glossary.create_term"
         | "narrative.create_obligation" => TaskExecutionContract {
             authority_layer: StoryAuthorityLayer::FormalAssets,
-            state_layer: StoryStateLayer::AssetState,
+            state_layer: StoryStateLayer::Asset,
             capability_pack: "asset-building-pack",
             review_gate: ReviewGateMode::ManualRecommended,
         },
-        "chapter.draft"
-        | "chapter.continue"
-        | "chapter.rewrite"
-        | "chapter.plan"
+        "chapter.draft" | "chapter.continue" | "chapter.rewrite" | "chapter.plan"
         | "prose.naturalize" => TaskExecutionContract {
             authority_layer: StoryAuthorityLayer::SceneExecution,
-            state_layer: StoryStateLayer::DynamicSceneState,
+            state_layer: StoryStateLayer::DynamicScene,
             capability_pack: "scene-production-pack",
             review_gate: ReviewGateMode::ManualRequired,
         },
@@ -166,13 +161,13 @@ pub fn task_execution_contract(task_type: &str) -> TaskExecutionContract {
         | "dashboard.review"
         | "export.review" => TaskExecutionContract {
             authority_layer: StoryAuthorityLayer::ReviewAudit,
-            state_layer: StoryStateLayer::ReviewState,
+            state_layer: StoryStateLayer::Review,
             capability_pack: "review-guard-pack",
             review_gate: ReviewGateMode::ManualRequired,
         },
         _ => TaskExecutionContract {
             authority_layer: StoryAuthorityLayer::Custom,
-            state_layer: StoryStateLayer::CustomState,
+            state_layer: StoryStateLayer::Custom,
             capability_pack: "custom-pack",
             review_gate: ReviewGateMode::ManualRequired,
         },
@@ -194,12 +189,18 @@ mod tests {
             canonical_task_type("generate_blueprint_step"),
             "blueprint.generate_step"
         );
-        assert_eq!(canonical_task_type("glossary.create"), "glossary.create_term");
+        assert_eq!(
+            canonical_task_type("glossary.create"),
+            "glossary.create_term"
+        );
         assert_eq!(
             canonical_task_type("narrative_create_obligation"),
             "narrative.create_obligation"
         );
-        assert_eq!(canonical_task_type("relationships.review"), "relationship.review");
+        assert_eq!(
+            canonical_task_type("relationships.review"),
+            "relationship.review"
+        );
         assert_eq!(canonical_task_type("timeline.scan"), "timeline.review");
         assert_eq!(canonical_task_type("dashboard.analyze"), "dashboard.review");
         assert_eq!(canonical_task_type("export.check"), "export.review");
@@ -221,8 +222,11 @@ mod tests {
     #[test]
     fn execution_contract_for_scene_task() {
         let contract = task_execution_contract("chapter.rewrite");
-        assert_eq!(contract.authority_layer, StoryAuthorityLayer::SceneExecution);
-        assert_eq!(contract.state_layer, StoryStateLayer::DynamicSceneState);
+        assert_eq!(
+            contract.authority_layer,
+            StoryAuthorityLayer::SceneExecution
+        );
+        assert_eq!(contract.state_layer, StoryStateLayer::DynamicScene);
         assert_eq!(contract.capability_pack, "scene-production-pack");
         assert_eq!(contract.review_gate, ReviewGateMode::ManualRequired);
     }
@@ -231,7 +235,7 @@ mod tests {
     fn execution_contract_for_asset_task() {
         let contract = task_execution_contract("character.create");
         assert_eq!(contract.authority_layer, StoryAuthorityLayer::FormalAssets);
-        assert_eq!(contract.state_layer, StoryStateLayer::AssetState);
+        assert_eq!(contract.state_layer, StoryStateLayer::Asset);
         assert_eq!(contract.capability_pack, "asset-building-pack");
         assert_eq!(contract.review_gate, ReviewGateMode::ManualRecommended);
     }
@@ -240,7 +244,7 @@ mod tests {
     fn execution_contract_for_unknown_task() {
         let contract = task_execution_contract("my.custom.skill");
         assert_eq!(contract.authority_layer, StoryAuthorityLayer::Custom);
-        assert_eq!(contract.state_layer, StoryStateLayer::CustomState);
+        assert_eq!(contract.state_layer, StoryStateLayer::Custom);
         assert_eq!(contract.capability_pack, "custom-pack");
         assert_eq!(contract.review_gate, ReviewGateMode::ManualRequired);
     }

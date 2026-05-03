@@ -690,10 +690,7 @@ fn resolve_registry_public_key(registry: &RegistryDocument, host: Option<&str>) 
 }
 
 fn is_loopback_host(host: Option<&str>) -> bool {
-    match host.unwrap_or("").to_ascii_lowercase().as_str() {
-        "localhost" | "127.0.0.1" | "::1" => true,
-        _ => false,
-    }
+    matches!(host.unwrap_or("").to_ascii_lowercase().as_str(), "localhost" | "127.0.0.1" | "::1")
 }
 
 #[cfg(test)]

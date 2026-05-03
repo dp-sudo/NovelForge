@@ -70,7 +70,7 @@ impl AiService {
         route: Option<&TaskRoute>,
     ) -> Vec<(String, String)> {
         let max_attempts = route
-            .map(|r| r.max_retries.max(1).min(8) as usize)
+            .map(|r| r.max_retries.clamp(1, 8) as usize)
             .unwrap_or(1);
         let fallback = route.and_then(|r| {
             r.fallback_provider_id.as_ref().map(|fp| {

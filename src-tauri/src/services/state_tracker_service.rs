@@ -243,7 +243,13 @@ impl StateTrackerService {
                     .with_detail(e.to_string())
             })?;
 
-        let (snapshot_id, snapshot_type, ch_id, notes, created_at): (String, String, String, Option<String>, String) = match snapshot_row {
+        let (snapshot_id, snapshot_type, ch_id, notes, created_at): (
+            String,
+            String,
+            String,
+            Option<String>,
+            String,
+        ) = match snapshot_row {
             Some(row) => row,
             None => return Ok(None),
         };
@@ -342,8 +348,7 @@ impl StateTrackerService {
             params![snapshot_id],
         )
         .map_err(|e| {
-            AppErrorDto::new("DELETE_FAILED", "删除状态快照失败", true)
-                .with_detail(e.to_string())
+            AppErrorDto::new("DELETE_FAILED", "删除状态快照失败", true).with_detail(e.to_string())
         })?;
         Ok(())
     }
@@ -423,26 +428,29 @@ impl StateTrackerService {
                 AppErrorDto::new("QUERY_FAILED", "查询角色状态失败", true)
                     .with_detail(e.to_string())
             })?;
-        let rows = stmt.query_map(params![snapshot_id], |row| {
-            Ok(CharacterStateEntry {
-                id: row.get(0)?,
-                snapshot_id: row.get(1)?,
-                character_id: row.get(2)?,
-                location: row.get(3)?,
-                emotional_state: row.get(4)?,
-                arc_progress: row.get(5)?,
-                knowledge_gained: row.get(6)?,
-                relationships_changed: row.get(7)?,
-                status_notes: row.get(8)?,
+        let rows = stmt
+            .query_map(params![snapshot_id], |row| {
+                Ok(CharacterStateEntry {
+                    id: row.get(0)?,
+                    snapshot_id: row.get(1)?,
+                    character_id: row.get(2)?,
+                    location: row.get(3)?,
+                    emotional_state: row.get(4)?,
+                    arc_progress: row.get(5)?,
+                    knowledge_gained: row.get(6)?,
+                    relationships_changed: row.get(7)?,
+                    status_notes: row.get(8)?,
+                })
             })
-        })
-        .map_err(|e| {
-            AppErrorDto::new("QUERY_FAILED", "查询角色状态失败", true).with_detail(e.to_string())
-        })?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| {
-            AppErrorDto::new("QUERY_FAILED", "查询角色状态失败", true).with_detail(e.to_string())
-        })?;
+            .map_err(|e| {
+                AppErrorDto::new("QUERY_FAILED", "查询角色状态失败", true)
+                    .with_detail(e.to_string())
+            })?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| {
+                AppErrorDto::new("QUERY_FAILED", "查询角色状态失败", true)
+                    .with_detail(e.to_string())
+            })?;
         Ok(rows)
     }
 
@@ -460,23 +468,26 @@ impl StateTrackerService {
                 AppErrorDto::new("QUERY_FAILED", "查询情节状态失败", true)
                     .with_detail(e.to_string())
             })?;
-        let rows = stmt.query_map(params![snapshot_id], |row| {
-            Ok(PlotStateEntry {
-                id: row.get(0)?,
-                snapshot_id: row.get(1)?,
-                plot_node_id: row.get(2)?,
-                progress_status: row.get(3)?,
-                tension_level: row.get(4)?,
-                open_threads: row.get(5)?,
+        let rows = stmt
+            .query_map(params![snapshot_id], |row| {
+                Ok(PlotStateEntry {
+                    id: row.get(0)?,
+                    snapshot_id: row.get(1)?,
+                    plot_node_id: row.get(2)?,
+                    progress_status: row.get(3)?,
+                    tension_level: row.get(4)?,
+                    open_threads: row.get(5)?,
+                })
             })
-        })
-        .map_err(|e| {
-            AppErrorDto::new("QUERY_FAILED", "查询情节状态失败", true).with_detail(e.to_string())
-        })?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| {
-            AppErrorDto::new("QUERY_FAILED", "查询情节状态失败", true).with_detail(e.to_string())
-        })?;
+            .map_err(|e| {
+                AppErrorDto::new("QUERY_FAILED", "查询情节状态失败", true)
+                    .with_detail(e.to_string())
+            })?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| {
+                AppErrorDto::new("QUERY_FAILED", "查询情节状态失败", true)
+                    .with_detail(e.to_string())
+            })?;
         Ok(rows)
     }
 
@@ -494,22 +505,25 @@ impl StateTrackerService {
                 AppErrorDto::new("QUERY_FAILED", "查询世界状态失败", true)
                     .with_detail(e.to_string())
             })?;
-        let rows = stmt.query_map(params![snapshot_id], |row| {
-            Ok(WorldStateEntry {
-                id: row.get(0)?,
-                snapshot_id: row.get(1)?,
-                world_rule_id: row.get(2)?,
-                state_description: row.get(3)?,
-                changed_in_chapter: row.get::<_, i32>(4)? != 0,
+        let rows = stmt
+            .query_map(params![snapshot_id], |row| {
+                Ok(WorldStateEntry {
+                    id: row.get(0)?,
+                    snapshot_id: row.get(1)?,
+                    world_rule_id: row.get(2)?,
+                    state_description: row.get(3)?,
+                    changed_in_chapter: row.get::<_, i32>(4)? != 0,
+                })
             })
-        })
-        .map_err(|e| {
-            AppErrorDto::new("QUERY_FAILED", "查询世界状态失败", true).with_detail(e.to_string())
-        })?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| {
-            AppErrorDto::new("QUERY_FAILED", "查询世界状态失败", true).with_detail(e.to_string())
-        })?;
+            .map_err(|e| {
+                AppErrorDto::new("QUERY_FAILED", "查询世界状态失败", true)
+                    .with_detail(e.to_string())
+            })?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| {
+                AppErrorDto::new("QUERY_FAILED", "查询世界状态失败", true)
+                    .with_detail(e.to_string())
+            })?;
         Ok(rows)
     }
 
@@ -607,10 +621,19 @@ mod tests {
     }
 
     fn create_test_chapter(project_root: &str) -> String {
-        use crate::services::chapter_service::ChapterService;
+        use crate::services::chapter_service::{ChapterInput, ChapterService};
         let cs = ChapterService::default();
-        cs.create(project_root, "测试章节".into(), None)
-            .expect("chapter created")
+        cs.create_chapter(
+            project_root,
+            ChapterInput {
+                title: "测试章节".to_string(),
+                summary: None,
+                target_words: None,
+                status: None,
+            },
+        )
+        .expect("chapter created")
+        .id
     }
 
     #[test]

@@ -9,6 +9,8 @@
 //!   migrations/project/0003_pipeline_draft_pool.sql
 //!   migrations/project/0004_story_os_review_queue.sql
 //!   migrations/project/0005_story_os_v2_governance.sql
+//!   migrations/project/0006_story_constitution.sql
+//!   migrations/project/0007_story_state_tracker.sql
 //!   migrations/app/0001_init.sql
 //!   migrations/app/0002_skill_index.sql
 //!   migrations/app/0003_task_route_unique.sql
@@ -53,6 +55,14 @@ fn project_migrations() -> Vec<Migration> {
         Migration {
             version: "0005_story_os_v2_governance",
             sql: include_str!("../../migrations/project/0005_story_os_v2_governance.sql"),
+        },
+        Migration {
+            version: "0006_story_constitution",
+            sql: include_str!("../../migrations/project/0006_story_constitution.sql"),
+        },
+        Migration {
+            version: "0007_story_state_tracker",
+            sql: include_str!("../../migrations/project/0007_story_state_tracker.sql"),
         },
     ]
 }
@@ -160,9 +170,7 @@ fn run_pending(
             label,
             applied_versions.len()
         );
-        return Ok(MigrationResult {
-            applied: vec![],
-        });
+        return Ok(MigrationResult { applied: vec![] });
     }
 
     // Apply each pending migration within a transaction
@@ -190,9 +198,7 @@ fn run_pending(
         );
     }
 
-    Ok(MigrationResult {
-        applied,
-    })
+    Ok(MigrationResult { applied })
 }
 
 /// Record a migration version as applied.

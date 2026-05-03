@@ -407,7 +407,7 @@ pub async fn save_task_route(
     r.task_type = task_routing::canonical_task_type(&r.task_type).into_owned();
     r.provider_id = r.provider_id.trim().to_string();
     r.model_id = r.model_id.trim().to_string();
-    r.max_retries = r.max_retries.max(1).min(8);
+    r.max_retries = r.max_retries.clamp(1, 8);
     r.fallback_provider_id = r
         .fallback_provider_id
         .as_ref()
@@ -519,7 +519,6 @@ pub async fn save_editor_settings(
 ) -> Result<(), AppErrorDto> {
     state.settings_service.save_editor_settings(&settings)
 }
-
 
 #[tauri::command]
 pub async fn load_provider_config(

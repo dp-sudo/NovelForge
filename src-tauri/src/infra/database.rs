@@ -4,7 +4,6 @@ use std::path::{Path, PathBuf};
 use log::info;
 use rusqlite::{Connection, Result as SqlResult};
 
-
 pub fn get_database_path(project_root: &Path) -> PathBuf {
     project_root.join("database").join("project.sqlite")
 }
