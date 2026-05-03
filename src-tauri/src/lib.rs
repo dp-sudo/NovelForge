@@ -10,9 +10,7 @@ use state::AppState;
 use std::path::PathBuf;
 use tauri::Manager;
 
-/// Resolve the builtin skills directory from multiple possible locations.
 fn resolve_builtin_skills_dir(app: &tauri::App) -> PathBuf {
-    // 1. Try Tauri's resource directory (production bundles)
     if let Ok(path) = app.path().resolve(
         "resources/builtin-skills",
         tauri::path::BaseDirectory::Resource,
@@ -21,7 +19,6 @@ fn resolve_builtin_skills_dir(app: &tauri::App) -> PathBuf {
             return path;
         }
     }
-    // 2. Try relative to the resource dir
     if let Ok(dir) = app.path().resource_dir() {
         let path = dir.join("resources/builtin-skills");
         if path.exists() {
@@ -32,7 +29,6 @@ fn resolve_builtin_skills_dir(app: &tauri::App) -> PathBuf {
             return path2;
         }
     }
-    // 3. Try relative to the current working directory (dev mode via cargo run)
     if let Ok(cwd) = std::env::current_dir() {
         let candidates = [
             cwd.join("resources/builtin-skills"),
@@ -47,7 +43,6 @@ fn resolve_builtin_skills_dir(app: &tauri::App) -> PathBuf {
             }
         }
     }
-    // Fallback
     PathBuf::from("resources/builtin-skills")
 }
 
@@ -55,8 +50,6 @@ fn resolve_builtin_skills_dir(app: &tauri::App) -> PathBuf {
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
-            // ── Logging: stdout with Debug level ──
-            // File logging is handled by infra::logger::log_to_file() for key events
             app.handle().plugin(
                 tauri_plugin_log::Builder::default()
                     .level(log::LevelFilter::Debug)
@@ -69,7 +62,6 @@ pub fn run() {
             app.handle()
                 .plugin(tauri_plugin_updater::Builder::new().build())?;
 
-            // ══ 1. Initialize SkillRegistry & manage AppState FIRST ══
             let app_data_dir = match crate::infra::app_database::app_dir() {
                 Ok(d) => d,
                 Err(e) => {
@@ -107,7 +99,6 @@ pub fn run() {
                 }
             }
 
-            // ══ 2. Deferred provider preload (state is now safe to access) ══
             let ai_service = app.state::<AppState>().ai_service.clone();
             std::thread::spawn(move || {
                 let rt = tokio::runtime::Runtime::new().unwrap();
@@ -201,7 +192,6 @@ pub fn run() {
             commands::settings_commands::delete_task_route,
             commands::settings_commands::check_remote_registry,
             commands::settings_commands::apply_registry_update,
-            // 问题4修复(收敛计划): 以下为 compatibility-only 命令，官方调用面统一走 src/api/settingsApi.ts。
             commands::settings_commands::load_provider_config,
             commands::settings_commands::save_provider_config,
             commands::settings_commands::test_provider_connection,
@@ -209,7 +199,6 @@ pub fn run() {
             commands::settings_commands::save_editor_settings,
             commands::ai_commands::run_ai_task_pipeline,
             commands::ai_commands::cancel_ai_task_pipeline,
-            // 问题4修复(收敛计划): 以下为 compatibility-only 命令，后续将逐步移除。
             commands::ai_commands::register_ai_provider,
             commands::ai_commands::test_ai_connection,
             commands::skill_commands::list_skills,
@@ -235,6 +224,8 @@ pub fn run() {
             commands::context_commands::get_chapter_context,
             commands::context_commands::apply_asset_candidate,
             commands::context_commands::apply_structured_draft,
+            commands::context_commands::update_review_queue_item_status,
+            commands::context_commands::list_review_work_items,
             commands::dashboard_commands::get_dashboard_stats,
             commands::search_commands::search_project,
             commands::search_commands::search_project_semantic,

@@ -78,6 +78,31 @@ export interface ChapterContext {
     confidence: number;
     evidence: string;
   }>;
+  reviewQueue: Array<{
+    id: string;
+    runId: string;
+    taskType: string;
+    title: string;
+    severity: string;
+    message: string;
+    status: string;
+    createdAt: string;
+  }>;
+  latestCheckpoint: {
+    checkpointId: string;
+    runId: string;
+    taskType: string;
+    status: string;
+    createdAt: string;
+    reviewPendingCount: number;
+    reviewTotalCount: number;
+  } | null;
+  polishSummary: {
+    pending: number;
+    resolved: number;
+    rejected: number;
+    total: number;
+  };
   previousChapterSummary: string | null;
 }
 
@@ -141,5 +166,35 @@ export async function applyStructuredDraft(
     projectRoot,
     chapterId,
     input,
+  });
+}
+
+export async function updateReviewQueueItemStatus(
+  projectRoot: string,
+  itemId: string,
+  status: "pending" | "resolved" | "rejected"
+): Promise<void> {
+  return invokeCommand<void>("update_review_queue_item_status", {
+    projectRoot,
+    itemId,
+    status,
+  });
+}
+
+export async function listReviewWorkItems(
+  projectRoot: string,
+  options: {
+    chapterId?: string;
+    taskType?: string;
+    status?: "pending" | "resolved" | "rejected";
+    limit?: number;
+  } = {}
+): Promise<ChapterContext["reviewQueue"]> {
+  return invokeCommand<ChapterContext["reviewQueue"]>("list_review_work_items", {
+    projectRoot,
+    chapterId: options.chapterId,
+    taskType: options.taskType,
+    status: options.status,
+    limit: options.limit ?? 100,
   });
 }

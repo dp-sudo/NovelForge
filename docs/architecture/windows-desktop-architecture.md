@@ -1,9 +1,9 @@
 # NovelForge Windows 桌面端技术架构文档
 
 ## 1. 文档信息
-- 版本：v0.6
-- 状态：S18（AI Pipeline v1 + 结构化草案池 + 写作风格 + 技能管理）
-- 最后更新：2026-04-28
+- 版本：v0.7
+- 状态：生产就绪（AI Pipeline v1 + 结构化草案池 + 写作风格 + 技能管理 + 完整服务层）
+- 最后更新：2026-05-03
 - 代码基线：`src/` + `src-tauri/src/`
 
 ## 2. 架构目标
@@ -43,16 +43,17 @@
   - 技能管理：`get_skill`, `get_skill_content`, `create_skill`, `update_skill`, `delete_skill`, `import_skill_file`, `reset_builtin_skill`, `refresh_skills`。
 
 ### 4.4 Service 层（`src-tauri/src/services/*`）
-- `AppState` 现有服务：
-  - `AiPipelineService`, `AiService`
-  - `BackupService`, `ImportService`
-  - `ProjectService`, `ChapterService`, `VolumeService`
-  - `BlueprintService`, `CharacterService`, `RelationshipService`
-  - `WorldService`, `GlossaryService`, `PlotService`, `NarrativeService`
-  - `ContextService`, `ConsistencyService`, `DashboardService`, `IntegrityService`
-  - `SearchService`, `VectorService`
-  - `SettingsService`, `ModelRegistryService`, `GitService`, `LicenseService`
-  - `SkillRegistry`
+- `AppState` 现有服务（完整列表）：
+  - **AI 相关**: `AiPipelineService`, `AiService`
+  - **项目与章节**: `ProjectService`, `ChapterService`, `VolumeService`
+  - **资产管理**: `CharacterService`, `RelationshipService`, `WorldService`, `GlossaryService`, `PlotService`, `NarrativeService`, `BlueprintService`
+  - **上下文与一致性**: `ContextService`, `ConsistencyService`
+  - **搜索与索引**: `SearchService`, `VectorService`
+  - **导入导出**: `ImportService`, `ExportService`, `BackupService`
+  - **版本控制**: `GitService`
+  - **设置与配置**: `SettingsService`, `ModelRegistryService`, `LicenseService`
+  - **统计与完整性**: `DashboardService`, `IntegrityService`
+  - **技能管理**: `SkillRegistry` (Arc<RwLock<SkillRegistry>>)
 
 ### 4.5 Infra 层（`src-tauri/src/infra/*`）
 - `migrator.rs` + `migrations/*`：项目库/应用库迁移管理。
@@ -130,13 +131,113 @@
 - 用户在 UI 手动确认后调用 `apply_structured_draft` 落库并回写状态。
 
 ## 7. 命令面（按域摘要）
-- Project：项目创建/打开/最近项目 + 写作风格保存读取 + Git 仓库与快照。
-- Chapter：章节 CRUD、重排、自动保存/恢复、快照、卷管理。
-- AI：pipeline run/cancel、蓝图/角色/设定/剧情/一致性 AI 任务（legacy stream 命令已移除）。
-- Context：上下文聚合、资产候选采纳、结构化草案确认。
-- Settings：Provider/模型/路由/registry、编辑器设置、授权、更新。
-- Skills：技能列表/详情/内容读取、创建、编辑、删除、导入、重置、重载。
-- Search/Integrity：关键字+语义检索、索引重建、项目完整性检查。
+### 7.1 Project 命令
+- `validate_project`: 项目名称校验与规范化
+- `create_project`: 创建新项目（目录、数据库、project.json）
+- `open_project`: 打开现有项目
+- `list_recent_projects`: 列出最近打开的项目
+- `clear_recent_projects`: 清空最近项目列表
+- `save_writing_style`: 保存项目写作风格配置
+- `get_writing_style`: 获取项目写作风格配置
+- `init_project_repository`: 初始化 Git 仓库
+- `get_project_repository_status`: 获取 Git 仓库状态
+- `commit_project_snapshot`: 提交 Git 快照
+- `list_project_history`: 列出 Git 提交历史
+
+### 7.2 Chapter 命令
+- `list_chapters`: 列出所有章节
+- `list_timeline_entries`: 列出时间线条目
+- `reorder_chapters`: 重新排序章节
+- `create_chapter`: 创建新章节
+- `save_chapter_content`: 保存章节正文
+- `autosave_draft`: 自动保存草稿
+- `recover_draft`: 恢复草稿
+- `read_chapter_content`: 读取章节正文
+- `delete_chapter`: 删除章节（软删除）
+- `create_snapshot`: 创建章节快照
+- `list_snapshots`: 列出快照
+- `read_snapshot_content`: 读取快照内容
+- `list_volumes`: 列出卷
+- `create_volume`: 创建卷
+- `delete_volume`: 删除卷
+- `assign_chapter_volume`: 分配章节到卷
+
+### 7.3 AI Pipeline 命令
+- `run_ai_task_pipeline`: 运行 AI 任务管道（返回 requestId）
+- `cancel_ai_task_pipeline`: 取消 AI 任务
+- 事件协议：`ai:pipeline:event`（start | progress | delta | done | error）
+
+### 7.4 AI 功能任务命令
+- `generate_blueprint_suggestion`: 生成蓝图建议
+- `ai_generate_character`: 生成角色卡
+- `ai_generate_world_rule`: 生成世界规则
+- `ai_generate_plot_node`: 生成情节节点
+- `ai_generate_glossary_term`: 生成名词表术语
+- `ai_generate_narrative_obligation`: 生成叙事义务
+- `ai_scan_consistency`: 一致性扫描
+
+### 7.5 Context 命令
+- `get_chapter_context`: 获取章节上下文（包含资产候选和结构化草案）
+- `apply_asset_candidate`: 采纳资产候选入库
+- `apply_structured_draft`: 确认结构化草案入库
+- `update_review_queue_item_status`: 更新审查队列项状态
+- `list_review_work_items`: 列出审查工作项
+
+### 7.6 Blueprint / Character / World / Glossary / Plot / Narrative 命令
+- **Blueprint**: `list_blueprint_steps`, `save_blueprint_step`, `mark_blueprint_completed`, `reset_blueprint_step`
+- **Character**: `list_characters`, `create_character`, `update_character`, `delete_character`
+- **Relationship**: `list_character_relationships`, `create_character_relationship`, `delete_character_relationship`
+- **World**: `list_world_rules`, `create_world_rule`, `delete_world_rule`
+- **Glossary**: `list_glossary_terms`, `create_glossary_term`
+- **Plot**: `list_plot_nodes`, `create_plot_node`, `reorder_plot_nodes`
+- **Narrative**: `list_narrative_obligations`, `create_narrative_obligation`, `update_obligation_status`, `delete_narrative_obligation`
+
+### 7.7 Consistency 命令
+- `scan_chapter_consistency`: 扫描章节一致性
+- `scan_full_consistency`: 扫描全书一致性
+- `list_consistency_issues`: 列出一致性问题
+- `update_issue_status`: 更新问题状态
+
+### 7.8 Search / Integrity 命令
+- `search_project`: 关键字 + 语义搜索合并
+- `search_project_semantic`: 纯语义搜索
+- `rebuild_search_index`: 重建关键字索引
+- `rebuild_vector_index`: 重建向量索引
+- `check_project_integrity`: 项目完整性检查
+
+### 7.9 Export 命令
+- `export_chapter`: 导出单章节（txt | md | docx | pdf | epub）
+- `export_book`: 导出全书（txt | md | docx | pdf | epub）
+
+### 7.10 Import / Backup 命令
+- `import_chapter_files`: 导入章节文件
+- `create_backup`: 创建备份
+- `list_backups`: 列出备份
+- `restore_backup`: 恢复备份
+
+### 7.11 Settings 命令
+- **Provider**: `list_providers`, `save_provider`, `load_provider`, `delete_provider`, `test_provider_connection`
+- **Model**: `refresh_provider_models`, `get_provider_models`, `get_refresh_logs`
+- **Route**: `list_task_routes`, `save_task_route`, `delete_task_route`
+- **Registry**: `check_remote_registry`, `apply_registry_update`
+- **Editor**: `load_editor_settings`, `save_editor_settings`
+- **License**: `get_license_status`, `activate_license`
+- **Update**: `check_app_update`, `install_app_update`
+- **Compatibility-only** (deprecated): `load_provider_config`, `save_provider_config`, `register_ai_provider`, `test_ai_connection`
+
+### 7.12 Skills 命令
+- `list_skills`: 列出所有技能
+- `get_skill`: 获取技能元数据
+- `get_skill_content`: 获取技能内容
+- `create_skill`: 创建自定义技能
+- `update_skill`: 更新技能
+- `delete_skill`: 删除技能
+- `import_skill_file`: 导入技能文件
+- `reset_builtin_skill`: 重置内置技能
+- `refresh_skills`: 刷新技能列表
+
+### 7.13 Dashboard 命令
+- `get_dashboard_stats`: 获取仪表盘统计数据
 
 ## 8. 当前过渡态与风险
 - compatibility-only 命令（`load_provider_config`、`save_provider_config`、`register_ai_provider`、`test_ai_connection`）仍保留用于历史调用兼容，不作为新接入路径。

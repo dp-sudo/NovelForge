@@ -2,8 +2,6 @@ import { invokeCommand, logUI } from "./tauriClient.js";
 import type { ChapterInput } from "../domain/types.js";
 import type { ChapterStatus } from "../domain/constants.js";
 
-// ── Import (no dev-engine fallback needed) ──
-
 export interface ImportFileEntry {
   file_name: string;
   content: string;
@@ -23,8 +21,6 @@ export interface ImportResult {
 export async function importChapterFiles(projectRoot: string, files: ImportFileEntry[]): Promise<ImportResult> {
   return invokeCommand<ImportResult>("import_chapter_files", { input: { projectRoot, files } });
 }
-
-// ── Backup ──
 
 export interface BackupResult {
   filePath: string;
@@ -49,8 +45,6 @@ export async function restoreBackup(projectRoot: string, backupPath: string): Pr
   return invokeCommand<RestoreResult>("restore_backup", { projectRoot, backupPath });
 }
 
-// ── Search (no dev-engine fallback needed) ──
-
 export interface SearchResult {
   entityType: string;
   entityId: string;
@@ -66,8 +60,6 @@ export async function searchProject(projectRoot: string, query: string, limit?: 
 export async function rebuildSearchIndex(projectRoot: string): Promise<number> {
   return invokeCommand<number>("rebuild_search_index", { projectRoot });
 }
-
-// ── Integrity (no dev-engine fallback needed) ──
 
 export interface IntegrityIssue {
   severity: string;
@@ -179,7 +171,6 @@ export async function recoverDraft(chapterId: string, projectRoot: string): Prom
 }
 
 export async function readChapterContent(chapterId: string, projectRoot: string): Promise<string> {
-  // 问题1修复(调用面): 编辑器切章时必须先走正式正文读取，再做草稿恢复决策。
   return invokeCommand<string>("read_chapter_content", {
     projectRoot,
     chapterId,
@@ -189,8 +180,6 @@ export async function readChapterContent(chapterId: string, projectRoot: string)
 export async function deleteChapter(id: string, projectRoot: string): Promise<void> {
   await invokeCommand<void>("delete_chapter", { projectRoot, input: { id } });
 }
-
-// ── Snapshots ──
 
 export interface SnapshotRecord {
   id: string;
@@ -213,8 +202,6 @@ export async function listSnapshots(projectRoot: string, chapterId?: string): Pr
 export async function readSnapshotContent(projectRoot: string, snapshotId: string): Promise<string> {
   return invokeCommand<string>("read_snapshot_content", { projectRoot, snapshotId });
 }
-
-// ── Volumes ──
 
 export interface VolumeRecord {
   id: string;

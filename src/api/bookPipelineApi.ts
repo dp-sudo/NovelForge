@@ -39,6 +39,13 @@ export type BookPipelineEvent =
     stageKey: BookStageKey;
     stageLabel: string;
     event: AiPipelineEvent;
+    meta: {
+      taskContract: Record<string, unknown> | null;
+      contextCompilationSnapshot: Record<string, unknown> | null;
+      reviewChecklist: Array<Record<string, unknown>>;
+      reviewWorkItems: Array<Record<string, unknown>>;
+      checkpointId: string | null;
+    };
   }
   | {
     type: "stage-done";
@@ -46,6 +53,8 @@ export type BookPipelineEvent =
     stageKey: BookStageKey;
     stageLabel: string;
     requestId: string;
+    checkpointId: string | null;
+    reviewWorkItems: Array<Record<string, unknown>>;
   }
   | {
     type: "stage-error";
@@ -154,7 +163,6 @@ export async function* streamBookGenerationPipeline(
   input: RunBookGenerationInput,
   signal?: AbortSignal,
 ): AsyncGenerator<BookPipelineEvent> {
-  // 问题5修复: 把离散 AI 任务编排成单一可追踪会话（分阶段 + 可中断）。
   const sessionId = createSessionId();
   const stages = buildBookStages(input);
 
@@ -178,9 +186,27 @@ export async function* streamBookGenerationPipeline(
     };
 
     let latestRequestId: string | undefined;
+    let latestCheckpointId: string | null = null;
+    let latestReviewWorkItems: Array<Record<string, unknown>> = [];
     try {
       for await (const event of streamTaskPipeline(stage.request, { timeoutMs: 180000 })) {
         latestRequestId = event.requestId;
+        const eventMeta = (event.meta && typeof event.meta === "object" ? event.meta : null) as
+          | Record<string, unknown>
+          | null;
+        const checkpointId = eventMeta && typeof eventMeta.checkpointId === "string"
+          ? eventMeta.checkpointId
+          : eventMeta && typeof eventMeta.storyCheckpointId === "string"
+            ? eventMeta.storyCheckpointId
+            : null;
+        if (checkpointId) {
+          latestCheckpointId = checkpointId;
+        }
+        if (eventMeta && Array.isArray(eventMeta.reviewWorkItems)) {
+          latestReviewWorkItems = eventMeta.reviewWorkItems.filter(
+            (item): item is Record<string, unknown> => Boolean(item) && typeof item === "object"
+          );
+        }
         if (signal?.aborted) {
           if (latestRequestId) {
             await cancelTaskPipeline(latestRequestId, "book_pipeline_abort");
@@ -213,6 +239,33 @@ export async function* streamBookGenerationPipeline(
           stageKey: stage.key,
           stageLabel: stage.label,
           event,
+          meta: {
+            taskContract:
+              eventMeta && eventMeta.taskContract && typeof eventMeta.taskContract === "object"
+                ? (eventMeta.taskContract as Record<string, unknown>)
+                : null,
+            contextCompilationSnapshot:
+              eventMeta &&
+              eventMeta.contextCompilationSnapshot &&
+              typeof eventMeta.contextCompilationSnapshot === "object"
+                ? (eventMeta.contextCompilationSnapshot as Record<string, unknown>)
+                : null,
+            reviewChecklist:
+              eventMeta && Array.isArray(eventMeta.reviewChecklist)
+                ? eventMeta.reviewChecklist.filter(
+                    (item): item is Record<string, unknown> =>
+                      Boolean(item) && typeof item === "object"
+                  )
+                : [],
+            reviewWorkItems:
+              eventMeta && Array.isArray(eventMeta.reviewWorkItems)
+                ? eventMeta.reviewWorkItems.filter(
+                    (item): item is Record<string, unknown> =>
+                      Boolean(item) && typeof item === "object"
+                  )
+                : [],
+            checkpointId,
+          },
         };
       }
       if (latestRequestId) {
@@ -222,6 +275,8 @@ export async function* streamBookGenerationPipeline(
           stageKey: stage.key,
           stageLabel: stage.label,
           requestId: latestRequestId,
+          checkpointId: latestCheckpointId,
+          reviewWorkItems: latestReviewWorkItems,
         };
       }
     } catch (error) {

@@ -6,8 +6,6 @@ use crate::errors::AppErrorDto;
 use crate::services::skill_registry::SkillManifest;
 use crate::state::AppState;
 
-// ── List all skills ──
-
 #[tauri::command]
 pub async fn list_skills(state: State<'_, AppState>) -> Result<Vec<SkillManifest>, AppErrorDto> {
     state
@@ -19,8 +17,6 @@ pub async fn list_skills(state: State<'_, AppState>) -> Result<Vec<SkillManifest
         })?
         .list_skills()
 }
-
-// ── Get a single skill manifest ──
 
 #[tauri::command]
 pub async fn get_skill(
@@ -44,8 +40,6 @@ pub async fn get_skill(
         })
 }
 
-// ── Get full .md content of a skill (for editing) ──
-
 #[tauri::command]
 pub async fn get_skill_content(
     id: String,
@@ -67,8 +61,6 @@ pub async fn get_skill_content(
             )
         })
 }
-
-// ── Create a new skill ──
 
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -116,8 +108,6 @@ pub async fn create_skill(
     Ok(manifest)
 }
 
-// ── Update an existing skill's content ──
-
 #[tauri::command]
 pub async fn update_skill(
     id: String,
@@ -131,8 +121,6 @@ pub async fn update_skill(
     reg.update_skill(&id, &body)
 }
 
-// ── Delete a skill (user/imported only) ──
-
 #[tauri::command]
 pub async fn delete_skill(id: String, state: State<'_, AppState>) -> Result<(), AppErrorDto> {
     let reg = state.skill_registry.write().map_err(|e| {
@@ -141,8 +129,6 @@ pub async fn delete_skill(id: String, state: State<'_, AppState>) -> Result<(), 
     })?;
     reg.delete_skill(&id)
 }
-
-// ── Import a .md file from external path ──
 
 #[tauri::command]
 pub async fn import_skill_file(
@@ -156,8 +142,6 @@ pub async fn import_skill_file(
     reg.import_file(&file_path)
 }
 
-// ── Reset a built-in skill to original ──
-
 #[tauri::command]
 pub async fn reset_builtin_skill(
     id: String,
@@ -169,8 +153,6 @@ pub async fn reset_builtin_skill(
     })?;
     reg.reset_builtin(&id)
 }
-
-// ── Refresh/re-scan skills directory ──
 
 #[tauri::command]
 pub async fn refresh_skills(state: State<'_, AppState>) -> Result<Vec<SkillManifest>, AppErrorDto> {

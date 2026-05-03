@@ -42,8 +42,6 @@ pub async fn delete_character(
     state.character_service.soft_delete(&project_root, &id)
 }
 
-// ── Character Relationship Commands ──
-
 #[tauri::command]
 pub async fn list_character_relationships(
     project_root: String,

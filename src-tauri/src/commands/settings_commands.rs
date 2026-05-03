@@ -302,7 +302,6 @@ pub async fn save_provider(
     );
     state.ai_service.reload_provider(&saved.id).await?;
 
-    // Auto-create default task routes for every task type if not already configured
     if let Some(ref default_model) = saved.default_model {
         if !default_model.is_empty() {
             let conn = app_database::open_or_create()?;
@@ -339,7 +338,6 @@ pub async fn load_provider(
     provider_id: String,
     state: State<'_, AppState>,
 ) -> Result<ProviderConfig, AppErrorDto> {
-    // 问题4修复(Deprecated 命令面): 兼容入口保留，但官方调用面改为 settingsApi.list_providers/save_provider。
     log::warn!("[DEPRECATED_COMMAND] load_provider is compatibility-only");
     state.settings_service.load_provider(&provider_id)
 }
@@ -362,8 +360,6 @@ pub async fn test_provider_connection(
 ) -> Result<String, AppErrorDto> {
     state.settings_service.test_connection(&provider_id).await
 }
-
-// ── Model registry commands ──
 
 #[tauri::command]
 pub async fn refresh_provider_models(
@@ -391,8 +387,6 @@ pub async fn get_refresh_logs(
 ) -> Result<Vec<crate::adapters::llm_types::RefreshLog>, AppErrorDto> {
     state.model_registry_service.get_refresh_logs(&provider_id)
 }
-
-// ── Task route commands ──
 
 #[tauri::command]
 pub async fn list_task_routes(_state: State<'_, AppState>) -> Result<Vec<TaskRoute>, AppErrorDto> {
@@ -489,8 +483,6 @@ pub async fn delete_task_route(
     Ok(())
 }
 
-// ── Remote registry commands ──
-
 #[tauri::command]
 pub async fn check_remote_registry(
     url: String,
@@ -513,8 +505,6 @@ pub async fn apply_registry_update(
         .await
 }
 
-// ── Editor settings commands ──
-
 #[tauri::command]
 pub async fn load_editor_settings(
     state: State<'_, AppState>,
@@ -530,14 +520,12 @@ pub async fn save_editor_settings(
     state.settings_service.save_editor_settings(&settings)
 }
 
-// ── Legacy backward-compatible wrappers ──
 
 #[tauri::command]
 pub async fn load_provider_config(
     _project_root: String,
     state: State<'_, AppState>,
 ) -> Result<serde_json::Value, AppErrorDto> {
-    // 问题4修复(Deprecated 命令面): 兼容旧协议，后续由 list_providers 收敛替代。
     log::warn!("[DEPRECATED_COMMAND] load_provider_config is compatibility-only");
     let providers = state.settings_service.list_providers()?;
     serde_json::to_value(providers).map_err(|e| {
@@ -556,7 +544,6 @@ pub async fn save_provider_config(
     input: serde_json::Value,
     state: State<'_, AppState>,
 ) -> Result<(), AppErrorDto> {
-    // 问题4修复(Deprecated 命令面): 兼容旧协议，后续由 save_provider 收敛替代。
     log::warn!("[DEPRECATED_COMMAND] save_provider_config is compatibility-only");
     let mut config: ProviderConfig = serde_json::from_value(input).map_err(|e| {
         AppErrorDto::new("INVALID_INPUT", "Invalid provider config format", true)

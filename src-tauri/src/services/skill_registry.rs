@@ -6,8 +6,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::errors::AppErrorDto;
 
-/// ── SkillManifest (extended, .md frontmatter-aligned) ──
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SkillManifest {
@@ -57,8 +55,6 @@ pub struct SkillFile {
     pub manifest: SkillManifest,
     pub body: String,
 }
-
-/// ── SkillRegistry (filesystem-backed) ──
 
 pub struct SkillRegistry {
     skills_dir: PathBuf,
@@ -176,8 +172,6 @@ impl SkillRegistry {
 
         Ok(())
     }
-
-    // ── Public CRUD ──
 
     pub fn list_skills(&self) -> Result<Vec<SkillManifest>, AppErrorDto> {
         self.manifests.read().map(|g| g.clone()).map_err(|e| {
@@ -339,8 +333,6 @@ impl SkillRegistry {
         Ok(sf.manifest)
     }
 
-    // ── Internal helpers ──
-
     /// List builtin skill IDs (without extension) from the bundled directory.
     fn list_builtin_ids(&self) -> Vec<String> {
         let mut ids = Vec::new();
@@ -410,8 +402,6 @@ pub fn initialize_global_registry(
     reg.initialize()?;
     Ok(reg)
 }
-
-// ── File format helpers ──
 
 /// Split a .md string into (frontmatter_yaml, body_markdown).
 /// Expects format:

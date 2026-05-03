@@ -12,13 +12,14 @@ let unloadCleanupBound = false;
 
 export type AiPipelinePhase =
   | "validate"
-  | "context"
+  | "compile_context"
   | "route"
-  | "prompt"
+  | "compose_prompt"
   | "generate"
   | "postprocess"
+  | "review"
   | "persist"
-  | "done"
+  | "checkpoint"
   | string;
 
 export type AiPipelineEventType = "start" | "delta" | "progress" | "done" | "error";

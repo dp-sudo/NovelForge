@@ -36,7 +36,6 @@ export async function loadEditorChapterContentWithRecovery(
       return { persistedContent, recoveryContent: recovery.draftContent };
     }
   } catch {
-    // 问题1修复(辅助逻辑): 恢复草稿失败不应阻断正式正文加载。
   }
 
   return { persistedContent, recoveryContent: null };

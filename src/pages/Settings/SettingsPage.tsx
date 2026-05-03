@@ -817,8 +817,6 @@ export function SettingsPage() {
     return trimmed ? trimmed : undefined;
   }
 
-  // ── Remote registry handlers ──
-
   async function handleCheckRegistry() {
     if (!registryUrl.trim()) { setRegistryStatus("✗ 注册表 URL 不能为空"); return; }
     setRegistryChecking(true);

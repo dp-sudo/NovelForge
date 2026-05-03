@@ -9,6 +9,8 @@ interface AiPreviewPanelProps {
   errorMessage?: string | null;
   originalText?: string;
   taskType: string;
+  taskContractHint?: string | null;
+  reviewHints?: string[];
   onInsert: (strategy: "cursor" | "replace" | "append") => void;
   onDiscard: () => void;
   onCopy: () => void;
@@ -34,6 +36,8 @@ export function AiPreviewPanel({
   errorMessage,
   originalText,
   taskType,
+  taskContractHint,
+  reviewHints = [],
   onInsert,
   onDiscard,
   onCopy
@@ -105,6 +109,19 @@ export function AiPreviewPanel({
         </div>
       </div>
       <div className="p-4 max-h-64 overflow-y-auto">
+        {taskContractHint && (
+          <div className="mb-3 px-3 py-2 rounded-lg text-xs bg-surface-900/80 text-surface-300 border border-surface-700">
+            {taskContractHint}
+          </div>
+        )}
+        {reviewHints.length > 0 && (
+          <div className="mb-3 px-3 py-2 rounded-lg text-xs bg-warning/10 text-warning border border-warning/30">
+            <div className="font-medium mb-1">建议人工精修：</div>
+            {reviewHints.map((hint, index) => (
+              <div key={`${hint}-${index}`}>- {hint}</div>
+            ))}
+          </div>
+        )}
         {status === "error" && errorMessage && (
           <div className="mb-3 px-3 py-2 rounded-lg text-sm bg-error/10 text-error border border-error/20">
             {errorMessage}

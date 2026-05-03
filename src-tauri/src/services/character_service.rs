@@ -376,8 +376,6 @@ impl Default for CreateCharacterInput {
     }
 }
 
-// ── Character Relationships ──
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CharacterRelationship {

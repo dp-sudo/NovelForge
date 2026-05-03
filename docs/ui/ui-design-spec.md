@@ -1,9 +1,9 @@
-# NovelForge UI 设计文档（MVP）
+# NovelForge UI 设计文档
 
 ## 1. 文档信息
-- 版本：v0.6
-- 状态：S18（编辑器 AI Pipeline + 结构化草案确认闭环 + 设置页技能/写作风格）
-- 最后更新：2026-04-28
+- 版本：v0.7
+- 状态：生产就绪（编辑器 AI Pipeline + 结构化草案确认闭环 + 设置页技能/写作风格 + 完整页面体系）
+- 最后更新：2026-05-03
 - 代码基线：`src/pages/*`、`src/components/*`、`src/api/*`
 
 ## 2. UI 目标
@@ -11,22 +11,26 @@
 - 保证写作链路中的保存、恢复、AI 任务状态、人工确认入库可见。
 - 明确页面数据源（当前默认 Tauri command）。
 
-## 3. 页面信息架构（当前）
-- 顶层：`Project Center` + `App Shell`
-- `App Shell` 侧栏页面：
-  - 仪表盘 `dashboard`
-  - 蓝图 `blueprint`
-  - 角色 `characters`
-  - 世界设定 `world`
-  - 名词库 `glossary`
-  - 剧情 `plot`
-  - 叙事义务 `narrative`
-  - 时间线 `timeline`
-  - 关系图 `relationships`
-  - 章节 `chapters`
-  - 一致性检查 `consistency`
-  - 导出 `export`
-  - 设置 `settings`
+## 3. 页面信息架构（当前实现）
+### 3.1 顶层路由
+- `project-center`: 项目中心（创建/打开项目）
+- 其他路由需要在项目打开后才可访问
+
+### 3.2 项目内页面（AppShell 侧栏）
+- `dashboard`: 仪表盘（项目统计、快速入口）
+- `blueprint`: 蓝图规划（8 步法）
+- `characters`: 角色管理（角色列表、关系图）
+- `world`: 世界设定（规则列表、分类筛选）
+- `glossary`: 名词表（术语管理）
+- `plot`: 情节管理（节点列表、排序）
+- `narrative`: 叙事义务（义务列表、状态流转）
+- `timeline`: 时间线（章节时间线视图）
+- `relationships`: 关系图（角色关系可视化）
+- `chapters`: 章节列表（章节管理、卷管理）
+- `editor`: 章节编辑器（写作主界面）
+- `consistency`: 一致性检查（问题列表、扫描）
+- `export`: 导出（格式选择、导出配置）
+- `settings`: 设置（模型配置、任务路由、技能管理、编辑器设置、写作风格、数据备份、关于）
 
 ## 4. 页面与交互现状
 ### 4.1 项目中心（`ProjectCenterPage`）

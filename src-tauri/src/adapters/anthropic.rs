@@ -266,8 +266,6 @@ impl AnthropicAdapter {
         }
     }
 
-    // ── Capability-detection helpers ──
-
     async fn test_streaming(&self, model: &str, provider_id: &str) -> Result<bool, LlmError> {
         use tokio::sync::mpsc;
         let (tx, mut rx) = mpsc::channel(8);

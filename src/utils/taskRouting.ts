@@ -26,6 +26,29 @@ export interface EditorAiAction {
   category: EditorAiCategory;
 }
 
+export type StoryAuthorityLayer =
+  | "story_constitution"
+  | "formal_assets"
+  | "scene_execution"
+  | "review_audit"
+  | "custom";
+
+export type StoryStateLayer =
+  | "constitution_state"
+  | "asset_state"
+  | "dynamic_scene_state"
+  | "review_state"
+  | "custom_state";
+
+export type ReviewGateMode = "manual_required" | "manual_recommended" | "auto_allowed";
+
+export interface TaskExecutionContract {
+  authorityLayer: StoryAuthorityLayer;
+  stateLayer: StoryStateLayer;
+  capabilityPack: string;
+  reviewGate: ReviewGateMode;
+}
+
 // WP-5: 编辑器固定 9 按钮任务清单（canonical）
 export const EDITOR_AI_ACTIONS: EditorAiAction[] = [
   { taskType: "chapter.continue", label: "续写章节", category: "writing" },
@@ -60,6 +83,112 @@ export const TASK_TYPE_LABELS: Record<string, string> = {
   "consistency.scan": "一致性检查",
   "blueprint.generate_step": "生成蓝图步骤",
   custom: "自定义",
+};
+
+const DEFAULT_TASK_EXECUTION_CONTRACT: TaskExecutionContract = {
+  authorityLayer: "custom",
+  stateLayer: "custom_state",
+  capabilityPack: "custom-pack",
+  reviewGate: "manual_required",
+};
+
+const TASK_EXECUTION_CONTRACT_MAP: Record<string, TaskExecutionContract> = {
+  "blueprint.generate_step": {
+    authorityLayer: "story_constitution",
+    stateLayer: "constitution_state",
+    capabilityPack: "blueprint-planning-pack",
+    reviewGate: "manual_recommended",
+  },
+  "character.create": {
+    authorityLayer: "formal_assets",
+    stateLayer: "asset_state",
+    capabilityPack: "asset-building-pack",
+    reviewGate: "manual_recommended",
+  },
+  "world.create_rule": {
+    authorityLayer: "formal_assets",
+    stateLayer: "asset_state",
+    capabilityPack: "asset-building-pack",
+    reviewGate: "manual_recommended",
+  },
+  "plot.create_node": {
+    authorityLayer: "formal_assets",
+    stateLayer: "asset_state",
+    capabilityPack: "asset-building-pack",
+    reviewGate: "manual_recommended",
+  },
+  "glossary.create_term": {
+    authorityLayer: "formal_assets",
+    stateLayer: "asset_state",
+    capabilityPack: "asset-building-pack",
+    reviewGate: "manual_recommended",
+  },
+  "narrative.create_obligation": {
+    authorityLayer: "formal_assets",
+    stateLayer: "asset_state",
+    capabilityPack: "asset-building-pack",
+    reviewGate: "manual_recommended",
+  },
+  "chapter.draft": {
+    authorityLayer: "scene_execution",
+    stateLayer: "dynamic_scene_state",
+    capabilityPack: "scene-production-pack",
+    reviewGate: "manual_required",
+  },
+  "chapter.continue": {
+    authorityLayer: "scene_execution",
+    stateLayer: "dynamic_scene_state",
+    capabilityPack: "scene-production-pack",
+    reviewGate: "manual_required",
+  },
+  "chapter.rewrite": {
+    authorityLayer: "scene_execution",
+    stateLayer: "dynamic_scene_state",
+    capabilityPack: "scene-production-pack",
+    reviewGate: "manual_required",
+  },
+  "chapter.plan": {
+    authorityLayer: "scene_execution",
+    stateLayer: "dynamic_scene_state",
+    capabilityPack: "scene-production-pack",
+    reviewGate: "manual_required",
+  },
+  "prose.naturalize": {
+    authorityLayer: "scene_execution",
+    stateLayer: "dynamic_scene_state",
+    capabilityPack: "scene-production-pack",
+    reviewGate: "manual_required",
+  },
+  "consistency.scan": {
+    authorityLayer: "review_audit",
+    stateLayer: "review_state",
+    capabilityPack: "review-guard-pack",
+    reviewGate: "manual_required",
+  },
+  "timeline.review": {
+    authorityLayer: "review_audit",
+    stateLayer: "review_state",
+    capabilityPack: "review-guard-pack",
+    reviewGate: "manual_required",
+  },
+  "relationship.review": {
+    authorityLayer: "review_audit",
+    stateLayer: "review_state",
+    capabilityPack: "review-guard-pack",
+    reviewGate: "manual_required",
+  },
+  "dashboard.review": {
+    authorityLayer: "review_audit",
+    stateLayer: "review_state",
+    capabilityPack: "review-guard-pack",
+    reviewGate: "manual_required",
+  },
+  "export.review": {
+    authorityLayer: "review_audit",
+    stateLayer: "review_state",
+    capabilityPack: "review-guard-pack",
+    reviewGate: "manual_required",
+  },
 };
 
 export const DIFF_TASK_TYPES = new Set(["chapter.rewrite", "prose.naturalize"]);
@@ -181,4 +310,9 @@ export function getTaskRequirements(taskType: string) {
 
 export function isEditorAiTask(taskType: string): boolean {
   return EDITOR_AI_TASK_SET.has(canonicalTaskType(taskType));
+}
+
+export function getTaskExecutionContract(taskType: string): TaskExecutionContract {
+  const canonical = canonicalTaskType(taskType);
+  return TASK_EXECUTION_CONTRACT_MAP[canonical] ?? DEFAULT_TASK_EXECUTION_CONTRACT;
 }

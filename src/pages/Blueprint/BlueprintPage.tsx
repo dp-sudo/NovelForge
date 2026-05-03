@@ -55,8 +55,6 @@ const RHYTHM_OPTIONS = [
 
 type StepStatus = "not_started" | "in_progress" | "completed";
 
-// ── Form field helpers ──
-
 function TextField({ label, value, onChange, placeholder, helperText }: {
   label: string; value: string; onChange: (v: string) => void; placeholder?: string; helperText?: string;
 }) {
@@ -70,8 +68,6 @@ function TextField({ label, value, onChange, placeholder, helperText }: {
     />
   );
 }
-
-// ── Step 1: 灵感定锚 ──
 
 function AnchorForm({ data, onChange }: { data: Record<string, string>; onChange: (d: Record<string, string>) => void }) {
   function set(k: string) { return (v: string) => onChange({ ...data, [k]: v }); }
@@ -97,8 +93,6 @@ function AnchorForm({ data, onChange }: { data: Record<string, string>; onChange
   );
 }
 
-// ── Step 2: 类型策略 ──
-
 function GenreForm({ data, onChange }: { data: Record<string, string>; onChange: (d: Record<string, string>) => void }) {
   function set(k: string) { return (v: string) => onChange({ ...data, [k]: v }); }
   return (
@@ -118,8 +112,6 @@ function GenreForm({ data, onChange }: { data: Record<string, string>; onChange:
     </div>
   );
 }
-
-// ── Step 3: 故事母题 ──
 
 function PremiseForm({ data, onChange }: { data: Record<string, string>; onChange: (d: Record<string, string>) => void }) {
   function set(k: string) { return (v: string) => onChange({ ...data, [k]: v }); }
@@ -145,8 +137,6 @@ function PremiseForm({ data, onChange }: { data: Record<string, string>; onChang
   );
 }
 
-// ── Step 4: 角色工坊 ──
-
 function CharactersForm({ data, onChange }: { data: Record<string, string>; onChange: (d: Record<string, string>) => void }) {
   function set(k: string) { return (v: string) => onChange({ ...data, [k]: v }); }
   return (
@@ -170,8 +160,6 @@ function CharactersForm({ data, onChange }: { data: Record<string, string>; onCh
     </div>
   );
 }
-
-// ── Step 5: 世界规则 ──
 
 function WorldForm({ data, onChange }: { data: Record<string, string>; onChange: (d: Record<string, string>) => void }) {
   function set(k: string) { return (v: string) => onChange({ ...data, [k]: v }); }
@@ -197,8 +185,6 @@ function WorldForm({ data, onChange }: { data: Record<string, string>; onChange:
   );
 }
 
-// ── Step 6: 名词锁定 ──
-
 function GlossaryForm({ data, onChange }: { data: Record<string, string>; onChange: (d: Record<string, string>) => void }) {
   function set(k: string) { return (v: string) => onChange({ ...data, [k]: v }); }
   return (
@@ -218,8 +204,6 @@ function GlossaryForm({ data, onChange }: { data: Record<string, string>; onChan
     </div>
   );
 }
-
-// ── Step 7: 剧情骨架 ──
 
 function PlotForm({ data, onChange }: { data: Record<string, string>; onChange: (d: Record<string, string>) => void }) {
   function set(k: string) { return (v: string) => onChange({ ...data, [k]: v }); }
@@ -244,8 +228,6 @@ function PlotForm({ data, onChange }: { data: Record<string, string>; onChange: 
     </div>
   );
 }
-
-// ── Step 8: 章节路线 ──
 
 function ChaptersForm({ data, onChange }: { data: Record<string, string>; onChange: (d: Record<string, string>) => void }) {
   function set(k: string) { return (v: string) => onChange({ ...data, [k]: v }); }

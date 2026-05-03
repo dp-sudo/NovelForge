@@ -155,6 +155,9 @@ pub struct EditorContextPanel {
     pub relationship_drafts: Vec<RelationshipDraft>,
     pub involvement_drafts: Vec<InvolvementDraft>,
     pub scene_drafts: Vec<SceneDraft>,
+    pub review_queue: Vec<ReviewQueueItem>,
+    pub latest_checkpoint: Option<StoryCheckpointSummary>,
+    pub polish_summary: PolishSummary,
     pub previous_chapter_summary: Option<String>,
 }
 
@@ -213,6 +216,40 @@ pub struct SceneDraft {
     pub scene_type: String,
     pub confidence: f32,
     pub evidence: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewQueueItem {
+    pub id: String,
+    pub run_id: String,
+    pub task_type: String,
+    pub title: String,
+    pub severity: String,
+    pub message: String,
+    pub status: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoryCheckpointSummary {
+    pub checkpoint_id: String,
+    pub run_id: String,
+    pub task_type: String,
+    pub status: String,
+    pub created_at: String,
+    pub review_pending_count: i64,
+    pub review_total_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PolishSummary {
+    pub pending: i64,
+    pub resolved: i64,
+    pub rejected: i64,
+    pub total: i64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -345,6 +382,10 @@ impl ContextService {
         )?;
         let (relationship_drafts, involvement_drafts, scene_drafts) =
             self.load_structured_draft_pool(&conn, &project_id, chapter_id)?;
+        let review_queue = self.load_review_queue(&conn, &project_id, chapter_id)?;
+        let latest_checkpoint =
+            self.load_latest_checkpoint_summary(&conn, &project_id, chapter_id)?;
+        let polish_summary = self.load_polish_summary(&conn, &project_id, Some(chapter_id))?;
 
         Ok(EditorContextPanel {
             chapter: EditorChapterContext {
@@ -364,6 +405,9 @@ impl ContextService {
             relationship_drafts,
             involvement_drafts,
             scene_drafts,
+            review_queue,
+            latest_checkpoint,
+            polish_summary,
             previous_chapter_summary: related.previous_chapter_summary,
         })
     }
@@ -900,6 +944,190 @@ impl ContextService {
         Ok(result)
     }
 
+    pub fn update_review_queue_item_status(
+        &self,
+        project_root: &str,
+        item_id: &str,
+        status: &str,
+    ) -> Result<(), AppErrorDto> {
+        let normalized_status = status.trim().to_ascii_lowercase();
+        if !matches!(normalized_status.as_str(), "pending" | "resolved" | "rejected") {
+            return Err(AppErrorDto::new(
+                "REVIEW_QUEUE_STATUS_INVALID",
+                "审查队列状态不合法",
+                true,
+            ));
+        }
+        let review_item_id = item_id.trim();
+        if review_item_id.is_empty() {
+            return Err(AppErrorDto::new(
+                "REVIEW_QUEUE_ITEM_ID_REQUIRED",
+                "审查队列项 ID 不能为空",
+                true,
+            ));
+        }
+
+        let project_root_path = Path::new(project_root);
+        let conn = open_database(project_root_path).map_err(|err| {
+            AppErrorDto::new("DB_OPEN_FAILED", "无法打开项目数据库", false)
+                .with_detail(err.to_string())
+        })?;
+        let project_id = get_project_id(&conn)?;
+        let now = now_iso();
+        let mut run_id_for_action: Option<String> = None;
+        let mut chapter_id_for_action: Option<String> = None;
+        let old_status: Option<String> = conn
+            .query_row(
+                "SELECT status FROM story_os_v2_review_work_items WHERE id = ?1 AND project_id = ?2",
+                params![review_item_id, &project_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|err| {
+                AppErrorDto::new("DB_QUERY_FAILED", "查询审查工单失败", true)
+                    .with_detail(err.to_string())
+            })?;
+        if old_status.is_some() {
+            let tuple: Option<(String, Option<String>)> = conn
+                .query_row(
+                    "SELECT run_id, chapter_id FROM story_os_v2_review_work_items
+                     WHERE id = ?1 AND project_id = ?2",
+                    params![review_item_id, &project_id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .optional()
+                .map_err(|err| {
+                    AppErrorDto::new("DB_QUERY_FAILED", "查询审查工单失败", true)
+                        .with_detail(err.to_string())
+                })?;
+            if let Some((run_id, chapter_id)) = tuple {
+                run_id_for_action = Some(run_id);
+                chapter_id_for_action = chapter_id;
+            }
+            conn.execute(
+                "UPDATE story_os_v2_review_work_items
+                 SET status = ?1, updated_at = ?2
+                 WHERE id = ?3 AND project_id = ?4",
+                params![&normalized_status, &now, review_item_id, &project_id],
+            )
+            .map_err(|err| {
+                AppErrorDto::new("DB_WRITE_FAILED", "更新审查工单失败", true)
+                    .with_detail(err.to_string())
+            })?;
+            let _ = conn.execute(
+                "INSERT INTO story_os_v2_polish_actions(
+                    id, work_item_id, run_id, project_id, chapter_id, action_type, from_status,
+                    to_status, note, operator, created_at
+                 ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL, 'human', ?9)",
+                params![
+                    Uuid::new_v4().to_string(),
+                    review_item_id,
+                    run_id_for_action.as_deref().unwrap_or("unknown-run"),
+                    &project_id,
+                    chapter_id_for_action,
+                    "status_update",
+                    old_status.clone().unwrap_or_else(|| "pending".to_string()),
+                    &normalized_status,
+                    &now
+                ],
+            );
+        }
+
+        let affected = conn
+            .execute(
+                "UPDATE ai_review_queue
+                 SET status = ?1, updated_at = ?2
+                 WHERE id = ?3 AND project_id = ?4",
+                params![&normalized_status, &now, review_item_id, &project_id],
+            )
+            .map_err(|err| {
+                AppErrorDto::new("DB_WRITE_FAILED", "更新审查队列失败", true)
+                    .with_detail(err.to_string())
+            })?;
+        if affected == 0 {
+            if old_status.is_none() {
+                return Err(AppErrorDto::new(
+                    "REVIEW_QUEUE_ITEM_NOT_FOUND",
+                    "审查队列项不存在",
+                    true,
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    pub fn list_review_work_items(
+        &self,
+        project_root: &str,
+        chapter_id: Option<&str>,
+        task_type: Option<&str>,
+        status: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<ReviewQueueItem>, AppErrorDto> {
+        let conn = open_database(Path::new(project_root)).map_err(|err| {
+            AppErrorDto::new("DB_OPEN_FAILED", "无法打开项目数据库", false)
+                .with_detail(err.to_string())
+        })?;
+        let project_id = get_project_id(&conn)?;
+        let normalized_status = status
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_ascii_lowercase);
+        let normalized_task = task_type
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+        let normalized_chapter = chapter_id
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, run_id, task_type, title, severity, message, status, created_at
+                 FROM story_os_v2_review_work_items
+                 WHERE project_id = ?1
+                   AND (?2 IS NULL OR chapter_id = ?2)
+                   AND (?3 IS NULL OR task_type = ?3)
+                   AND (?4 IS NULL OR status = ?4)
+                 ORDER BY created_at DESC
+                 LIMIT ?5",
+            )
+            .map_err(|err| {
+                AppErrorDto::new("DB_QUERY_FAILED", "查询审查工单失败", true)
+                    .with_detail(err.to_string())
+            })?;
+        let rows = stmt
+            .query_map(
+                params![
+                    &project_id,
+                    normalized_chapter,
+                    normalized_task,
+                    normalized_status,
+                    limit.max(1) as i64
+                ],
+                |row| {
+                    Ok(ReviewQueueItem {
+                        id: row.get(0)?,
+                        run_id: row.get(1)?,
+                        task_type: row.get(2)?,
+                        title: row.get(3)?,
+                        severity: row.get(4)?,
+                        message: row.get(5)?,
+                        status: row.get(6)?,
+                        created_at: row.get(7)?,
+                    })
+                },
+            )
+            .map_err(|err| {
+                AppErrorDto::new("DB_QUERY_FAILED", "查询审查工单失败", true)
+                    .with_detail(err.to_string())
+            })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(|err| {
+            AppErrorDto::new("DB_QUERY_FAILED", "解析审查工单失败", true)
+                .with_detail(err.to_string())
+        })
+    }
+
     fn persist_structured_draft_pool(
         &self,
         conn: &mut rusqlite::Connection,
@@ -1281,6 +1509,213 @@ impl ContextService {
         }
 
         Ok((relationship_drafts, involvement_drafts, scene_drafts))
+    }
+
+    fn load_review_queue(
+        &self,
+        conn: &rusqlite::Connection,
+        project_id: &str,
+        chapter_id: &str,
+    ) -> Result<Vec<ReviewQueueItem>, AppErrorDto> {
+        let mut stmt_v2 = conn
+            .prepare(
+                "SELECT id, run_id, task_type, title, severity, message, status, created_at
+                 FROM story_os_v2_review_work_items
+                 WHERE project_id = ?1
+                   AND chapter_id = ?2
+                   AND status = 'pending'
+                 ORDER BY
+                   CASE severity
+                     WHEN 'high' THEN 0
+                     WHEN 'medium' THEN 1
+                     ELSE 2
+                   END,
+                   created_at DESC
+                 LIMIT 20",
+            )
+            .map_err(|err| {
+                AppErrorDto::new("DB_QUERY_FAILED", "查询审查队列失败", true)
+                    .with_detail(err.to_string())
+            })?;
+
+        let rows_v2 = stmt_v2
+            .query_map(params![project_id, chapter_id], |row| {
+                Ok(ReviewQueueItem {
+                    id: row.get(0)?,
+                    run_id: row.get(1)?,
+                    task_type: row.get(2)?,
+                    title: row.get(3)?,
+                    severity: row.get(4)?,
+                    message: row.get(5)?,
+                    status: row.get(6)?,
+                    created_at: row.get(7)?,
+                })
+            })
+            .map_err(|err| {
+                AppErrorDto::new("DB_QUERY_FAILED", "查询审查队列失败", true)
+                    .with_detail(err.to_string())
+            })?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|err| {
+                AppErrorDto::new("DB_QUERY_FAILED", "解析审查队列失败", true)
+                    .with_detail(err.to_string())
+            })?;
+        if !rows_v2.is_empty() {
+            return Ok(rows_v2);
+        }
+
+        let mut stmt_legacy = conn
+            .prepare(
+                "SELECT id, run_id, task_type, title, severity, message, status, created_at
+                 FROM ai_review_queue
+                 WHERE project_id = ?1
+                   AND chapter_id = ?2
+                   AND status = 'pending'
+                 ORDER BY
+                   CASE severity
+                     WHEN 'high' THEN 0
+                     WHEN 'medium' THEN 1
+                     ELSE 2
+                   END,
+                   created_at DESC
+                 LIMIT 20",
+            )
+            .map_err(|err| {
+                AppErrorDto::new("DB_QUERY_FAILED", "查询审查队列失败", true)
+                    .with_detail(err.to_string())
+            })?;
+        let rows_legacy = stmt_legacy
+            .query_map(params![project_id, chapter_id], |row| {
+                Ok(ReviewQueueItem {
+                    id: row.get(0)?,
+                    run_id: row.get(1)?,
+                    task_type: row.get(2)?,
+                    title: row.get(3)?,
+                    severity: row.get(4)?,
+                    message: row.get(5)?,
+                    status: row.get(6)?,
+                    created_at: row.get(7)?,
+                })
+            })
+            .map_err(|err| {
+                AppErrorDto::new("DB_QUERY_FAILED", "查询审查队列失败", true)
+                    .with_detail(err.to_string())
+            })?;
+
+        rows_legacy.collect::<Result<Vec<_>, _>>().map_err(|err| {
+            AppErrorDto::new("DB_QUERY_FAILED", "解析审查队列失败", true)
+                .with_detail(err.to_string())
+        })
+    }
+
+    fn load_latest_checkpoint_summary(
+        &self,
+        conn: &rusqlite::Connection,
+        project_id: &str,
+        chapter_id: &str,
+    ) -> Result<Option<StoryCheckpointSummary>, AppErrorDto> {
+        let row = conn
+            .query_row(
+                "SELECT id, run_id, task_type, status, created_at
+                 FROM ai_story_checkpoints
+                 WHERE project_id = ?1 AND chapter_id = ?2
+                 ORDER BY created_at DESC
+                 LIMIT 1",
+                params![project_id, chapter_id],
+                |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, String>(2)?,
+                        r.get::<_, String>(3)?,
+                        r.get::<_, String>(4)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(|err| {
+                AppErrorDto::new("DB_QUERY_FAILED", "查询最近检查点失败", true)
+                    .with_detail(err.to_string())
+            })?;
+        let Some((checkpoint_id, run_id, task_type, status, created_at)) = row else {
+            return Ok(None);
+        };
+        let review_pending_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM story_os_v2_review_work_items
+                 WHERE checkpoint_id = ?1 AND status = 'pending'",
+                params![&checkpoint_id],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+        let review_total_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM story_os_v2_review_work_items
+                 WHERE checkpoint_id = ?1",
+                params![&checkpoint_id],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+        Ok(Some(StoryCheckpointSummary {
+            checkpoint_id,
+            run_id,
+            task_type,
+            status,
+            created_at,
+            review_pending_count,
+            review_total_count,
+        }))
+    }
+
+    fn load_polish_summary(
+        &self,
+        conn: &rusqlite::Connection,
+        project_id: &str,
+        chapter_id: Option<&str>,
+    ) -> Result<PolishSummary, AppErrorDto> {
+        let normalized_chapter = chapter_id
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        let mut stmt = conn
+            .prepare(
+                "SELECT status, COUNT(*)
+                 FROM story_os_v2_review_work_items
+                 WHERE project_id = ?1
+                   AND (?2 IS NULL OR chapter_id = ?2)
+                 GROUP BY status",
+            )
+            .map_err(|err| {
+                AppErrorDto::new("DB_QUERY_FAILED", "查询精修汇总失败", true)
+                    .with_detail(err.to_string())
+            })?;
+        let rows = stmt
+            .query_map(params![project_id, normalized_chapter], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .map_err(|err| {
+                AppErrorDto::new("DB_QUERY_FAILED", "查询精修汇总失败", true)
+                    .with_detail(err.to_string())
+            })?;
+        let mut summary = PolishSummary {
+            pending: 0,
+            resolved: 0,
+            rejected: 0,
+            total: 0,
+        };
+        for row in rows {
+            let (status, count) = row.map_err(|err| {
+                AppErrorDto::new("DB_QUERY_FAILED", "解析精修汇总失败", true)
+                    .with_detail(err.to_string())
+            })?;
+            match status.as_str() {
+                "pending" => summary.pending = count,
+                "resolved" => summary.resolved = count,
+                "rejected" => summary.rejected = count,
+                _ => {}
+            }
+            summary.total += count;
+        }
+        Ok(summary)
     }
 
     fn find_or_create_character(

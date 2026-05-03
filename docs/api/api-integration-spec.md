@@ -1,10 +1,10 @@
 # NovelForge API 集成文档（Frontend <-> Tauri <-> Rust）
 
 ## 1. 文档信息
-- 版本：v0.7
-- 状态：S18（AI Pipeline v1 + 结构化草案池闭环）
-- 最后更新：2026-04-29
-- 代码基线：`src/api/*`、`src-tauri/src/commands/*`
+- 版本：v0.8
+- 状态：生产就绪（AI Pipeline v1 + 结构化草案池闭环 + 完整命令体系）
+- 最后更新：2026-05-03
+- 代码基线：`src/api/*`、`src-tauri/src/commands/*`、`src-tauri/src/lib.rs`
 
 ## 2. 集成原则（当前）
 - 前端统一通过 `invokeCommand` 调用 Rust command。

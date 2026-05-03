@@ -1,37 +1,54 @@
 # NovelForge 运行流程文档（Main / Renderer / API / Service）
 
 ## 1. 文档信息
-- 版本：v0.7
-- 状态：S18（AI Pipeline v1 已接入编辑器主链路）
-- 最后更新：2026-04-29
+- 版本：v0.8
+- 状态：生产就绪（AI Pipeline v1 已接入编辑器主链路 + 完整命令体系）
+- 最后更新：2026-05-03
 
 ## 2. 运行时角色
 ### 2.1 Main（Tauri + Rust）
-- 启动应用并注册 `invoke_handler`。
-- 托管 `AppState`。
+- 启动应用并注册 `invoke_handler`（共 100+ 命令）。
+- 托管 `AppState`（包含 20+ 服务）。
 - 执行本地文件系统、SQLite、Provider/模型、AI Pipeline、技能注册表逻辑。
+- 初始化技能注册表（builtin + custom）。
+- 延迟预加载 Provider 适配器（3 秒后台线程）。
 
 ### 2.2 Renderer（React）
-- 页面渲染与用户交互。
+- 页面渲染与用户交互（15 个页面路由）。
 - 通过 `src/api/*` 调用 `invokeCommand`。
 - 编辑器 AI 主链路走 `pipelineApi`，并监听 `ai:pipeline:event`。
+- 状态管理：`projectStore`（项目元数据）、`uiStore`（路由、主题、错误）、`editorStore`（编辑器状态）。
 
 ### 2.3 API 适配层（`src/api/*`）
 - `tauriClient.invokeCommand()` 统一调用与错误解析。
 - 关键链路：
-  - `projectApi` / `chapterApi` / `contextApi`
-  - `pipelineApi`（run/cancel/stream）
-  - `settingsApi`（Provider/路由/编辑器设置/写作风格/Git/授权/更新）
-  - `skillsApi`（技能管理）
+  - `projectApi`: 项目创建/打开/最近项目/写作风格/Git
+  - `chapterApi`: 章节 CRUD/保存/草稿/快照/卷管理/导入/备份
+  - `contextApi`: 上下文聚合/资产候选/结构化草案
+  - `pipelineApi`: AI 任务管道（run/cancel/stream）
+  - `settingsApi`: Provider/模型/路由/编辑器设置/授权/更新
+  - `skillsApi`: 技能管理
+  - `blueprintApi`, `characterApi`, `worldApi`, `glossaryApi`, `plotApi`, `narrativeApi`: 资产管理
+  - `consistencyApi`: 一致性检查
+  - `exportApi`: 导出
+  - `statsApi`: 仪表盘统计
+  - `timelineApi`: 时间线
 
 ### 2.4 兼容层
 - 问题3修复：legacy AI 命令 `generate_ai_preview`、`stream_ai_generate`、`stream_ai_chapter_task` 已从当前代码命令面移除。
-- 问题4修复：仅保留少量 compatibility-only 命令（如 `load_provider_config`、`save_provider_config`、`register_ai_provider`、`test_ai_connection`），用于历史调用兼容。
+- 问题4修复：仅保留少量 compatibility-only 命令（如 `load_provider_config`、`save_provider_config`、`register_ai_provider`、`test_ai_connection`），用于历史调用兼容，已标记 deprecated。
 
 ## 3. 启动流程
 1. `main.rs` 调用 `app_lib::run()`。
-2. `lib.rs` 注册 command、初始化 `AppState` 与技能注册表。
-3. 前端进入 `project-center`；打开项目后进入 `AppShell`。
+2. `lib.rs` 注册 100+ command、初始化 `AppState` 与技能注册表。
+3. 技能注册表初始化：
+   - 解析 builtin skills 目录（`resources/builtin-skills`）
+   - 解析 custom skills 目录（`~/.novelforge/skills`）
+   - 加载所有技能元数据与内容
+4. 延迟预加载 Provider 适配器（3 秒后台线程）：
+   - 从应用级数据库加载所有 Provider 配置
+   - 为每个 Provider 调用 `ai_service.reload_provider()`
+5. 前端进入 `project-center`；打开项目后进入 `AppShell`。
 
 ## 4. 主流程时序（当前实现）
 ### 4.1 项目创建/打开

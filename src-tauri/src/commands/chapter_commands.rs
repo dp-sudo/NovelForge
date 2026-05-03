@@ -186,8 +186,6 @@ pub async fn delete_chapter(
         .delete_chapter(&project_root, &input.id)
 }
 
-// ── Snapshot Commands ──
-
 #[tauri::command]
 pub async fn create_snapshot(
     project_root: String,
@@ -225,8 +223,6 @@ pub async fn read_snapshot_content(
         .chapter_service
         .read_snapshot_content(&project_root, &snapshot_id)
 }
-
-// ── Volume Commands ──
 
 #[tauri::command]
 pub async fn list_volumes(

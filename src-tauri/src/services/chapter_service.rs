@@ -893,8 +893,6 @@ fn build_chapter_markdown(input: ChapterMarkdownInput<'_>) -> String {
     .join("\n")
 }
 
-// ── Snapshot / Version Management ──
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SnapshotRecord {
@@ -1070,8 +1068,6 @@ impl ChapterService {
             .ok_or_else(|| AppErrorDto::new("SNAPSHOT_FILE_MISSING", "快照文件已不存在", false))
     }
 }
-
-// ── Volume Management ──
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

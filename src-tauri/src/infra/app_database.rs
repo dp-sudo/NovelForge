@@ -333,8 +333,6 @@ pub fn delete_provider(conn: &Connection, provider_id: &str) -> Result<(), AppEr
     Ok(())
 }
 
-// ── llm_models CRUD ──
-
 /// List all models for a provider.
 pub fn load_models(conn: &Connection, provider_id: &str) -> Result<Vec<ModelRecord>, AppErrorDto> {
     let mut stmt = conn.prepare(
@@ -475,8 +473,6 @@ pub fn insert_refresh_log(
     Ok(())
 }
 
-// ── llm_task_routes CRUD ──
-
 /// Load all task routes.
 pub fn load_task_routes(conn: &Connection) -> Result<Vec<TaskRoute>, AppErrorDto> {
     let mut stmt = conn
@@ -561,8 +557,6 @@ pub fn delete_task_route(conn: &Connection, route_id: &str) -> Result<(), AppErr
     })?;
     Ok(())
 }
-
-// ── app_settings CRUD ──
 
 /// Load a single app setting by key. Returns None if not found.
 pub fn load_app_setting(conn: &Connection, key: &str) -> Result<Option<String>, AppErrorDto> {

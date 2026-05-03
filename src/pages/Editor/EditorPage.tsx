@@ -23,6 +23,7 @@ import {
   applyAssetCandidate,
   applyStructuredDraft,
   getChapterContext,
+  updateReviewQueueItemStatus,
   type ChapterContext
 } from "../../api/contextApi";
 import {
@@ -74,13 +75,14 @@ const STRUCTURED_DRAFT_STATUS_LABEL: Record<"pending" | "applying" | "applied" |
 
 const PIPELINE_PHASE_LABEL: Record<string, string> = {
   validate: "参数校验",
-  context: "上下文聚合",
+  compile_context: "上下文编译",
   route: "任务路由",
-  prompt: "提示词构建",
+  compose_prompt: "提示词组装",
   generate: "模型生成",
   postprocess: "结果整理",
+  review: "审查清单",
   persist: "结果落库",
-  done: "完成",
+  checkpoint: "检查点",
   run: "任务启动"
 };
 
@@ -102,12 +104,13 @@ const PIPELINE_SUGGESTION_BY_ERROR_CODE: Record<string, string> = {
 
 const PIPELINE_SUGGESTION_BY_PHASE: Record<string, string> = {
   validate: "检查输入参数（章节、选区、任务描述）后重试。",
-  context: "检查项目目录和章节数据是否可读，必要时重开项目。",
+  compile_context: "检查项目目录和章节数据是否可读，必要时重开项目。",
   route: "检查任务路由的 Provider 与模型 ID 是否已配置。",
-  prompt: "检查技能模板或提示词参数是否完整。",
+  compose_prompt: "检查技能模板或提示词参数是否完整。",
   generate: "检查 API Key、模型可用性与网络状态，必要时切换模型。",
   postprocess: "模型返回格式异常，请重试；若持续失败可更换模型。",
   persist: "检查项目目录写权限和数据库状态后重试。",
+  checkpoint: "检查 v2 治理表是否完整，并确认检查点与审查工单落库成功。",
   run: "检查控制台日志，确认后端命令是否执行成功。"
 };
 
@@ -140,7 +143,10 @@ export function EditorPage() {
   const [editorNotice, setEditorNotice] = useState<string | null>(null);
   const [candidateStatus, setCandidateStatus] = useState<Record<string, "idle" | "applying" | "applied" | "error">>({});
   const [structuredDraftStatus, setStructuredDraftStatus] = useState<Record<string, "applying" | "error">>({});
+  const [reviewQueueUpdating, setReviewQueueUpdating] = useState<Record<string, boolean>>({});
   const [currentTab, setCurrentTab] = useState<"characters" | "world" | "plot" | "glossary">("characters");
+  const [aiTaskContractHint, setAiTaskContractHint] = useState<string | null>(null);
+  const [aiReviewHints, setAiReviewHints] = useState<string[]>([]);
 
   const chapterId = useEditorStore((s) => s.activeChapterId);
   const chapterTitle = useEditorStore((s) => s.activeChapterTitle);
@@ -205,6 +211,7 @@ export function EditorPage() {
       setContext(null);
       setCandidateStatus({});
       setStructuredDraftStatus({});
+      setReviewQueueUpdating({});
       return;
     }
     const cid: string = chapterId;
@@ -227,7 +234,6 @@ export function EditorPage() {
         recoverDraft,
       });
       if (!cancelled) {
-        // 问题1修复(2/3): 先读取正式正文，再进行草稿恢复决策，防止恢复提示与正文加载顺序冲突。
         setLoadedContent(persistedContent);
         if (recoveryContent) {
           setRecoveryContent(recoveryContent);
@@ -250,7 +256,6 @@ export function EditorPage() {
   useEffect(() => {
     const wc = content.replace(/\s+/g, "").length;
     store.setWordCount(wc);
-    // 问题1修复(3/3): 加载正式正文时不标记 unsaved，避免误触发自动保存覆盖已有内容。
     if (hydratingContentRef.current) {
       hydratingContentRef.current = false;
       return;
@@ -345,6 +350,19 @@ export function EditorPage() {
     return parts.join(" | ") || "AI 生成异常，请检查控制台日志";
   }, []);
 
+  const formatTaskContractHint = useCallback((meta: Record<string, unknown> | null | undefined): string | null => {
+    if (!meta) return null;
+    const raw = meta.taskContract;
+    if (!raw || typeof raw !== "object") return null;
+    const contract = raw as Record<string, unknown>;
+    const authorityLayer = typeof contract.authorityLayer === "string" ? contract.authorityLayer : "";
+    const stateLayer = typeof contract.stateLayer === "string" ? contract.stateLayer : "";
+    const capabilityPack = typeof contract.capabilityPack === "string" ? contract.capabilityPack : "";
+    const reviewGate = typeof contract.reviewGate === "string" ? contract.reviewGate : "";
+    if (!authorityLayer && !stateLayer && !capabilityPack && !reviewGate) return null;
+    return `权威层: ${authorityLayer || "n/a"} | 状态层: ${stateLayer || "n/a"} | 能力包: ${capabilityPack || "n/a"} | 审查门: ${reviewGate || "n/a"}`;
+  }, []);
+
   const cancelActivePipeline = useCallback(async (reason: string = "manual") => {
     const requestId = activeAiRequestIdRef.current;
     if (!requestId) return;
@@ -379,6 +397,7 @@ export function EditorPage() {
       await refreshChapterContext(projectRoot, chapterId);
       setCandidateStatus({});
       setStructuredDraftStatus({});
+      setReviewQueueUpdating({});
     } catch {
       store.setSaveStatus("error");
     }
@@ -391,6 +410,7 @@ export function EditorPage() {
     store.setIsDirty(false);
     setCandidateStatus({});
     setStructuredDraftStatus({});
+    setReviewQueueUpdating({});
     setShowRecovery(false);
     setShowAiPanel(false);
     store.resetAiPreview();
@@ -469,6 +489,8 @@ export function EditorPage() {
 
     setShowAiPanel(true);
     setOriginalText(selectedText);
+    setAiTaskContractHint(null);
+    setAiReviewHints([]);
     store.resetAiPreview();
     store.setAiTaskType(canonicalTask);
     store.setAiStreamStatus("streaming");
@@ -497,8 +519,38 @@ export function EditorPage() {
           store.appendAiPreviewContent(event.delta);
           continue;
         }
+        if (event.type === "progress") {
+          const contractHint = formatTaskContractHint(event.meta ?? null);
+          if (contractHint) {
+            setAiTaskContractHint(contractHint);
+          }
+          const reviewHints = (() => {
+            if (!event.meta || typeof event.meta !== "object") return null;
+            const reviewChecklist = (event.meta as Record<string, unknown>).reviewChecklist;
+            if (!Array.isArray(reviewChecklist)) return null;
+            const hints = reviewChecklist
+              .map((item) => {
+                if (!item || typeof item !== "object") return null;
+                const row = item as Record<string, unknown>;
+                const status = typeof row.status === "string" ? row.status : "";
+                const title = typeof row.title === "string" ? row.title : "审查项";
+                const message = typeof row.message === "string" ? row.message : "";
+                if (status !== "attention") return null;
+                return `${title}: ${message}`;
+              })
+              .filter((value): value is string => Boolean(value));
+            return hints;
+          })();
+          if (reviewHints) {
+            setAiReviewHints(reviewHints);
+          }
+          continue;
+        }
         if (event.type === "done") {
           store.setAiStreamStatus("completed");
+          if (projectRoot && chapterId) {
+            void refreshChapterContext(projectRoot, chapterId);
+          }
           continue;
         }
         if (event.type === "error") {
@@ -793,6 +845,30 @@ export function EditorPage() {
     }
   }
 
+  async function handleUpdateReviewQueueItem(itemId: string, status: "pending" | "resolved" | "rejected") {
+    if (!projectRoot || !chapterId) return;
+    setReviewQueueUpdating((prev) => ({ ...prev, [itemId]: true }));
+    try {
+      await updateReviewQueueItemStatus(projectRoot, itemId, status);
+      await refreshChapterContext(projectRoot, chapterId);
+      setEditorNotice(
+        status === "resolved"
+          ? "审查项已标记为已处理"
+          : status === "rejected"
+            ? "审查项已标记为驳回"
+            : "审查项已回到待办"
+      );
+    } catch (err) {
+      setEditorNotice(err instanceof Error ? err.message : "更新审查项失败");
+    } finally {
+      setReviewQueueUpdating((prev) => {
+        const next = { ...prev };
+        delete next[itemId];
+        return next;
+      });
+    }
+  }
+
   const volumeFilterOptions = useMemo(
     () => [
       { value: "all", label: "全部卷" },
@@ -1004,6 +1080,8 @@ export function EditorPage() {
             errorMessage={aiStreamError}
             originalText={originalText}
             taskType={aiTaskType}
+            taskContractHint={aiTaskContractHint}
+            reviewHints={aiReviewHints}
             onInsert={handleAiInsert}
             onDiscard={handleAiDiscard}
             onCopy={handleAiCopy}
@@ -1275,6 +1353,78 @@ export function EditorPage() {
                     })
                   )}
                 </div>
+              </div>
+
+              <div className="mt-3 pt-3 border-t border-surface-700 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="text-xs font-semibold text-surface-400 uppercase tracking-wider">
+                    审查队列
+                  </div>
+                  <span className="text-[11px] text-surface-500">
+                    {context.reviewQueue.length.toString()} 条
+                  </span>
+                </div>
+                {context.latestCheckpoint && (
+                  <div className="p-2 rounded-lg bg-surface-800 border border-surface-700 text-[11px] text-surface-400">
+                    <div>最近检查点：{context.latestCheckpoint.taskType}</div>
+                    <div>
+                      待办 {context.latestCheckpoint.reviewPendingCount} / 总计 {context.latestCheckpoint.reviewTotalCount}
+                    </div>
+                    <div>{new Date(context.latestCheckpoint.createdAt).toLocaleString("zh-CN")}</div>
+                  </div>
+                )}
+                <div className="text-[11px] text-surface-500">
+                  精修汇总：待办 {context.polishSummary.pending} · 已处理 {context.polishSummary.resolved} · 驳回 {context.polishSummary.rejected}
+                </div>
+                {context.reviewQueue.length === 0 ? (
+                  <p className="text-xs text-surface-500">当前章节暂无待精修项</p>
+                ) : (
+                  <div className="space-y-2">
+                    {context.reviewQueue.slice(0, 6).map((item) => (
+                      <div key={item.id} className="p-2 bg-surface-700/50 rounded-lg">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-sm text-surface-200">{item.title}</span>
+                          <span className={`text-[11px] ${
+                            item.severity === "high"
+                              ? "text-error"
+                              : item.severity === "medium"
+                                ? "text-warning"
+                                : "text-surface-500"
+                          }`}>
+                            {item.severity}
+                          </span>
+                        </div>
+                        <p className="text-xs text-surface-400 mt-1">{item.message}</p>
+                        <p className="text-[11px] text-surface-500 mt-1">
+                          {new Date(item.createdAt).toLocaleString("zh-CN")}
+                        </p>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          <button
+                            onClick={() => void handleUpdateReviewQueueItem(item.id, "resolved")}
+                            disabled={reviewQueueUpdating[item.id]}
+                            className="px-2 py-1 text-[11px] bg-surface-800 text-surface-200 border border-surface-600 rounded hover:bg-surface-700 disabled:opacity-40 transition-colors"
+                          >
+                            {reviewQueueUpdating[item.id] ? "处理中..." : "标记已处理"}
+                          </button>
+                          <button
+                            onClick={() => void handleUpdateReviewQueueItem(item.id, "rejected")}
+                            disabled={reviewQueueUpdating[item.id]}
+                            className="px-2 py-1 text-[11px] bg-surface-800 text-warning border border-surface-600 rounded hover:bg-surface-700 disabled:opacity-40 transition-colors"
+                          >
+                            驳回
+                          </button>
+                          <button
+                            onClick={() => void handleUpdateReviewQueueItem(item.id, "pending")}
+                            disabled={reviewQueueUpdating[item.id]}
+                            className="px-2 py-1 text-[11px] bg-surface-800 text-info border border-surface-600 rounded hover:bg-surface-700 disabled:opacity-40 transition-colors"
+                          >
+                            回待办
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <div className="mt-3 pt-3 border-t border-surface-700">

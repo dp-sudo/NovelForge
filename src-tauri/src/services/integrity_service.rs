@@ -142,7 +142,40 @@ impl IntegrityService {
                         detail: Some(format!("当前迁移版本: {}", versions.join(", "))),
                         auto_fixable: false,
                     });
+                } else if !versions.contains(&"0005_story_os_v2_governance".to_string()) {
+                    issues.push(IntegrityIssue {
+                        severity: "error".into(),
+                        category: "schema_migration".into(),
+                        message: "缺少 Story OS v2 迁移记录 0005_story_os_v2_governance".into(),
+                        detail: Some(format!("当前迁移版本: {}", versions.join(", "))),
+                        auto_fixable: false,
+                    });
                 }
+            }
+        }
+
+        // (f) Check Story OS v2 governance tables are present
+        for table in [
+            "story_os_v2_run_ledger",
+            "story_os_v2_context_snapshots",
+            "story_os_v2_review_work_items",
+            "story_os_v2_polish_actions",
+        ] {
+            let count: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                    params![table],
+                    |row| row.get(0),
+                )
+                .unwrap_or(0);
+            if count == 0 {
+                issues.push(IntegrityIssue {
+                    severity: "error".into(),
+                    category: "schema_table".into(),
+                    message: format!("缺少 v2 治理表：{}", table),
+                    detail: None,
+                    auto_fixable: false,
+                });
             }
         }
 
@@ -268,7 +301,7 @@ mod tests {
             .expect("check_project failed");
         assert_eq!(report.status, "healthy");
         assert!(report.issues.is_empty());
-        assert_eq!(report.summary.schema_version, "0003_pipeline_draft_pool");
+        assert_eq!(report.summary.schema_version, "0005_story_os_v2_governance");
 
         remove_temp_workspace(&ws);
     }

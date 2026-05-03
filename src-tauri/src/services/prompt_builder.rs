@@ -50,17 +50,14 @@ impl PromptBuilder {
 
         let mut parts = vec![];
 
-        // Role
         parts.push("# 角色".to_string());
         parts.push("你是专业长篇小说章节写作助手，擅长按照既定角色、世界规则和剧情节点生成稳定的章节草稿。".to_string());
         parts.push(String::new());
 
-        // Task
         parts.push("# 任务".to_string());
         parts.push("根据当前章节目标生成一版章节正文草稿。".to_string());
         parts.push(String::new());
 
-        // Project context
         parts.push("# 固定上下文".to_string());
         parts.push(format!("作品名称：{}", global.project_name));
         parts.push(format!("题材：{}", global.genre));
@@ -86,7 +83,6 @@ impl PromptBuilder {
         }
         parts.push(String::new());
 
-        // Current chapter info
         if let Some(ref ch) = related.chapter {
             parts.push("# 当前章节信息".to_string());
             parts.push(format!("章节标题：{}", ch.title));
@@ -97,7 +93,6 @@ impl PromptBuilder {
             parts.push(String::new());
         }
 
-        // Plot nodes
         if !related.plot_nodes.is_empty() {
             parts.push("# 关联剧情节点".to_string());
             for node in &related.plot_nodes {
@@ -112,7 +107,6 @@ impl PromptBuilder {
             parts.push(String::new());
         }
 
-        // Characters
         if !related.characters.is_empty() {
             parts.push("# 出场角色".to_string());
             for ch in &related.characters {
@@ -125,7 +119,6 @@ impl PromptBuilder {
             parts.push(String::new());
         }
 
-        // World rules
         if !related.world_rules.is_empty() {
             parts.push("# 相关世界规则".to_string());
             for rule in &related.world_rules {
@@ -138,7 +131,6 @@ impl PromptBuilder {
             parts.push(String::new());
         }
 
-        // Previous chapter summary
         if let Some(ref prev_summary) = related.previous_chapter_summary {
             if !prev_summary.is_empty() {
                 parts.push("# 上一章摘要".to_string());
@@ -147,12 +139,10 @@ impl PromptBuilder {
             }
         }
 
-        // User instruction
         parts.push("# 写作要求".to_string());
         parts.push(user_instruction.to_string());
         parts.push(String::new());
 
-        // Constraints
         parts.push("# 严格约束".to_string());
         parts.push("1. 不得改写已锁定设定。".to_string());
         parts.push("2. 不得新增没有铺垫的重大世界规则。".to_string());
@@ -168,7 +158,6 @@ impl PromptBuilder {
         }
         parts.push(String::new());
 
-        // Output format
         parts.push("# 输出".to_string());
         parts.push("请只输出章节正文，不要输出解释。".to_string());
 
@@ -391,7 +380,6 @@ impl PromptBuilder {
         parts.push("检查当前章节是否违反角色、名词、世界规则、时间线或文风约束。".to_string());
         parts.push(String::new());
 
-        // Locked terms
         if !global.locked_terms.is_empty() {
             parts.push("# 已锁定名词".to_string());
             for term in &global.locked_terms {
@@ -400,7 +388,6 @@ impl PromptBuilder {
             parts.push(String::new());
         }
 
-        // Banned terms
         if !global.banned_terms.is_empty() {
             parts.push("# 禁用词".to_string());
             for term in &global.banned_terms {

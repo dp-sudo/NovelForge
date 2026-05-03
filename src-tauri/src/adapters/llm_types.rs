@@ -3,8 +3,6 @@ use std::collections::HashMap;
 
 use crate::errors::AppErrorDto;
 
-// ── LlmError (14 spec-aligned variants) ──
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum LlmError {
@@ -114,8 +112,6 @@ impl LlmError {
     }
 }
 
-// ── Message types ──
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Message {
@@ -130,8 +126,6 @@ pub struct ContentBlock {
     pub block_type: String,
     pub text: Option<String>,
 }
-
-// ── UnifiedGenerateRequest (18 fields) ──
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -154,8 +148,6 @@ pub struct UnifiedGenerateRequest {
     /// Task type for route resolution (e.g. "chapter_draft", "consistency_scan")
     pub task_type: Option<String>,
 }
-
-// ── UnifiedGenerateResponse (10 fields) ──
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -189,8 +181,6 @@ pub struct Usage {
     pub prompt_tokens_details: Option<serde_json::Value>,
 }
 
-// ── StreamChunk ──
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StreamChunk {
@@ -204,8 +194,6 @@ pub struct StreamChunk {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning: Option<String>,
 }
-
-// ── ProviderConfig ──
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -230,8 +218,6 @@ pub struct ProviderConfig {
     pub models_path: Option<String>,
     pub last_model_refresh_at: Option<String>,
 }
-
-// ── ModelRecord (app-level llm_models table) ──
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -258,8 +244,6 @@ pub struct ModelRecord {
     pub updated_at: String,
 }
 
-// ── CapabilityReport ──
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CapabilityReport {
@@ -272,8 +256,6 @@ pub struct CapabilityReport {
     pub thinking: bool,
     pub error: Option<String>,
 }
-
-// ── RefreshLog ──
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -289,8 +271,6 @@ pub struct RefreshLog {
     pub created_at: String,
 }
 
-// ── TaskRoute ──
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskRoute {
@@ -304,8 +284,6 @@ pub struct TaskRoute {
     pub created_at: Option<String>,
     pub updated_at: Option<String>,
 }
-
-// ── ModelInfo (registry) ──
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

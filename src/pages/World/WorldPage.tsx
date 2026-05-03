@@ -30,7 +30,6 @@ const CONSTRAINTS = [
 const emptyForm = { title: "", category: "世界规则" as const, description: "", constraintLevel: "normal" as const, examples: "" };
 
 function pickText(value: unknown): string | undefined {
-  // 问题7修复: 清理未使用解析器，保留当前仍被调用的最小规范化工具函数。
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 

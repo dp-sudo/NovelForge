@@ -568,7 +568,6 @@ impl LlmService for OpenAiCompatibleAdapter {
     }
 }
 
-// ── Capability-detection helpers (not part of LlmService trait) ──
 impl OpenAiCompatibleAdapter {
     async fn test_streaming(&self, model: &str, provider_id: &str) -> Result<bool, LlmError> {
         use tokio::sync::mpsc;

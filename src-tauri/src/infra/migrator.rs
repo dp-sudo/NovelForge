@@ -7,6 +7,8 @@
 //!   migrations/project/0001_init.sql
 //!   migrations/project/0002_task_route_unique.sql
 //!   migrations/project/0003_pipeline_draft_pool.sql
+//!   migrations/project/0004_story_os_review_queue.sql
+//!   migrations/project/0005_story_os_v2_governance.sql
 //!   migrations/app/0001_init.sql
 //!   migrations/app/0002_skill_index.sql
 //!   migrations/app/0003_task_route_unique.sql
@@ -44,6 +46,14 @@ fn project_migrations() -> Vec<Migration> {
         Migration {
             version: "0003_pipeline_draft_pool",
             sql: include_str!("../../migrations/project/0003_pipeline_draft_pool.sql"),
+        },
+        Migration {
+            version: "0004_story_os_review_queue",
+            sql: include_str!("../../migrations/project/0004_story_os_review_queue.sql"),
+        },
+        Migration {
+            version: "0005_story_os_v2_governance",
+            sql: include_str!("../../migrations/project/0005_story_os_v2_governance.sql"),
         },
     ]
 }

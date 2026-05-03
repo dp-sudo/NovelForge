@@ -1,5 +1,3 @@
-// ── LlmProviderConfig (matches Rust adapters::llm_types::ProviderConfig) ──
-
 export interface LlmProviderConfig {
   id: string;
   displayName: string;
@@ -22,8 +20,6 @@ export interface LlmProviderConfig {
   lastModelRefreshAt?: string;
 }
 
-// ── LlmModelConfig (spec §3.2) ──
-
 export interface LlmModelConfig {
   id: string;
   providerId: string;
@@ -41,8 +37,6 @@ export interface LlmModelConfig {
   status: string;
   recommendedFor: string[];
 }
-
-// ── UnifiedGenerateRequest (spec §3.3) ──
 
 export interface UnifiedGenerateRequest {
   providerId: string;
@@ -62,8 +56,6 @@ export interface UnifiedMessage {
   content: string;
 }
 
-// ── UnifiedGenerateResponse (spec §3.4) ──
-
 export interface UnifiedGenerateResponse {
   requestId: string;
   providerId: string;
@@ -76,8 +68,6 @@ export interface UnifiedGenerateResponse {
     totalTokens?: number;
   };
 }
-
-// ── LlmError (spec §20) ──
 
 export type LlmErrorCode =
   | "missing_api_key"
@@ -93,8 +83,6 @@ export type LlmErrorCode =
   | "invalid_json_response"
   | "unsupported_feature"
   | "unknown";
-
-// ── TaskRoute ──
 
 export interface TaskRoute {
   id: string;
@@ -128,8 +116,6 @@ export function defaultWritingStyle(): WritingStyle {
   };
 }
 
-// ── CapabilityReport ──
-
 export interface CapabilityReport {
   providerId: string;
   textResponse: boolean;
@@ -140,8 +126,6 @@ export interface CapabilityReport {
   thinking: boolean;
   error: string | null;
 }
-
-// ── ModelRecord ──
 
 export interface ModelRecord {
   id: string;
@@ -163,8 +147,6 @@ export interface ModelRecord {
   registryVersion?: string | null;
 }
 
-// ── RefreshLog ──
-
 export interface RefreshLog {
   id: string;
   providerId: string;
@@ -177,16 +159,12 @@ export interface RefreshLog {
   createdAt: string;
 }
 
-// ── RefreshResult ──
-
 export interface RefreshResult {
   added: number;
   updated: number;
   removed: number;
   capabilities: CapabilityReport;
 }
-
-// ── Built-in vendor info (display metadata) ──
 
 export interface VendorInfo {
   id: string;

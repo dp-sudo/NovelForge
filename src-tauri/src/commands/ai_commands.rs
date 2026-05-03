@@ -100,7 +100,6 @@ pub async fn register_ai_provider(
     config: ProviderConfig,
     state: State<'_, AppState>,
 ) -> Result<(), AppErrorDto> {
-    // 问题4修复(Deprecated 命令面): 兼容入口保留，官方路径为 settingsApi.save_provider。
     log::warn!("[DEPRECATED_COMMAND] register_ai_provider is compatibility-only");
     state.ai_service.register_provider(config).await;
     Ok(())
@@ -111,7 +110,6 @@ pub async fn test_ai_connection(
     provider_id: String,
     state: State<'_, AppState>,
 ) -> Result<(), AppErrorDto> {
-    // 问题4修复(Deprecated 命令面): 兼容入口保留，官方路径为 settingsApi.testProviderConnection。
     log::warn!("[DEPRECATED_COMMAND] test_ai_connection is compatibility-only");
     state.ai_service.test_connection(&provider_id).await
 }

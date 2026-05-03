@@ -485,8 +485,6 @@ impl AiService {
         adapter.test_connection().await.map_err(Into::into)
     }
 
-    // ── AI request logging ──
-
     /// Record an AI request in the project database for traceability.
     pub fn log_ai_request(
         &self,
@@ -537,8 +535,6 @@ impl AiService {
         }
     }
 }
-
-// ── Legacy preview types (kept for backward compatibility) ──
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]

@@ -32,13 +32,14 @@ use crate::services::{
 
 const PIPELINE_EVENT_NAME: &str = "ai:pipeline:event";
 const PHASE_VALIDATE: &str = "validate";
-const PHASE_CONTEXT: &str = "context";
+const PHASE_COMPILE_CONTEXT: &str = "compile_context";
 const PHASE_ROUTE: &str = "route";
-const PHASE_PROMPT: &str = "prompt";
+const PHASE_COMPOSE_PROMPT: &str = "compose_prompt";
 const PHASE_GENERATE: &str = "generate";
 const PHASE_POSTPROCESS: &str = "postprocess";
+const PHASE_REVIEW: &str = "review";
 const PHASE_PERSIST: &str = "persist";
-const PHASE_DONE: &str = "done";
+const PHASE_CHECKPOINT: &str = "checkpoint";
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -110,6 +111,47 @@ struct PipelineSuccess {
     output_text: String,
     route: TaskRouteResolution,
     persisted_records: Vec<PersistedRecord>,
+    story_checkpoint_id: Option<String>,
+    context_snapshot_id: Option<String>,
+    review_queue_count: usize,
+    context_compilation_snapshot: Value,
+    review_checklist: Vec<ReviewChecklistItem>,
+    review_work_items: Vec<ReviewWorkItemBrief>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ReviewChecklistItem {
+    key: String,
+    title: String,
+    severity: String,
+    status: String,
+    message: String,
+}
+
+#[derive(Debug, Clone)]
+struct ReviewChecklist {
+    items: Vec<ReviewChecklistItem>,
+    requires_human_review: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ReviewWorkItemBrief {
+    id: String,
+    key: String,
+    title: String,
+    severity: String,
+    message: String,
+    status: String,
+}
+
+#[derive(Debug, Clone)]
+struct StoryCheckpointRecord {
+    checkpoint_id: String,
+    review_queue_count: usize,
+    status: String,
+    review_work_items: Vec<ReviewWorkItemBrief>,
 }
 
 impl AiPipelineService {
@@ -143,6 +185,7 @@ impl AiPipelineService {
         input: RunAiTaskPipelineInput,
     ) -> Result<RunAiTaskPipelineResult, AppErrorDto> {
         let canonical_task = task_routing::canonical_task_type(&input.task_type).into_owned();
+        let task_contract = task_routing::task_execution_contract(&canonical_task);
         let started_at = Instant::now();
 
         let run_result = match self.insert_pipeline_run(
@@ -151,6 +194,7 @@ impl AiPipelineService {
             input.chapter_id.as_deref(),
             &canonical_task,
             input.ui_action.as_deref(),
+            &task_contract,
         ) {
             Ok(()) => {
                 self.run_pipeline_inner(
@@ -176,7 +220,7 @@ impl AiPipelineService {
                     &input.project_root,
                     &request_id,
                     "succeeded",
-                    PHASE_DONE,
+                    PHASE_CHECKPOINT,
                     None,
                     None,
                     started_at.elapsed().as_millis() as i64,
@@ -185,7 +229,7 @@ impl AiPipelineService {
                     app_handle,
                     AiPipelineEvent {
                         request_id: request_id.clone(),
-                        phase: PHASE_DONE.to_string(),
+                        phase: PHASE_CHECKPOINT.to_string(),
                         event_type: "done".to_string(),
                         delta: None,
                         error_code: None,
@@ -193,10 +237,18 @@ impl AiPipelineService {
                         recoverable: None,
                         meta: Some(json!({
                             "taskType": canonical_task,
+                            "taskContract": task_contract,
+                            "contextCompilationSnapshot": success.context_compilation_snapshot,
+                            "contextSnapshotId": success.context_snapshot_id,
+                            "reviewChecklist": success.review_checklist,
+                            "reviewWorkItems": success.review_work_items,
+                            "checkpointId": success.story_checkpoint_id.clone(),
                             "outputLength": success.output_text.chars().count(),
                             "providerId": success.route.provider_id,
                             "modelId": success.route.model_id,
                             "persistedRecords": success.persisted_records.clone(),
+                            "storyCheckpointId": success.story_checkpoint_id,
+                            "reviewQueueCount": success.review_queue_count,
                         })),
                     },
                 );
@@ -267,6 +319,7 @@ impl AiPipelineService {
         canonical_task: &str,
         input: &RunAiTaskPipelineInput,
     ) -> Result<PipelineSuccess, StageError> {
+        let task_contract = task_routing::task_execution_contract(canonical_task);
         self.touch_pipeline_phase(&input.project_root, request_id, PHASE_VALIDATE);
         self.emit_event(
             app_handle,
@@ -278,7 +331,10 @@ impl AiPipelineService {
                 error_code: None,
                 message: Some("validating input".to_string()),
                 recoverable: None,
-                meta: Some(json!({ "taskType": canonical_task })),
+                meta: Some(json!({
+                    "taskType": canonical_task,
+                    "taskContract": task_contract,
+                })),
             },
         );
         self.validate_input(canonical_task, input)
@@ -291,16 +347,16 @@ impl AiPipelineService {
             error: err,
         })?;
 
-        self.touch_pipeline_phase(&input.project_root, request_id, PHASE_CONTEXT);
+        self.touch_pipeline_phase(&input.project_root, request_id, PHASE_COMPILE_CONTEXT);
         self.emit_event(
             app_handle,
             AiPipelineEvent {
                 request_id: request_id.to_string(),
-                phase: PHASE_CONTEXT.to_string(),
+                phase: PHASE_COMPILE_CONTEXT.to_string(),
                 event_type: "start".to_string(),
                 delta: None,
                 error_code: None,
-                message: Some("collecting context".to_string()),
+                message: Some("compiling context".to_string()),
                 recoverable: None,
                 meta: None,
             },
@@ -310,19 +366,46 @@ impl AiPipelineService {
             context_service
                 .collect_global_context_only(&input.project_root)
                 .map_err(|err| StageError {
-                    phase: PHASE_CONTEXT,
+                    phase: PHASE_COMPILE_CONTEXT,
                     error: err,
                 })?
         } else {
             context_service
                 .collect_chapter_context(&input.project_root, chapter_id)
                 .map_err(|err| StageError {
-                    phase: PHASE_CONTEXT,
+                    phase: PHASE_COMPILE_CONTEXT,
                     error: err,
                 })?
         };
+        let context_compilation_snapshot =
+            Self::build_context_manifest(&context, canonical_task, &task_contract);
+        self.emit_event(
+            app_handle,
+            AiPipelineEvent {
+                request_id: request_id.to_string(),
+                phase: PHASE_COMPILE_CONTEXT.to_string(),
+                event_type: "progress".to_string(),
+                delta: None,
+                error_code: None,
+                message: Some("context compilation ready".to_string()),
+                recoverable: None,
+                meta: Some(json!({
+                    "contextCompilationSnapshot": context_compilation_snapshot.clone(),
+                    "taskContract": task_contract,
+                })),
+            },
+        );
+        let context_snapshot_id = self
+            .record_context_snapshot(
+                &input.project_root,
+                request_id,
+                canonical_task,
+                input.chapter_id.as_deref(),
+                &context_compilation_snapshot,
+            )
+            .ok();
         self.check_cancelled(request_id).map_err(|err| StageError {
-            phase: PHASE_CONTEXT,
+            phase: PHASE_COMPILE_CONTEXT,
             error: err,
         })?;
 
@@ -358,24 +441,31 @@ impl AiPipelineService {
                     "providerId": route.provider_id.clone(),
                     "modelId": route.model_id.clone(),
                     "attempts": route.attempts.clone(),
+                    "taskContract": task_contract,
                 })),
             },
+        );
+        self.update_run_ledger_route(
+            &input.project_root,
+            request_id,
+            &route.provider_id,
+            &route.model_id,
         );
         self.check_cancelled(request_id).map_err(|err| StageError {
             phase: PHASE_ROUTE,
             error: err,
         })?;
 
-        self.touch_pipeline_phase(&input.project_root, request_id, PHASE_PROMPT);
+        self.touch_pipeline_phase(&input.project_root, request_id, PHASE_COMPOSE_PROMPT);
         self.emit_event(
             app_handle,
             AiPipelineEvent {
                 request_id: request_id.to_string(),
-                phase: PHASE_PROMPT.to_string(),
+                phase: PHASE_COMPOSE_PROMPT.to_string(),
                 event_type: "start".to_string(),
                 delta: None,
                 error_code: None,
-                message: Some("building prompt".to_string()),
+                message: Some("composing prompt".to_string()),
                 recoverable: None,
                 meta: None,
             },
@@ -383,11 +473,17 @@ impl AiPipelineService {
         let prompt = self
             .resolve_or_build_prompt(skill_registry, &context, canonical_task, input)
             .map_err(|err| StageError {
-                phase: PHASE_PROMPT,
+                phase: PHASE_COMPOSE_PROMPT,
                 error: err,
             })?;
+        let compiled_prompt = Self::compose_compiled_prompt(
+            canonical_task,
+            &task_contract,
+            &context_compilation_snapshot,
+            &prompt,
+        );
         self.check_cancelled(request_id).map_err(|err| StageError {
-            phase: PHASE_PROMPT,
+            phase: PHASE_COMPOSE_PROMPT,
             error: err,
         })?;
 
@@ -405,6 +501,8 @@ impl AiPipelineService {
                 meta: Some(json!({
                     "providerId": route.provider_id.clone(),
                     "modelId": route.model_id.clone(),
+                    "capabilityPack": task_contract.capability_pack,
+                    "authorityLayer": task_contract.authority_layer,
                 })),
             },
         );
@@ -417,7 +515,7 @@ impl AiPipelineService {
                     text: Some(Self::generate_user_message(canonical_task).to_string()),
                 }],
             }],
-            system_prompt: Some(prompt),
+            system_prompt: Some(compiled_prompt),
             stream: true,
             task_type: Some(canonical_task.to_string()),
             ..Default::default()
@@ -489,6 +587,48 @@ impl AiPipelineService {
                 error: err,
             })?;
 
+        self.touch_pipeline_phase(&input.project_root, request_id, PHASE_REVIEW);
+        self.emit_event(
+            app_handle,
+            AiPipelineEvent {
+                request_id: request_id.to_string(),
+                phase: PHASE_REVIEW.to_string(),
+                event_type: "start".to_string(),
+                delta: None,
+                error_code: None,
+                message: Some("review checklist evaluating".to_string()),
+                recoverable: None,
+                meta: None,
+            },
+        );
+        let review_checklist =
+            Self::build_review_checklist(&context, canonical_task, &task_contract, &normalized);
+        self.emit_event(
+            app_handle,
+            AiPipelineEvent {
+                request_id: request_id.to_string(),
+                phase: PHASE_REVIEW.to_string(),
+                event_type: "progress".to_string(),
+                delta: None,
+                error_code: None,
+                message: Some("review checklist ready".to_string()),
+                recoverable: None,
+                meta: Some(json!({
+                    "taskContract": task_contract,
+                    "contextCompilationSnapshot": context_compilation_snapshot.clone(),
+                    "reviewChecklist": review_checklist.items.clone(),
+                    "reviewSummary": {
+                        "requiresHumanReview": review_checklist.requires_human_review,
+                        "attentionCount": review_checklist.items.iter().filter(|item| item.status == "attention").count(),
+                    }
+                })),
+            },
+        );
+        self.check_cancelled(request_id).map_err(|err| StageError {
+            phase: PHASE_REVIEW,
+            error: err,
+        })?;
+
         self.touch_pipeline_phase(&input.project_root, request_id, PHASE_PERSIST);
         self.emit_event(
             app_handle,
@@ -500,7 +640,12 @@ impl AiPipelineService {
                 error_code: None,
                 message: Some("persisting run audit".to_string()),
                 recoverable: None,
-                meta: None,
+                meta: Some(json!({
+                    "taskContract": task_contract,
+                    "contextCompilationSnapshot": context_compilation_snapshot.clone(),
+                    "reviewChecklist": review_checklist.items.clone(),
+                    "reviewGate": task_contract.review_gate,
+                })),
             },
         );
         self.check_cancelled(request_id).map_err(|err| StageError {
@@ -542,11 +687,573 @@ impl AiPipelineService {
             );
         }
 
+        let checkpoint_record = match self.record_story_checkpoint(
+            &input.project_root,
+            request_id,
+            canonical_task,
+            input.chapter_id.as_deref(),
+            &task_contract,
+            &context_compilation_snapshot,
+            &review_checklist,
+            input.auto_persist,
+            &persisted_records,
+        ) {
+            Ok(record) => {
+                self.emit_event(
+                    app_handle,
+                    AiPipelineEvent {
+                        request_id: request_id.to_string(),
+                        phase: PHASE_PERSIST.to_string(),
+                        event_type: "progress".to_string(),
+                        delta: None,
+                        error_code: None,
+                        message: Some("story checkpoint recorded".to_string()),
+                        recoverable: None,
+                        meta: Some(json!({
+                            "taskContract": task_contract,
+                            "contextCompilationSnapshot": context_compilation_snapshot.clone(),
+                            "reviewChecklist": review_checklist.items.clone(),
+                            "reviewWorkItems": record.review_work_items.clone(),
+                            "checkpointId": record.checkpoint_id.clone(),
+                            "storyCheckpointId": record.checkpoint_id,
+                            "reviewQueueCount": record.review_queue_count,
+                            "checkpointStatus": record.status,
+                        })),
+                    },
+                );
+                Some(record)
+            }
+            Err(err) => {
+                self.emit_event(
+                    app_handle,
+                    AiPipelineEvent {
+                        request_id: request_id.to_string(),
+                        phase: PHASE_PERSIST.to_string(),
+                        event_type: "progress".to_string(),
+                        delta: None,
+                        error_code: Some(err.code.clone()),
+                        message: Some(format!("story checkpoint skipped: {}", err.message)),
+                        recoverable: Some(true),
+                        meta: None,
+                    },
+                );
+                None
+            }
+        };
+        self.update_run_ledger_result(
+            &input.project_root,
+            request_id,
+            normalized.chars().count() as i64,
+            &persisted_records,
+            review_checklist
+                .items
+                .iter()
+                .filter(|item| item.status == "attention")
+                .count() as i64,
+            review_checklist.requires_human_review,
+            checkpoint_record
+                .as_ref()
+                .map(|record| record.checkpoint_id.as_str()),
+        );
+
+        self.touch_pipeline_phase(&input.project_root, request_id, PHASE_CHECKPOINT);
+        self.emit_event(
+            app_handle,
+            AiPipelineEvent {
+                request_id: request_id.to_string(),
+                phase: PHASE_CHECKPOINT.to_string(),
+                event_type: "progress".to_string(),
+                delta: None,
+                error_code: None,
+                message: Some("checkpoint finalized".to_string()),
+                recoverable: None,
+                meta: Some(json!({
+                    "taskContract": task_contract,
+                    "contextCompilationSnapshot": context_compilation_snapshot.clone(),
+                    "reviewChecklist": review_checklist.items.clone(),
+                    "reviewWorkItems": checkpoint_record.as_ref().map(|record| record.review_work_items.clone()).unwrap_or_default(),
+                    "checkpointId": checkpoint_record.as_ref().map(|record| record.checkpoint_id.clone()),
+                })),
+            },
+        );
+
         Ok(PipelineSuccess {
             output_text: normalized,
             route,
             persisted_records,
+            story_checkpoint_id: checkpoint_record
+                .as_ref()
+                .map(|record| record.checkpoint_id.clone()),
+            context_snapshot_id,
+            review_queue_count: checkpoint_record
+                .as_ref()
+                .map(|record| record.review_queue_count)
+                .unwrap_or(0),
+            context_compilation_snapshot,
+            review_checklist: review_checklist.items.clone(),
+            review_work_items: checkpoint_record
+                .as_ref()
+                .map(|record| record.review_work_items.clone())
+                .unwrap_or_default(),
         })
+    }
+
+    fn build_context_manifest(
+        context: &CollectedContext,
+        task_type: &str,
+        contract: &task_routing::TaskExecutionContract,
+    ) -> Value {
+        let global = &context.global_context;
+        let related = &context.related_context;
+        let strategy = match contract.authority_layer {
+            task_routing::StoryAuthorityLayer::StoryConstitution => "constitution_first",
+            task_routing::StoryAuthorityLayer::FormalAssets => "asset_grounded",
+            task_routing::StoryAuthorityLayer::SceneExecution => "scene_focused",
+            task_routing::StoryAuthorityLayer::ReviewAudit => "audit_focused",
+            task_routing::StoryAuthorityLayer::Custom => "default",
+        };
+        let blueprint_completed = global
+            .blueprint_summary
+            .iter()
+            .filter(|step| step.status == "completed")
+            .count();
+        let source_counts = json!({
+            "blueprintCompleted": blueprint_completed,
+            "lockedTerms": global.locked_terms.len(),
+            "bannedTerms": global.banned_terms.len(),
+            "chapterBound": related.chapter.is_some(),
+            "characters": related.characters.len(),
+            "worldRules": related.world_rules.len(),
+            "plotNodes": related.plot_nodes.len(),
+            "relationshipEdges": related.relationship_edges.len(),
+            "hasPreviousSummary": related.previous_chapter_summary.as_ref().map(|s| !s.trim().is_empty()).unwrap_or(false),
+        });
+        let priorities = vec![
+            "story_constitution",
+            "formal_assets",
+            "dynamic_scene_state",
+            "task_instruction",
+        ];
+        let estimated_tokens = 320
+            + (blueprint_completed as i64 * 90)
+            + (related.characters.len() as i64 * 55)
+            + (related.world_rules.len() as i64 * 65)
+            + (related.plot_nodes.len() as i64 * 45)
+            + (related.relationship_edges.len() as i64 * 40);
+        let token_budget = json!({
+            "hardLimit": 12000,
+            "reservedForGeneration": 2600,
+            "estimatedContextTokens": estimated_tokens,
+            "strategy": "budgeted_trim",
+        });
+        json!({
+            "taskType": task_type,
+            "compileStrategy": strategy,
+            "project": {
+                "name": global.project_name,
+                "genre": global.genre,
+                "narrativePov": global.narrative_pov,
+            },
+            "sources": source_counts,
+            "trimming": {
+                "policy": "priority_trim",
+                "blueprintStepContentMaxChars": 800,
+                "ruleMaxChars": 300,
+                "chapterSummaryMaxChars": 1200,
+            },
+            "priority": priorities,
+            "conflictResolution": {
+                "mode": "constitution_then_assets_then_scene",
+                "ifConflict": "raise_review_item",
+            },
+            "tokenBudget": token_budget,
+            "sourceDigests": {
+                "lockedTermsPreview": global.locked_terms.iter().take(6).collect::<Vec<_>>(),
+                "bannedTermsPreview": global.banned_terms.iter().take(6).collect::<Vec<_>>(),
+            }
+        })
+    }
+
+    fn record_context_snapshot(
+        &self,
+        project_root: &str,
+        run_id: &str,
+        task_type: &str,
+        chapter_id: Option<&str>,
+        snapshot: &Value,
+    ) -> Result<String, AppErrorDto> {
+        let conn = open_database(Path::new(project_root)).map_err(|err| {
+            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(err.to_string())
+        })?;
+        let project_id = get_project_id(&conn)?;
+        let now = now_iso();
+        let snapshot_id = Uuid::new_v4().to_string();
+        let compile_strategy = snapshot
+            .get("compileStrategy")
+            .and_then(|value| value.as_str())
+            .unwrap_or("default");
+        let sources_json = snapshot
+            .get("sources")
+            .cloned()
+            .unwrap_or_else(|| json!({}))
+            .to_string();
+        let trimming_json = snapshot
+            .get("trimming")
+            .cloned()
+            .unwrap_or_else(|| json!({}))
+            .to_string();
+        let priority_json = snapshot
+            .get("priority")
+            .cloned()
+            .unwrap_or_else(|| json!([]))
+            .to_string();
+        let conflict_json = snapshot
+            .get("conflictResolution")
+            .cloned()
+            .unwrap_or_else(|| json!({}))
+            .to_string();
+        let token_budget_json = snapshot
+            .get("tokenBudget")
+            .cloned()
+            .unwrap_or_else(|| json!({}))
+            .to_string();
+
+        conn.execute(
+            "INSERT INTO story_os_v2_context_snapshots(
+                id, run_id, project_id, chapter_id, task_type, compile_strategy, sources_json,
+                trimming_json, priority_json, conflict_resolution_json, token_budget_json,
+                compiled_manifest_json, created_at
+             ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+            params![
+                &snapshot_id,
+                run_id,
+                &project_id,
+                chapter_id.map(str::trim).filter(|v| !v.is_empty()),
+                task_type,
+                compile_strategy,
+                &sources_json,
+                &trimming_json,
+                &priority_json,
+                &conflict_json,
+                &token_budget_json,
+                snapshot.to_string(),
+                &now
+            ],
+        )
+        .map_err(|err| {
+            AppErrorDto::new("DB_WRITE_FAILED", "写入上下文编译快照失败", true)
+                .with_detail(err.to_string())
+        })?;
+
+        Ok(snapshot_id)
+    }
+
+    fn compose_compiled_prompt(
+        task_type: &str,
+        contract: &task_routing::TaskExecutionContract,
+        context_manifest: &Value,
+        raw_prompt: &str,
+    ) -> String {
+        let mut lines = Vec::new();
+        lines.push("# NovelForge 生产系统协议".to_string());
+        lines.push("你在长篇小说生产操作系统内执行任务，不追求字数最大化，追求正确层级推进。".to_string());
+        lines.push(format!("- taskType: {}", task_type));
+        lines.push(format!(
+            "- authorityLayer: {}",
+            Self::authority_layer_key(contract.authority_layer)
+        ));
+        lines.push(format!(
+            "- stateLayer: {}",
+            Self::state_layer_key(contract.state_layer)
+        ));
+        lines.push(format!("- capabilityPack: {}", contract.capability_pack));
+        lines.push(format!(
+            "- reviewGate: {}",
+            Self::review_gate_key(contract.review_gate)
+        ));
+        lines.push("- 规则：优先遵守故事宪法、再遵守正式资产、最后才扩展动态状态。".to_string());
+        lines.push(String::new());
+        lines.push("# 上下文编译清单(JSON)".to_string());
+        lines.push(context_manifest.to_string());
+        lines.push(String::new());
+        lines.push("# 任务提示".to_string());
+        lines.push(raw_prompt.to_string());
+        lines.join("\n")
+    }
+
+    fn build_review_checklist(
+        context: &CollectedContext,
+        task_type: &str,
+        contract: &task_routing::TaskExecutionContract,
+        output: &str,
+    ) -> ReviewChecklist {
+        let mut items = Vec::new();
+        let normalized = output.trim();
+        let output_len = normalized.chars().count();
+
+        let banned_hits: Vec<String> = context
+            .global_context
+            .banned_terms
+            .iter()
+            .filter(|term| !term.trim().is_empty() && normalized.contains(term.as_str()))
+            .cloned()
+            .collect();
+        if banned_hits.is_empty() {
+            items.push(ReviewChecklistItem {
+                key: "banned_terms".to_string(),
+                title: "禁用词检查".to_string(),
+                severity: "high".to_string(),
+                status: "pass".to_string(),
+                message: "未检测到禁用词".to_string(),
+            });
+        } else {
+            items.push(ReviewChecklistItem {
+                key: "banned_terms".to_string(),
+                title: "禁用词检查".to_string(),
+                severity: "high".to_string(),
+                status: "attention".to_string(),
+                message: format!("检测到禁用词：{}", banned_hits.join("、")),
+            });
+        }
+
+        let min_len = if matches!(
+            contract.authority_layer,
+            task_routing::StoryAuthorityLayer::SceneExecution
+        ) {
+            180
+        } else {
+            80
+        };
+        if output_len < min_len {
+            items.push(ReviewChecklistItem {
+                key: "output_length".to_string(),
+                title: "产出完整度".to_string(),
+                severity: "medium".to_string(),
+                status: "attention".to_string(),
+                message: format!("产出长度偏短（{} 字，建议至少 {} 字）", output_len, min_len),
+            });
+        } else {
+            items.push(ReviewChecklistItem {
+                key: "output_length".to_string(),
+                title: "产出完整度".to_string(),
+                severity: "low".to_string(),
+                status: "pass".to_string(),
+                message: format!("产出长度 {} 字", output_len),
+            });
+        }
+
+        if matches!(task_type, "chapter.draft" | "chapter.continue" | "chapter.rewrite") {
+            let has_dialogue = normalized.contains('“') || normalized.contains('"');
+            let has_action = normalized.contains('。') || normalized.contains('！');
+            let status = if has_dialogue && has_action {
+                "pass"
+            } else {
+                "attention"
+            };
+            items.push(ReviewChecklistItem {
+                key: "scene_texture".to_string(),
+                title: "场景推进纹理".to_string(),
+                severity: "medium".to_string(),
+                status: status.to_string(),
+                message: if status == "pass" {
+                    "含对白/动作纹理，具备可精修基础".to_string()
+                } else {
+                    "对白或动作纹理不足，建议人工精修场景推进".to_string()
+                },
+            });
+        }
+
+        let requires_human_review = matches!(
+            contract.review_gate,
+            task_routing::ReviewGateMode::ManualRequired
+        );
+        ReviewChecklist {
+            items,
+            requires_human_review,
+        }
+    }
+
+    fn record_story_checkpoint(
+        &self,
+        project_root: &str,
+        run_id: &str,
+        task_type: &str,
+        chapter_id: Option<&str>,
+        contract: &task_routing::TaskExecutionContract,
+        context_manifest: &Value,
+        review_checklist: &ReviewChecklist,
+        auto_persist: bool,
+        persisted_records: &[PersistedRecord],
+    ) -> Result<StoryCheckpointRecord, AppErrorDto> {
+        let project_root_path = Path::new(project_root);
+        let mut conn = open_database(project_root_path).map_err(|e| {
+            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
+        })?;
+        let project_id = get_project_id(&conn)?;
+        let now = now_iso();
+        let checkpoint_id = Uuid::new_v4().to_string();
+        let checklist_json = serde_json::to_string(&review_checklist.items).unwrap_or("[]".to_string());
+        let persisted_records_json =
+            serde_json::to_string(persisted_records).unwrap_or("[]".to_string());
+        let context_manifest_json = context_manifest.to_string();
+        let status = if review_checklist.requires_human_review {
+            if auto_persist {
+                "persisted_pending_review"
+            } else {
+                "awaiting_manual_review"
+            }
+        } else {
+            "persisted"
+        };
+
+        let tx = conn.transaction().map_err(|e| {
+            AppErrorDto::new("DB_WRITE_FAILED", "写入审查检查点失败", true)
+                .with_detail(e.to_string())
+        })?;
+        tx.execute(
+            "INSERT INTO ai_story_checkpoints(
+                id, run_id, project_id, chapter_id, task_type, authority_layer, state_layer,
+                capability_pack, review_gate, context_manifest_json, review_checklist_json,
+                persisted_records_json, persistence_mode, status, created_at
+             ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+            params![
+                &checkpoint_id,
+                run_id,
+                &project_id,
+                chapter_id.map(str::trim).filter(|v| !v.is_empty()),
+                task_type,
+                Self::authority_layer_key(contract.authority_layer),
+                Self::state_layer_key(contract.state_layer),
+                contract.capability_pack,
+                Self::review_gate_key(contract.review_gate),
+                &context_manifest_json,
+                &checklist_json,
+                &persisted_records_json,
+                if auto_persist {
+                    "auto_persist"
+                } else {
+                    "manual_persist"
+                },
+                status,
+                &now
+            ],
+        )
+        .map_err(|e| {
+            AppErrorDto::new("DB_WRITE_FAILED", "写入审查检查点失败", true)
+                .with_detail(e.to_string())
+        })?;
+
+        let mut review_queue_count = 0usize;
+        let mut review_work_items = Vec::new();
+        for item in &review_checklist.items {
+            if item.status != "attention" {
+                continue;
+            }
+            let review_item_id = Uuid::new_v4().to_string();
+            tx.execute(
+                "INSERT INTO ai_review_queue(
+                    id, checkpoint_id, run_id, project_id, chapter_id, task_type, title,
+                    severity, message, status, created_at, updated_at
+                 ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'pending', ?10, ?10)",
+                params![
+                    &review_item_id,
+                    &checkpoint_id,
+                    run_id,
+                    &project_id,
+                    chapter_id.map(str::trim).filter(|v| !v.is_empty()),
+                    task_type,
+                    &item.title,
+                    &item.severity,
+                    &item.message,
+                    &now
+                ],
+            )
+            .map_err(|e| {
+                AppErrorDto::new("DB_WRITE_FAILED", "写入审查队列失败", true)
+                    .with_detail(e.to_string())
+            })?;
+            tx.execute(
+                "INSERT INTO story_os_v2_review_work_items(
+                    id, run_id, checkpoint_id, project_id, chapter_id, task_type, checklist_key,
+                    title, severity, message, status, created_at, updated_at
+                 ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'pending', ?11, ?11)",
+                params![
+                    &review_item_id,
+                    run_id,
+                    &checkpoint_id,
+                    &project_id,
+                    chapter_id.map(str::trim).filter(|v| !v.is_empty()),
+                    task_type,
+                    &item.key,
+                    &item.title,
+                    &item.severity,
+                    &item.message,
+                    &now
+                ],
+            )
+            .map_err(|e| {
+                AppErrorDto::new("DB_WRITE_FAILED", "写入 v2 审查工单失败", true)
+                    .with_detail(e.to_string())
+            })?;
+            review_work_items.push(ReviewWorkItemBrief {
+                id: review_item_id,
+                key: item.key.clone(),
+                title: item.title.clone(),
+                severity: item.severity.clone(),
+                message: item.message.clone(),
+                status: "pending".to_string(),
+            });
+            review_queue_count += 1;
+        }
+        tx.execute(
+            "UPDATE story_os_v2_run_ledger
+             SET checkpoint_id = ?1, updated_at = ?2
+             WHERE id = ?3",
+            params![&checkpoint_id, &now, run_id],
+        )
+        .map_err(|e| {
+            AppErrorDto::new("DB_WRITE_FAILED", "回写 v2 运行台账 checkpoint 失败", true)
+                .with_detail(e.to_string())
+        })?;
+        tx.commit().map_err(|e| {
+            AppErrorDto::new("DB_WRITE_FAILED", "提交审查检查点失败", true)
+                .with_detail(e.to_string())
+        })?;
+
+        Ok(StoryCheckpointRecord {
+            checkpoint_id,
+            review_queue_count,
+            status: status.to_string(),
+            review_work_items,
+        })
+    }
+
+    fn authority_layer_key(layer: task_routing::StoryAuthorityLayer) -> &'static str {
+        match layer {
+            task_routing::StoryAuthorityLayer::StoryConstitution => "story_constitution",
+            task_routing::StoryAuthorityLayer::FormalAssets => "formal_assets",
+            task_routing::StoryAuthorityLayer::SceneExecution => "scene_execution",
+            task_routing::StoryAuthorityLayer::ReviewAudit => "review_audit",
+            task_routing::StoryAuthorityLayer::Custom => "custom",
+        }
+    }
+
+    fn state_layer_key(layer: task_routing::StoryStateLayer) -> &'static str {
+        match layer {
+            task_routing::StoryStateLayer::ConstitutionState => "constitution_state",
+            task_routing::StoryStateLayer::AssetState => "asset_state",
+            task_routing::StoryStateLayer::DynamicSceneState => "dynamic_scene_state",
+            task_routing::StoryStateLayer::ReviewState => "review_state",
+            task_routing::StoryStateLayer::CustomState => "custom_state",
+        }
+    }
+
+    fn review_gate_key(mode: task_routing::ReviewGateMode) -> &'static str {
+        match mode {
+            task_routing::ReviewGateMode::ManualRequired => "manual_required",
+            task_routing::ReviewGateMode::ManualRecommended => "manual_recommended",
+            task_routing::ReviewGateMode::AutoAllowed => "auto_allowed",
+        }
     }
 
     fn persist_task_output(
@@ -1404,6 +2111,7 @@ impl AiPipelineService {
         chapter_id: Option<&str>,
         task_type: &str,
         ui_action: Option<&str>,
+        task_contract: &task_routing::TaskExecutionContract,
     ) -> Result<(), AppErrorDto> {
         let conn = open_database(Path::new(project_root)).map_err(|err| {
             AppErrorDto::new("PIPELINE_DB_OPEN_FAILED", "数据库打开失败", false)
@@ -1427,6 +2135,29 @@ impl AiPipelineService {
         )
         .map_err(|err| {
             AppErrorDto::new("PIPELINE_AUDIT_INSERT_FAILED", "记录 pipeline 运行失败", false)
+                .with_detail(err.to_string())
+        })?;
+        conn.execute(
+            "INSERT INTO story_os_v2_run_ledger(
+                id, project_id, chapter_id, task_type, ui_action, authority_layer, state_layer,
+                capability_pack, review_gate, status, phase, created_at, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'running', ?10, ?11, ?11)",
+            params![
+                request_id,
+                &project_id,
+                chapter_id.map(str::trim).filter(|v| !v.is_empty()),
+                task_type,
+                ui_action.map(str::trim).filter(|v| !v.is_empty()),
+                Self::authority_layer_key(task_contract.authority_layer),
+                Self::state_layer_key(task_contract.state_layer),
+                task_contract.capability_pack,
+                Self::review_gate_key(task_contract.review_gate),
+                PHASE_VALIDATE,
+                &now
+            ],
+        )
+        .map_err(|err| {
+            AppErrorDto::new("PIPELINE_AUDIT_INSERT_FAILED", "记录 v2 run ledger 失败", false)
                 .with_detail(err.to_string())
         })?;
         Ok(())
@@ -1465,6 +2196,18 @@ impl AiPipelineService {
                 request_id
             ],
         );
+        let now = now_iso();
+        let _ = conn.execute(
+            "UPDATE story_os_v2_run_ledger
+             SET status = ?1,
+                 phase = ?2,
+                 error_code = ?3,
+                 error_message = ?4,
+                 updated_at = ?5,
+                 completed_at = ?6
+             WHERE id = ?7",
+            params![status, phase, error_code, error_message, &now, &now, request_id],
+        );
     }
 
     fn touch_pipeline_phase(&self, project_root: &str, request_id: &str, phase: &str) {
@@ -1478,6 +2221,69 @@ impl AiPipelineService {
              WHERE id = ?2
                AND status = 'running'",
             params![phase, request_id],
+        );
+        let _ = conn.execute(
+            "UPDATE story_os_v2_run_ledger
+             SET phase = ?1, updated_at = ?2
+             WHERE id = ?3
+               AND status = 'running'",
+            params![phase, now_iso(), request_id],
+        );
+    }
+
+    fn update_run_ledger_route(
+        &self,
+        project_root: &str,
+        request_id: &str,
+        provider_id: &str,
+        model_id: &str,
+    ) {
+        let conn = match open_database(Path::new(project_root)) {
+            Ok(conn) => conn,
+            Err(_) => return,
+        };
+        let _ = conn.execute(
+            "UPDATE story_os_v2_run_ledger
+             SET provider_id = ?1, model_id = ?2, updated_at = ?3
+             WHERE id = ?4",
+            params![provider_id, model_id, now_iso(), request_id],
+        );
+    }
+
+    fn update_run_ledger_result(
+        &self,
+        project_root: &str,
+        request_id: &str,
+        output_text_length: i64,
+        persisted_records: &[PersistedRecord],
+        review_attention_count: i64,
+        requires_human_review: bool,
+        checkpoint_id: Option<&str>,
+    ) {
+        let conn = match open_database(Path::new(project_root)) {
+            Ok(conn) => conn,
+            Err(_) => return,
+        };
+        let persisted_records_json =
+            serde_json::to_string(persisted_records).unwrap_or("[]".to_string());
+        let _ = conn.execute(
+            "UPDATE story_os_v2_run_ledger
+             SET output_text_length = ?1,
+                 persisted_records_json = ?2,
+                 review_attention_count = ?3,
+                 requires_human_review = ?4,
+                 checkpoint_id = COALESCE(?5, checkpoint_id),
+                 updated_at = ?6
+             WHERE id = ?7",
+            params![
+                output_text_length,
+                persisted_records_json,
+                review_attention_count,
+                if requires_human_review { 1_i64 } else { 0_i64 },
+                checkpoint_id,
+                now_iso(),
+                request_id
+            ],
         );
     }
 
@@ -1545,6 +2351,7 @@ mod tests {
     use super::{AiPipelineService, RunAiTaskPipelineInput, PHASE_ROUTE};
     use crate::infra::database::open_database;
     use crate::services::project_service::{CreateProjectInput, ProjectService};
+    use crate::services::task_routing;
 
     fn create_temp_workspace() -> PathBuf {
         let workspace =
@@ -1651,6 +2458,7 @@ mod tests {
 
         let service = AiPipelineService::default();
         let request_id = Uuid::new_v4().to_string();
+        let task_contract = task_routing::task_execution_contract("chapter.draft");
         service
             .insert_pipeline_run(
                 &project.project_root,
@@ -1658,6 +2466,7 @@ mod tests {
                 None,
                 "chapter.draft",
                 Some("editor.ai.chapter.draft"),
+                &task_contract,
             )
             .expect("insert run");
         service.touch_pipeline_phase(&project.project_root, &request_id, PHASE_ROUTE);
