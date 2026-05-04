@@ -2,9 +2,8 @@ use rusqlite::params;
 use serde::Serialize;
 
 use crate::errors::AppErrorDto;
-use crate::infra::database::open_database;
+use crate::infra::database::open_project_db;
 use crate::services::project_service::get_project_id;
-use std::path::Path;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -24,9 +23,7 @@ pub struct DashboardService;
 
 impl DashboardService {
     pub fn get_stats(&self, project_root: &str) -> Result<DashboardStats, AppErrorDto> {
-        let conn = open_database(Path::new(project_root)).map_err(|e| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
-        })?;
+        let conn = open_project_db(project_root)?;
         let project_id = get_project_id(&conn)?;
 
         let total_words: i64 = conn

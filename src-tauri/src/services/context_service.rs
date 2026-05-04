@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::errors::AppErrorDto;
-use crate::infra::database::open_database;
+use crate::infra::database::open_project_db;
 use crate::infra::path_utils::resolve_project_relative_path;
 use crate::infra::time::now_iso;
 use crate::services::import_service::{extract_asset_candidates, AssetExtractionCandidate};
@@ -313,10 +313,7 @@ impl ContextService {
         chapter_id: &str,
     ) -> Result<EditorContextPanel, AppErrorDto> {
         let project_root_path = Path::new(project_root);
-        let mut conn = open_database(project_root_path).map_err(|err| {
-            AppErrorDto::new("DB_OPEN_FAILED", "无法打开项目数据库", false)
-                .with_detail(err.to_string())
-        })?;
+        let mut conn = open_project_db(project_root)?;
         let project_id = get_project_id(&conn)?;
         let related = self.collect_related_context(&conn, &project_id, chapter_id)?;
         let chapter = related
@@ -417,11 +414,7 @@ impl ContextService {
         &self,
         project_root: &str,
     ) -> Result<CollectedContext, AppErrorDto> {
-        let project_root_path = std::path::Path::new(project_root);
-        let conn = open_database(project_root_path).map_err(|err| {
-            AppErrorDto::new("DB_OPEN_FAILED", "无法打开项目数据库", false)
-                .with_detail(err.to_string())
-        })?;
+        let conn = open_project_db(project_root)?;
         let project_id = get_project_id(&conn)?;
         let global = self.collect_global_context(&conn, &project_id)?;
         Ok(CollectedContext {
@@ -443,11 +436,7 @@ impl ContextService {
         project_root: &str,
         chapter_id: &str,
     ) -> Result<CollectedContext, AppErrorDto> {
-        let project_root_path = Path::new(project_root);
-        let conn = open_database(project_root_path).map_err(|err| {
-            AppErrorDto::new("DB_OPEN_FAILED", "无法打开项目数据库", false)
-                .with_detail(err.to_string())
-        })?;
+        let conn = open_project_db(project_root)?;
 
         let project_id = get_project_id(&conn)?;
 
@@ -480,11 +469,7 @@ impl ContextService {
         let target_type =
             resolve_candidate_target_type(input.target_kind.as_deref(), &input.asset_type)?;
 
-        let project_root_path = Path::new(project_root);
-        let mut conn = open_database(project_root_path).map_err(|err| {
-            AppErrorDto::new("DB_OPEN_FAILED", "无法打开项目数据库", false)
-                .with_detail(err.to_string())
-        })?;
+        let mut conn = open_project_db(project_root)?;
         let project_id = get_project_id(&conn)?;
 
         let chapter_exists = conn
@@ -556,11 +541,7 @@ impl ContextService {
         chapter_id: &str,
         input: ApplyStructuredDraftInput,
     ) -> Result<ApplyStructuredDraftResult, AppErrorDto> {
-        let project_root_path = Path::new(project_root);
-        let mut conn = open_database(project_root_path).map_err(|err| {
-            AppErrorDto::new("DB_OPEN_FAILED", "无法打开项目数据库", false)
-                .with_detail(err.to_string())
-        })?;
+        let mut conn = open_project_db(project_root)?;
         let project_id = get_project_id(&conn)?;
         let chapter_exists = conn
             .query_row(
@@ -970,11 +951,7 @@ impl ContextService {
             ));
         }
 
-        let project_root_path = Path::new(project_root);
-        let conn = open_database(project_root_path).map_err(|err| {
-            AppErrorDto::new("DB_OPEN_FAILED", "无法打开项目数据库", false)
-                .with_detail(err.to_string())
-        })?;
+        let conn = open_project_db(project_root)?;
         let project_id = get_project_id(&conn)?;
         let now = now_iso();
         let mut run_id_for_action: Option<String> = None;
@@ -1065,10 +1042,7 @@ impl ContextService {
         status: Option<&str>,
         limit: usize,
     ) -> Result<Vec<ReviewQueueItem>, AppErrorDto> {
-        let conn = open_database(Path::new(project_root)).map_err(|err| {
-            AppErrorDto::new("DB_OPEN_FAILED", "无法打开项目数据库", false)
-                .with_detail(err.to_string())
-        })?;
+        let conn = open_project_db(project_root)?;
         let project_id = get_project_id(&conn)?;
         let normalized_status = status
             .map(str::trim)

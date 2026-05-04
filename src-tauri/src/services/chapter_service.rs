@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::errors::AppErrorDto;
-use crate::infra::database::open_database;
+use crate::infra::database::open_project_db;
 use crate::infra::fs_utils::{read_text_if_exists, write_file_atomic};
 use crate::infra::path_utils::{
     chapter_file_name, resolve_project_relative_path, to_posix_relative,
@@ -82,12 +82,7 @@ pub struct ChapterService;
 
 impl ChapterService {
     pub fn list_chapters(&self, project_root: &str) -> Result<Vec<ChapterRecord>, AppErrorDto> {
-        let project_root_path = Path::new(project_root);
-        let conn = open_database(project_root_path).map_err(|err| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false)
-                .with_detail(err.to_string())
-                .with_suggested_action("请检查 database/project.sqlite 是否存在并可读写")
-        })?;
+        let conn = open_project_db(project_root)?;
 
         let project_id = get_project_id(&conn)?;
         let mut stmt = conn
@@ -138,12 +133,7 @@ impl ChapterService {
         &self,
         project_root: &str,
     ) -> Result<Vec<TimelineEntryRecord>, AppErrorDto> {
-        let project_root_path = Path::new(project_root);
-        let conn = open_database(project_root_path).map_err(|err| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false)
-                .with_detail(err.to_string())
-                .with_suggested_action("请检查 database/project.sqlite 是否存在并可读写")
-        })?;
+        let conn = open_project_db(project_root)?;
 
         let project_id = get_project_id(&conn)?;
         let mut stmt = conn
@@ -194,9 +184,7 @@ impl ChapterService {
         project_root: &str,
         ordered_ids: Vec<String>,
     ) -> Result<(), AppErrorDto> {
-        let mut conn = open_database(Path::new(project_root)).map_err(|e| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
-        })?;
+        let mut conn = open_project_db(project_root)?;
         let project_id = get_project_id(&conn)?;
         let mut stmt = conn
             .prepare(
@@ -278,11 +266,7 @@ impl ChapterService {
         }
 
         let project_root_path = Path::new(project_root);
-        let mut conn = open_database(project_root_path).map_err(|err| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false)
-                .with_detail(err.to_string())
-                .with_suggested_action("请检查 database/project.sqlite 是否存在并可读写")
-        })?;
+        let mut conn = open_project_db(project_root)?;
 
         let project_id = get_project_id(&conn)?;
         let next_index = conn
@@ -400,11 +384,7 @@ impl ChapterService {
         content: &str,
     ) -> Result<SaveChapterOutput, AppErrorDto> {
         let project_root_path = Path::new(project_root);
-        let conn = open_database(project_root_path).map_err(|err| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false)
-                .with_detail(err.to_string())
-                .with_suggested_action("请检查 database/project.sqlite 是否存在并可读写")
-        })?;
+        let conn = open_project_db(project_root)?;
 
         let chapter_row = conn
             .query_row(
@@ -495,11 +475,7 @@ impl ChapterService {
         content: &str,
     ) -> Result<String, AppErrorDto> {
         let project_root_path = Path::new(project_root);
-        let conn = open_database(project_root_path).map_err(|err| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false)
-                .with_detail(err.to_string())
-                .with_suggested_action("请检查 database/project.sqlite 是否存在并可读写")
-        })?;
+        let conn = open_project_db(project_root)?;
 
         let content_path = conn
             .query_row(
@@ -530,11 +506,7 @@ impl ChapterService {
         chapter_id: &str,
     ) -> Result<RecoverDraftResult, AppErrorDto> {
         let project_root_path = Path::new(project_root);
-        let conn = open_database(project_root_path).map_err(|err| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false)
-                .with_detail(err.to_string())
-                .with_suggested_action("请检查 database/project.sqlite 是否存在并可读写")
-        })?;
+        let conn = open_project_db(project_root)?;
 
         let content_path = conn
             .query_row(
@@ -607,11 +579,7 @@ impl ChapterService {
         chapter_id: &str,
     ) -> Result<String, AppErrorDto> {
         let project_root_path = Path::new(project_root);
-        let conn = open_database(project_root_path).map_err(|err| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false)
-                .with_detail(err.to_string())
-                .with_suggested_action("请检查 database/project.sqlite 是否存在并可读写")
-        })?;
+        let conn = open_project_db(project_root)?;
 
         let content_path = conn
             .query_row(
@@ -638,11 +606,7 @@ impl ChapterService {
 
     pub fn delete_chapter(&self, project_root: &str, chapter_id: &str) -> Result<(), AppErrorDto> {
         let project_root_path = Path::new(project_root);
-        let mut conn = open_database(project_root_path).map_err(|err| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false)
-                .with_detail(err.to_string())
-                .with_suggested_action("请检查 database/project.sqlite 是否存在并可读写")
-        })?;
+        let mut conn = open_project_db(project_root)?;
         let project_id = get_project_id(&conn)?;
         let tx = conn.transaction().map_err(|err| {
             AppErrorDto::new("CHAPTER_DELETE_FAILED", "删除章节失败", true)
@@ -905,9 +869,7 @@ impl ChapterService {
         note: Option<&str>,
     ) -> Result<SnapshotRecord, AppErrorDto> {
         let project_root_path = Path::new(project_root);
-        let conn = open_database(project_root_path).map_err(|e| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
-        })?;
+        let conn = open_project_db(project_root)?;
 
         let (content_path, chapter_index) = conn
             .query_row(
@@ -974,9 +936,7 @@ impl ChapterService {
         project_root: &str,
         chapter_id: Option<&str>,
     ) -> Result<Vec<SnapshotRecord>, AppErrorDto> {
-        let conn = open_database(Path::new(project_root)).map_err(|e| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
-        })?;
+        let conn = open_project_db(project_root)?;
 
         let (sql, param_str): (&str, Option<String>) = if let Some(cid) = chapter_id {
             ("SELECT id, chapter_id, snapshot_type, title, file_path, note, created_at FROM snapshots WHERE chapter_id = ?1 ORDER BY created_at DESC", Some(cid.to_string()))
@@ -1034,9 +994,7 @@ impl ChapterService {
         snapshot_id: &str,
     ) -> Result<String, AppErrorDto> {
         let project_root_path = Path::new(project_root);
-        let conn = open_database(project_root_path).map_err(|e| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
-        })?;
+        let conn = open_project_db(project_root)?;
 
         let file_path: String = conn
             .query_row(
@@ -1083,9 +1041,7 @@ pub struct VolumeService;
 
 impl VolumeService {
     pub fn list(&self, project_root: &str) -> Result<Vec<VolumeRecord>, AppErrorDto> {
-        let conn = open_database(Path::new(project_root)).map_err(|e| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
-        })?;
+        let conn = open_project_db(project_root)?;
         let project_id = crate::services::project_service::get_project_id(&conn)?;
 
         let mut stmt = conn.prepare(
@@ -1127,9 +1083,7 @@ impl VolumeService {
                 true,
             ));
         }
-        let conn = open_database(Path::new(project_root)).map_err(|e| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
-        })?;
+        let conn = open_project_db(project_root)?;
         let project_id = crate::services::project_service::get_project_id(&conn)?;
         let id = Uuid::new_v4().to_string();
         let now = crate::infra::time::now_iso();
@@ -1148,9 +1102,7 @@ impl VolumeService {
     }
 
     pub fn delete(&self, project_root: &str, id: &str) -> Result<(), AppErrorDto> {
-        let conn = open_database(Path::new(project_root)).map_err(|e| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
-        })?;
+        let conn = open_project_db(project_root)?;
         conn.execute(
             "UPDATE chapters SET volume_id = NULL WHERE volume_id = ?1",
             params![id],
@@ -1169,9 +1121,7 @@ impl VolumeService {
         chapter_id: &str,
         volume_id: Option<&str>,
     ) -> Result<(), AppErrorDto> {
-        let conn = open_database(Path::new(project_root)).map_err(|e| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
-        })?;
+        let conn = open_project_db(project_root)?;
         conn.execute(
             "UPDATE chapters SET volume_id = ?1 WHERE id = ?2",
             params![volume_id, chapter_id],

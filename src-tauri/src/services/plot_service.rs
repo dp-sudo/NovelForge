@@ -45,8 +45,7 @@ impl PlotService {
         let conn = open_project_db(project_root)?;
         let project_id = get_project_id(&conn)?;
         let mut stmt = conn
-            .prepare("SELECT id, project_id, title, node_type, sort_order, goal, conflict, emotional_curve, status, COALESCE(related_characters,'[]'), created_at, updated_at FROM plot_nodes WHERE project_id = ?1 ORDER BY sort_order")
-            .map_err(|e| AppErrorDto::new("QUERY_FAILED", "查询剧情节点失败", true).with_detail(e.to_string()))?;
+            .prepare("SELECT id, project_id, title, node_type, sort_order, goal, conflict, emotional_curve, status, COALESCE(related_characters,'[]'), created_at, updated_at FROM plot_nodes WHERE project_id = ?1 ORDER BY sort_order")?;
         let nodes = stmt
             .query_map(params![project_id], |row| {
                 Ok(PlotNodeRecord {
@@ -63,16 +62,8 @@ impl PlotService {
                     created_at: row.get(10)?,
                     updated_at: row.get(11)?,
                 })
-            })
-            .map_err(|e| {
-                AppErrorDto::new("QUERY_FAILED", "查询剧情节点失败", true)
-                    .with_detail(e.to_string())
             })?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| {
-                AppErrorDto::new("QUERY_FAILED", "查询剧情节点失败", true)
-                    .with_detail(e.to_string())
-            })?;
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(nodes)
     }
 
@@ -91,8 +82,7 @@ impl PlotService {
         conn.execute(
             "INSERT INTO plot_nodes(id, project_id, title, node_type, sort_order, goal, conflict, emotional_curve, status, related_characters, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
             params![id, project_id, input.title, input.node_type, input.sort_order, input.goal, input.conflict, input.emotional_curve, status, rc, now, now],
-        )
-        .map_err(|e| AppErrorDto::new("INSERT_FAILED", "创建剧情节点失败", true).with_detail(e.to_string()))?;
+        )?;
         Ok(id)
     }
 
@@ -104,10 +94,7 @@ impl PlotService {
             conn.execute(
                 "UPDATE plot_nodes SET sort_order = ?1, updated_at = ?2 WHERE id = ?3",
                 params![order, now, node_id],
-            )
-            .map_err(|e| {
-                AppErrorDto::new("REORDER_FAILED", "重排序失败", true).with_detail(e.to_string())
-            })?;
+            )?;
         }
         Ok(())
     }
@@ -115,15 +102,11 @@ impl PlotService {
     pub fn next_sort_order(&self, project_root: &str) -> Result<i64, AppErrorDto> {
         let conn = open_project_db(project_root)?;
         let project_id = get_project_id(&conn)?;
-        conn.query_row(
+        Ok(conn.query_row(
             "SELECT COALESCE(MAX(sort_order), 0) + 1 FROM plot_nodes WHERE project_id = ?1",
             params![project_id],
             |row| row.get::<_, i64>(0),
-        )
-        .map_err(|e| {
-            AppErrorDto::new("PIPELINE_DB_QUERY_FAILED", "读取剧情节点顺序失败", true)
-                .with_detail(e.to_string())
-        })
+        )?)
     }
 }
 

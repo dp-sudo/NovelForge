@@ -44,8 +44,7 @@ impl WorldService {
         let conn = open_project_db(project_root)?;
         let project_id = get_project_id(&conn)?;
         let mut stmt = conn
-            .prepare("SELECT id, project_id, title, category, description, constraint_level, COALESCE(related_entities,'[]'), examples, contradiction_policy, is_deleted, created_at, updated_at FROM world_rules WHERE project_id = ?1 AND is_deleted = 0")
-            .map_err(|e| AppErrorDto::new("QUERY_FAILED", "查询世界规则失败", true).with_detail(e.to_string()))?;
+            .prepare("SELECT id, project_id, title, category, description, constraint_level, COALESCE(related_entities,'[]'), examples, contradiction_policy, is_deleted, created_at, updated_at FROM world_rules WHERE project_id = ?1 AND is_deleted = 0")?;
         let rules = stmt
             .query_map(params![project_id], |row| {
                 Ok(WorldRuleRecord {
@@ -62,16 +61,8 @@ impl WorldService {
                     created_at: row.get(10)?,
                     updated_at: row.get(11)?,
                 })
-            })
-            .map_err(|e| {
-                AppErrorDto::new("QUERY_FAILED", "查询世界规则失败", true)
-                    .with_detail(e.to_string())
             })?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| {
-                AppErrorDto::new("QUERY_FAILED", "查询世界规则失败", true)
-                    .with_detail(e.to_string())
-            })?;
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(rules)
     }
 
@@ -89,8 +80,7 @@ impl WorldService {
         conn.execute(
             "INSERT INTO world_rules(id, project_id, title, category, description, constraint_level, related_entities, examples, contradiction_policy, is_deleted, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,0,?10,?11)",
             params![id, project_id, input.title, input.category, input.description, input.constraint_level, related, input.examples, input.contradiction_policy, now, now],
-        )
-        .map_err(|e| AppErrorDto::new("INSERT_FAILED", "创建世界规则失败", true).with_detail(e.to_string()))?;
+        )?;
         Ok(id)
     }
 
@@ -101,9 +91,7 @@ impl WorldService {
             "UPDATE world_rules SET is_deleted = 1, updated_at = ?1 WHERE id = ?2",
             params![now, id],
         )
-        .map_err(|e| {
-            AppErrorDto::new("DELETE_FAILED", "删除世界规则失败", true).with_detail(e.to_string())
-        })?;
+        ?;
         Ok(())
     }
 }

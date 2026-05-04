@@ -3,10 +3,9 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::errors::AppErrorDto;
-use crate::infra::database::open_database;
+use crate::infra::database::open_project_db;
 use crate::infra::time::now_iso;
 use crate::services::project_service::get_project_id;
-use std::path::Path;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -71,9 +70,7 @@ pub struct ConstitutionService;
 
 impl ConstitutionService {
     pub fn list(&self, project_root: &str) -> Result<Vec<ConstitutionRule>, AppErrorDto> {
-        let conn = open_database(Path::new(project_root)).map_err(|e| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
-        })?;
+        let conn = open_project_db(project_root)?;
         let project_id = get_project_id(&conn)?;
         let mut stmt = conn
             .prepare(
@@ -124,9 +121,7 @@ impl ConstitutionService {
                 true,
             ));
         }
-        let conn = open_database(Path::new(project_root)).map_err(|e| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
-        })?;
+        let conn = open_project_db(project_root)?;
         let project_id = get_project_id(&conn)?;
         let id = Uuid::new_v4().to_string();
         let now = now_iso();
@@ -160,9 +155,7 @@ impl ConstitutionService {
         id: &str,
         input: UpdateConstitutionRuleInput,
     ) -> Result<(), AppErrorDto> {
-        let conn = open_database(Path::new(project_root)).map_err(|e| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
-        })?;
+        let conn = open_project_db(project_root)?;
         let now = now_iso();
         let mut sets = vec!["updated_at = ?1".to_string()];
         let mut idx = 2u32;
@@ -218,9 +211,7 @@ impl ConstitutionService {
     }
 
     pub fn delete(&self, project_root: &str, id: &str) -> Result<(), AppErrorDto> {
-        let conn = open_database(Path::new(project_root)).map_err(|e| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
-        })?;
+        let conn = open_project_db(project_root)?;
         conn.execute(
             "DELETE FROM story_constitution_rules WHERE id = ?1",
             params![id],
@@ -248,9 +239,7 @@ impl ConstitutionService {
         run_id: Option<&str>,
         chapter_id: Option<&str>,
     ) -> Result<ConstitutionValidationResult, AppErrorDto> {
-        let conn = open_database(Path::new(project_root)).map_err(|e| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
-        })?;
+        let conn = open_project_db(project_root)?;
         let project_id = get_project_id(&conn)?;
 
         let mut stmt = conn
@@ -341,9 +330,7 @@ impl ConstitutionService {
         &self,
         project_root: &str,
     ) -> Result<Vec<ConstitutionViolation>, AppErrorDto> {
-        let conn = open_database(Path::new(project_root)).map_err(|e| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
-        })?;
+        let conn = open_project_db(project_root)?;
         let project_id = get_project_id(&conn)?;
         let mut stmt = conn
             .prepare(
@@ -391,9 +378,7 @@ impl ConstitutionService {
         status: &str,
         note: Option<&str>,
     ) -> Result<(), AppErrorDto> {
-        let conn = open_database(Path::new(project_root)).map_err(|e| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
-        })?;
+        let conn = open_project_db(project_root)?;
         let now = now_iso();
         conn.execute(
             "UPDATE constitution_violations SET resolution_status = ?1, resolution_note = ?2, \
