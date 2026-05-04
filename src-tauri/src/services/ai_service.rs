@@ -3,10 +3,7 @@ use std::sync::Arc;
 
 use tokio::sync::{mpsc, RwLock};
 
-use crate::adapters::{
-    anthropic::AnthropicAdapter, gemini::GeminiAdapter, llm_service::LlmService, llm_types::*,
-    openai_compatible::OpenAiCompatibleAdapter,
-};
+use crate::adapters::{llm_types::*, LlmService};
 use crate::errors::AppErrorDto;
 use crate::infra::{app_database, credential_manager};
 use crate::services::skill_registry::SkillRegistry;
@@ -100,19 +97,7 @@ impl AiService {
     /// Register a provider adapter at runtime.
     pub async fn register_provider(&self, config: ProviderConfig) {
         let id = config.id.clone();
-        let is_anthropic_protocol = matches!(
-            config.protocol.as_str(),
-            "anthropic_messages" | "custom_anthropic_compatible"
-        );
-        let is_gemini_protocol = matches!(config.protocol.as_str(), "gemini_generate_content");
-
-        let adapter: Box<dyn LlmService> = match config.vendor.as_str() {
-            "anthropic" | "minimax" => Box::new(AnthropicAdapter::new(config)),
-            "gemini" => Box::new(GeminiAdapter::new(config)),
-            _ if is_anthropic_protocol => Box::new(AnthropicAdapter::new(config)),
-            _ if is_gemini_protocol => Box::new(GeminiAdapter::new(config)),
-            _ => Box::new(OpenAiCompatibleAdapter::new(config)),
-        };
+        let adapter = crate::adapters::build_adapter(config);
         self.adapters.write().await.insert(id, adapter);
     }
 
@@ -397,20 +382,6 @@ impl AiService {
         });
 
         Ok(rx)
-    }
-
-    /// Test a provider's connection.
-    pub async fn test_connection(&self, provider_id: &str) -> Result<(), AppErrorDto> {
-        self.ensure_provider_registered(provider_id).await?;
-        let guard = self.adapters.read().await;
-        let adapter = guard.get(provider_id).ok_or_else(|| {
-            AppErrorDto::new(
-                "LLM_ADAPTER_NOT_FOUND",
-                &format!("Provider '{}' not registered", provider_id),
-                true,
-            )
-        })?;
-        adapter.test_connection().await.map_err(Into::into)
     }
 }
 

@@ -6,6 +6,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::errors::AppErrorDto;
 
+/// Construct the standard lock-error for the skill registry.
+pub fn skill_lock_error<E: std::fmt::Display>(e: E) -> AppErrorDto {
+    AppErrorDto::new("SKILLS_LOCK_FAILED", "Skill registry lock failed", false)
+        .with_detail(e.to_string())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SkillManifest {
@@ -131,10 +137,7 @@ impl SkillRegistry {
     pub fn reload(&self) -> Result<(), AppErrorDto> {
         let mut list = Vec::new();
         if !self.skills_dir.exists() {
-            let mut guard = self.manifests.write().map_err(|e| {
-                AppErrorDto::new("SKILLS_LOCK_FAILED", "Skill registry lock failed", false)
-                    .with_detail(e.to_string())
-            })?;
+            let mut guard = self.manifests.write().map_err(skill_lock_error)?;
             *guard = list;
             return Ok(());
         }
@@ -163,27 +166,18 @@ impl SkillRegistry {
         // Sort by id for deterministic order
         list.sort_by(|a, b| a.id.cmp(&b.id));
 
-        let mut guard = self.manifests.write().map_err(|e| {
-            AppErrorDto::new("SKILLS_LOCK_FAILED", "Skill registry lock failed", false)
-                .with_detail(e.to_string())
-        })?;
+        let mut guard = self.manifests.write().map_err(skill_lock_error)?;
         *guard = list;
 
         Ok(())
     }
 
     pub fn list_skills(&self) -> Result<Vec<SkillManifest>, AppErrorDto> {
-        self.manifests.read().map(|g| g.clone()).map_err(|e| {
-            AppErrorDto::new("SKILLS_LOCK_FAILED", "Skill registry lock failed", false)
-                .with_detail(e.to_string())
-        })
+        self.manifests.read().map(|g| g.clone()).map_err(skill_lock_error)
     }
 
     pub fn get_skill(&self, id: &str) -> Result<Option<SkillManifest>, AppErrorDto> {
-        let guard = self.manifests.read().map_err(|e| {
-            AppErrorDto::new("SKILLS_LOCK_FAILED", "Skill registry lock failed", false)
-                .with_detail(e.to_string())
-        })?;
+        let guard = self.manifests.read().map_err(skill_lock_error)?;
         Ok(guard.iter().find(|s| s.id == id).cloned())
     }
 
@@ -251,10 +245,7 @@ impl SkillRegistry {
 
     /// Delete a skill file (only user/imported skills).
     pub fn delete_skill(&self, id: &str) -> Result<(), AppErrorDto> {
-        let guard = self.manifests.read().map_err(|e| {
-            AppErrorDto::new("SKILLS_LOCK_FAILED", "Skill registry lock failed", false)
-                .with_detail(e.to_string())
-        })?;
+        let guard = self.manifests.read().map_err(skill_lock_error)?;
 
         let skill = guard.iter().find(|s| s.id == id).ok_or_else(|| {
             AppErrorDto::new(

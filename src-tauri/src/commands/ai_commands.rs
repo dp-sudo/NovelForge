@@ -1,7 +1,6 @@
 use tauri::State;
 use uuid::Uuid;
 
-use crate::adapters::ProviderConfig;
 use crate::errors::AppErrorDto;
 use crate::services::ai_pipeline_service::RunAiTaskPipelineInput;
 use crate::services::context_service::ContextService;
@@ -99,24 +98,6 @@ fn spawn_pipeline_run(
     });
 }
 
-#[tauri::command]
-pub async fn register_ai_provider(
-    config: ProviderConfig,
-    state: State<'_, AppState>,
-) -> Result<(), AppErrorDto> {
-    log::warn!("[DEPRECATED_COMMAND] register_ai_provider is compatibility-only");
-    state.ai_service.register_provider(config).await;
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn test_ai_connection(
-    provider_id: String,
-    state: State<'_, AppState>,
-) -> Result<(), AppErrorDto> {
-    log::warn!("[DEPRECATED_COMMAND] test_ai_connection is compatibility-only");
-    state.ai_service.test_connection(&provider_id).await
-}
 
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -160,7 +141,7 @@ pub async fn generate_blueprint_suggestion(
 
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct AiCharacterInput {
+pub struct SimpleAiInput {
     pub project_root: String,
     pub user_description: String,
 }
@@ -168,7 +149,7 @@ pub struct AiCharacterInput {
 #[tauri::command]
 pub async fn ai_generate_character(
     app_handle: tauri::AppHandle,
-    input: AiCharacterInput,
+    input: SimpleAiInput,
     state: State<'_, AppState>,
 ) -> Result<String, AppErrorDto> {
     crate::infra::logger::log_ai_call("character", "default", "character.create", None);
@@ -180,17 +161,10 @@ pub async fn ai_generate_character(
     .await
 }
 
-#[derive(Debug, Clone, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AiWorldRuleInput {
-    pub project_root: String,
-    pub user_description: String,
-}
-
 #[tauri::command]
 pub async fn ai_generate_world_rule(
     app_handle: tauri::AppHandle,
-    input: AiWorldRuleInput,
+    input: SimpleAiInput,
     state: State<'_, AppState>,
 ) -> Result<String, AppErrorDto> {
     crate::infra::logger::log_ai_call("world", "default", "world.create_rule", None);
@@ -202,17 +176,10 @@ pub async fn ai_generate_world_rule(
     .await
 }
 
-#[derive(Debug, Clone, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AiPlotNodeInput {
-    pub project_root: String,
-    pub user_description: String,
-}
-
 #[tauri::command]
 pub async fn ai_generate_plot_node(
     app_handle: tauri::AppHandle,
-    input: AiPlotNodeInput,
+    input: SimpleAiInput,
     state: State<'_, AppState>,
 ) -> Result<String, AppErrorDto> {
     crate::infra::logger::log_ai_call("plot", "default", "plot.create_node", None);
@@ -258,17 +225,10 @@ pub async fn ai_scan_consistency(
     .await
 }
 
-#[derive(Debug, Clone, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AiGlossaryInput {
-    pub project_root: String,
-    pub user_description: String,
-}
-
 #[tauri::command]
 pub async fn ai_generate_glossary_term(
     app_handle: tauri::AppHandle,
-    input: AiGlossaryInput,
+    input: SimpleAiInput,
     state: State<'_, AppState>,
 ) -> Result<String, AppErrorDto> {
     crate::infra::logger::log_ai_call("glossary", "default", "glossary.create_term", None);
@@ -280,17 +240,10 @@ pub async fn ai_generate_glossary_term(
     .await
 }
 
-#[derive(Debug, Clone, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AiNarrativeInput {
-    pub project_root: String,
-    pub user_description: String,
-}
-
 #[tauri::command]
 pub async fn ai_generate_narrative_obligation(
     app_handle: tauri::AppHandle,
-    input: AiNarrativeInput,
+    input: SimpleAiInput,
     state: State<'_, AppState>,
 ) -> Result<String, AppErrorDto> {
     crate::infra::logger::log_ai_call("narrative", "default", "narrative.create_obligation", None);

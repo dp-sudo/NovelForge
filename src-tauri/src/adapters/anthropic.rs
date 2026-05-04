@@ -470,7 +470,7 @@ impl LlmService for AnthropicAdapter {
             Err(e) => {
                 return Err(LlmError::ProviderError(format!(
                     "Auth error: {}",
-                    e.user_message()
+                    crate::errors::AppErrorDto::from(e).message
                 )))
             }
         };

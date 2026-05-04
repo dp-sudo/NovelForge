@@ -90,27 +90,7 @@ impl From<LlmError> for AppErrorDto {
     }
 }
 
-impl LlmError {
-    /// Returns a user-facing error message (used by stream error chunks).
-    pub fn user_message(&self) -> String {
-        match self {
-            LlmError::MissingApiKey => "API Key 未配置".to_string(),
-            LlmError::InvalidApiKey => "API Key 认证失败".to_string(),
-            LlmError::InsufficientQuota => "API 额度不足".to_string(),
-            LlmError::RateLimited => "请求频率过高，请稍后重试".to_string(),
-            LlmError::ModelNotFound => "模型不可用或不存在".to_string(),
-            LlmError::ContextLengthExceeded => "上下文超过模型长度限制".to_string(),
-            LlmError::MaxOutputExceeded => "输出超过最大 Token 限制".to_string(),
-            LlmError::ContentPolicyViolation => "内容安全策略拒绝".to_string(),
-            LlmError::NetworkTimeout => "连接超时，请检查网络".to_string(),
-            LlmError::NetworkError => "网络错误，请检查网络连接".to_string(),
-            LlmError::StreamInterrupted => "流式输出意外中断".to_string(),
-            LlmError::InvalidJsonResponse => "模型返回了无效的 JSON".to_string(),
-            LlmError::UnsupportedFeature => "该功能不被当前 Provider 支持".to_string(),
-            LlmError::ProviderError(msg) => format!("AI 服务错误: {}", msg),
-        }
-    }
-}
+
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

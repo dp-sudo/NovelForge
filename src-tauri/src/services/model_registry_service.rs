@@ -35,7 +35,7 @@ impl ModelRegistryService {
             config.api_key = Some(key);
         }
 
-        let adapter = build_adapter(&config)?;
+        let adapter = crate::adapters::build_adapter(config);
 
         let live_model_names = adapter.fetch_models().await.map_err(|e| {
             AppErrorDto::new(
@@ -794,30 +794,3 @@ mod tests {
     }
 }
 
-fn build_adapter(
-    config: &ProviderConfig,
-) -> Result<Box<dyn crate::adapters::LlmService>, AppErrorDto> {
-    let is_anthropic_protocol = matches!(
-        config.protocol.as_str(),
-        "anthropic_messages" | "custom_anthropic_compatible"
-    );
-    let is_gemini_protocol = matches!(config.protocol.as_str(), "gemini_generate_content");
-
-    match config.vendor.as_str() {
-        "anthropic" | "minimax" => Ok(Box::new(crate::adapters::anthropic::AnthropicAdapter::new(
-            config.clone(),
-        ))),
-        "gemini" => Ok(Box::new(crate::adapters::gemini::GeminiAdapter::new(
-            config.clone(),
-        ))),
-        _ if is_anthropic_protocol => Ok(Box::new(
-            crate::adapters::anthropic::AnthropicAdapter::new(config.clone()),
-        )),
-        _ if is_gemini_protocol => Ok(Box::new(crate::adapters::gemini::GeminiAdapter::new(
-            config.clone(),
-        ))),
-        _ => Ok(Box::new(
-            crate::adapters::openai_compatible::OpenAiCompatibleAdapter::new(config.clone()),
-        )),
-    }
-}

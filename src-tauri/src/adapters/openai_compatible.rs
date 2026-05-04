@@ -391,7 +391,7 @@ impl LlmService for OpenAiCompatibleAdapter {
             Err(e) => {
                 return Err(LlmError::ProviderError(format!(
                     "Auth error: {}",
-                    e.user_message()
+                    crate::errors::AppErrorDto::from(e).message
                 )))
             }
         };

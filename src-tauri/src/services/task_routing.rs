@@ -20,25 +20,14 @@ pub const CORE_TASK_ROUTE_TYPES: &[&str] = &[
     "export.review",
 ];
 
-pub const TASK_ROUTE_TYPES_WITH_CUSTOM: &[&str] = &[
-    "chapter.draft",
-    "chapter.continue",
-    "chapter.rewrite",
-    "chapter.plan",
-    "prose.naturalize",
-    "character.create",
-    "world.create_rule",
-    "consistency.scan",
-    "blueprint.generate_step",
-    "plot.create_node",
-    "glossary.create_term",
-    "narrative.create_obligation",
-    "timeline.review",
-    "relationship.review",
-    "dashboard.review",
-    "export.review",
-    "custom",
-];
+/// Returns all core task route types plus the `"custom"` catch-all.
+///
+/// Derived from `CORE_TASK_ROUTE_TYPES` to avoid maintaining a duplicate list.
+pub fn task_route_types_with_custom() -> Vec<&'static str> {
+    let mut v = CORE_TASK_ROUTE_TYPES.to_vec();
+    v.push("custom");
+    v
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]

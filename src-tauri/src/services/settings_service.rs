@@ -1,10 +1,7 @@
-use crate::adapters::anthropic::AnthropicAdapter;
-use crate::adapters::gemini::GeminiAdapter;
-use crate::adapters::llm_service::LlmService;
-use crate::adapters::llm_types::ProviderConfig;
-use crate::adapters::openai_compatible::OpenAiCompatibleAdapter;
+use crate::adapters::llm_types::{ProviderConfig, TaskRoute};
 use crate::errors::AppErrorDto;
 use crate::infra::{app_database, credential_manager};
+use crate::services::task_routing;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -70,20 +67,6 @@ impl SettingsService {
         Ok(result)
     }
 
-    /// Load a single provider config (with masked API Key).
-    pub fn load_provider(&self, provider_id: &str) -> Result<ProviderConfig, AppErrorDto> {
-        let conn = app_database::open_or_create()?;
-        let mut config = app_database::load_provider(&conn, provider_id)?.ok_or_else(|| {
-            AppErrorDto::new(
-                "PROVIDER_NOT_FOUND",
-                &format!("Provider '{}' not found", provider_id),
-                true,
-            )
-        })?;
-
-        config.api_key = load_masked_api_key(provider_id)?;
-        Ok(config)
-    }
 
     /// Delete a provider and its API key.
     pub fn delete_provider(&self, provider_id: &str) -> Result<(), AppErrorDto> {
@@ -239,20 +222,8 @@ fn validate_provider_config(config: &mut ProviderConfig) -> Result<(), AppErrorD
     Ok(())
 }
 
-fn build_adapter(config: ProviderConfig) -> Box<dyn LlmService> {
-    let is_anthropic_protocol = matches!(
-        config.protocol.as_str(),
-        "anthropic_messages" | "custom_anthropic_compatible"
-    );
-    let is_gemini_protocol = matches!(config.protocol.as_str(), "gemini_generate_content");
-
-    match config.vendor.as_str() {
-        "anthropic" | "minimax" => Box::new(AnthropicAdapter::new(config)),
-        "gemini" => Box::new(GeminiAdapter::new(config)),
-        _ if is_anthropic_protocol => Box::new(AnthropicAdapter::new(config)),
-        _ if is_gemini_protocol => Box::new(GeminiAdapter::new(config)),
-        _ => Box::new(OpenAiCompatibleAdapter::new(config)),
-    }
+fn build_adapter(config: ProviderConfig) -> Box<dyn crate::adapters::LlmService> {
+    crate::adapters::build_adapter(config)
 }
 
 fn is_loopback_host(host: Option<&str>) -> bool {
@@ -260,6 +231,110 @@ fn is_loopback_host(host: Option<&str>) -> bool {
         host.unwrap_or("").to_ascii_lowercase().as_str(),
         "localhost" | "127.0.0.1" | "::1"
     )
+}
+
+// ── Task route business logic (moved from commands layer) ──
+
+fn normalize_task_routes(routes: Vec<TaskRoute>) -> Vec<TaskRoute> {
+    use std::collections::BTreeMap;
+    let mut dedup: BTreeMap<String, (bool, TaskRoute)> = BTreeMap::new();
+    for mut route in routes {
+        let canonical = task_routing::canonical_task_type(&route.task_type).into_owned();
+        let is_exact_canonical = route.task_type == canonical;
+        route.task_type = canonical.clone();
+
+        let should_replace = match dedup.get(&canonical) {
+            None => true,
+            Some((existing_exact, _)) => is_exact_canonical && !*existing_exact,
+        };
+        if should_replace {
+            dedup.insert(canonical, (is_exact_canonical, route));
+        }
+    }
+    dedup.into_values().map(|(_, route)| route).collect()
+}
+
+fn pick_primary_route_seed(
+    routes: &[TaskRoute],
+    providers: &[ProviderConfig],
+) -> Option<(String, String)> {
+    const PROVIDER_SEED_PRIORITY: &[&str] = &[
+        "deepseek",
+        "kimi",
+        "zhipu",
+        "minimax",
+        "openai",
+        "anthropic",
+        "gemini",
+        "custom",
+    ];
+
+    if let Some(existing) = routes
+        .iter()
+        .find(|route| !route.provider_id.trim().is_empty() && !route.model_id.trim().is_empty())
+    {
+        return Some((
+            existing.provider_id.trim().to_string(),
+            existing.model_id.trim().to_string(),
+        ));
+    }
+
+    for provider_id in PROVIDER_SEED_PRIORITY {
+        if let Some(provider) = providers
+            .iter()
+            .find(|provider| provider.id == *provider_id)
+        {
+            let model_id = provider.default_model.as_deref().unwrap_or("").trim();
+            if !model_id.is_empty() {
+                return Some((provider.id.clone(), model_id.to_string()));
+            }
+        }
+    }
+
+    providers.iter().find_map(|provider| {
+        let model_id = provider.default_model.as_deref().unwrap_or("").trim();
+        if provider.id.trim().is_empty() || model_id.is_empty() {
+            None
+        } else {
+            Some((provider.id.clone(), model_id.to_string()))
+        }
+    })
+}
+
+/// Load task routes and fill in defaults if the table is empty.
+pub fn ensure_default_task_routes(
+    conn: &rusqlite::Connection,
+    providers: &[ProviderConfig],
+    routes: Vec<TaskRoute>,
+) -> Result<Vec<TaskRoute>, AppErrorDto> {
+    let normalized_routes = normalize_task_routes(routes);
+    if !normalized_routes.is_empty() {
+        return Ok(normalized_routes);
+    }
+
+    let Some((provider_id, model_id)) = pick_primary_route_seed(&normalized_routes, providers)
+    else {
+        return Ok(normalized_routes);
+    };
+
+    let now = crate::infra::time::now_iso();
+    for task_type in &task_routing::task_route_types_with_custom() {
+        let route = TaskRoute {
+            id: uuid::Uuid::new_v4().to_string(),
+            task_type: (*task_type).to_string(),
+            provider_id: provider_id.clone(),
+            model_id: model_id.clone(),
+            fallback_provider_id: None,
+            fallback_model_id: None,
+            max_retries: 1,
+            created_at: Some(now.clone()),
+            updated_at: Some(now.clone()),
+        };
+        app_database::upsert_task_route(conn, &route, &now)?;
+    }
+
+    let refreshed = app_database::load_task_routes(conn)?;
+    Ok(normalize_task_routes(refreshed))
 }
 
 #[cfg(test)]
