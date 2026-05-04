@@ -3,10 +3,9 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::errors::AppErrorDto;
-use crate::infra::database::open_database;
+use crate::infra::database::open_project_db;
 use crate::infra::time::now_iso;
 use crate::services::project_service::get_project_id;
-use std::path::Path;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -76,9 +75,7 @@ pub struct CharacterService;
 
 impl CharacterService {
     pub fn list(&self, project_root: &str) -> Result<Vec<CharacterRecord>, AppErrorDto> {
-        let conn = open_database(Path::new(project_root)).map_err(|e| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
-        })?;
+        let conn = open_project_db(project_root)?;
         let project_id = get_project_id(&conn)?;
         let mut stmt = conn
             .prepare("SELECT id, project_id, name, COALESCE(aliases,'[]'), role_type, age, gender, identity_text, appearance, motivation, desire, fear, flaw, arc_stage, COALESCE(locked_fields,'[]'), notes, is_deleted, created_at, updated_at FROM characters WHERE project_id = ?1 AND is_deleted = 0")
@@ -122,9 +119,7 @@ impl CharacterService {
         project_root: &str,
         input: CreateCharacterInput,
     ) -> Result<String, AppErrorDto> {
-        let conn = open_database(Path::new(project_root)).map_err(|e| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
-        })?;
+        let conn = open_project_db(project_root)?;
         let project_id = get_project_id(&conn)?;
         let id = Uuid::new_v4().to_string();
         let now = now_iso();
@@ -144,9 +139,7 @@ impl CharacterService {
         project_root: &str,
         input: UpdateCharacterInput,
     ) -> Result<(), AppErrorDto> {
-        let conn = open_database(Path::new(project_root)).map_err(|e| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
-        })?;
+        let conn = open_project_db(project_root)?;
         let now = now_iso();
         if let Some(name) = &input.name {
             conn.execute(
@@ -284,9 +277,7 @@ impl CharacterService {
     }
 
     pub fn soft_delete(&self, project_root: &str, id: &str) -> Result<(), AppErrorDto> {
-        let conn = open_database(Path::new(project_root)).map_err(|e| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
-        })?;
+        let conn = open_project_db(project_root)?;
         let now = now_iso();
         conn.execute(
             "UPDATE characters SET is_deleted = 1, updated_at = ?1 WHERE id = ?2",
@@ -385,9 +376,7 @@ impl RelationshipService {
         project_root: &str,
         character_id: Option<&str>,
     ) -> Result<Vec<CharacterRelationship>, AppErrorDto> {
-        let conn = open_database(Path::new(project_root)).map_err(|e| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
-        })?;
+        let conn = open_project_db(project_root)?;
 
         let sql = if character_id.is_some() {
             "SELECT id, source_character_id, target_character_id, relationship_type, description, created_at, updated_at FROM character_relationships WHERE source_character_id = ?1 OR target_character_id = ?1"
@@ -458,9 +447,7 @@ impl RelationshipService {
                 true,
             ));
         }
-        let conn = open_database(Path::new(project_root)).map_err(|e| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
-        })?;
+        let conn = open_project_db(project_root)?;
         let project_id = get_project_id(&conn)?;
         let id = Uuid::new_v4().to_string();
         let now = now_iso();
@@ -472,9 +459,7 @@ impl RelationshipService {
     }
 
     pub fn delete(&self, project_root: &str, id: &str) -> Result<(), AppErrorDto> {
-        let conn = open_database(Path::new(project_root)).map_err(|e| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
-        })?;
+        let conn = open_project_db(project_root)?;
         conn.execute(
             "DELETE FROM character_relationships WHERE id = ?1",
             params![id],

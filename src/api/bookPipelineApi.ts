@@ -1,8 +1,11 @@
 import {
   cancelTaskPipeline,
   streamTaskPipeline,
+  extractPipelineMeta,
   type AiPipelineEvent,
   type RunTaskPipelineInput,
+  type PipelineReviewWorkItem,
+  type PipelineReviewChecklistItem,
 } from "./pipelineApi.js";
 
 export type BookStageKey =
@@ -42,8 +45,8 @@ export type BookPipelineEvent =
     meta: {
       taskContract: Record<string, unknown> | null;
       contextCompilationSnapshot: Record<string, unknown> | null;
-      reviewChecklist: Array<Record<string, unknown>>;
-      reviewWorkItems: Array<Record<string, unknown>>;
+      reviewChecklist: PipelineReviewChecklistItem[];
+      reviewWorkItems: PipelineReviewWorkItem[];
       checkpointId: string | null;
     };
   }
@@ -54,7 +57,7 @@ export type BookPipelineEvent =
     stageLabel: string;
     requestId: string;
     checkpointId: string | null;
-    reviewWorkItems: Array<Record<string, unknown>>;
+    reviewWorkItems: PipelineReviewWorkItem[];
   }
   | {
     type: "stage-error";
@@ -187,25 +190,16 @@ export async function* streamBookGenerationPipeline(
 
     let latestRequestId: string | undefined;
     let latestCheckpointId: string | null = null;
-    let latestReviewWorkItems: Array<Record<string, unknown>> = [];
+    let latestReviewWorkItems: PipelineReviewWorkItem[] = [];
     try {
       for await (const event of streamTaskPipeline(stage.request, { timeoutMs: 180000 })) {
         latestRequestId = event.requestId;
-        const eventMeta = (event.meta && typeof event.meta === "object" ? event.meta : null) as
-          | Record<string, unknown>
-          | null;
-        const checkpointId = eventMeta && typeof eventMeta.checkpointId === "string"
-          ? eventMeta.checkpointId
-          : eventMeta && typeof eventMeta.storyCheckpointId === "string"
-            ? eventMeta.storyCheckpointId
-            : null;
-        if (checkpointId) {
-          latestCheckpointId = checkpointId;
+        const extracted = extractPipelineMeta(event.meta);
+        if (extracted.checkpointId) {
+          latestCheckpointId = extracted.checkpointId;
         }
-        if (eventMeta && Array.isArray(eventMeta.reviewWorkItems)) {
-          latestReviewWorkItems = eventMeta.reviewWorkItems.filter(
-            (item): item is Record<string, unknown> => Boolean(item) && typeof item === "object"
-          );
+        if (extracted.reviewWorkItems.length > 0) {
+          latestReviewWorkItems = extracted.reviewWorkItems;
         }
         if (signal?.aborted) {
           if (latestRequestId) {
@@ -240,31 +234,11 @@ export async function* streamBookGenerationPipeline(
           stageLabel: stage.label,
           event,
           meta: {
-            taskContract:
-              eventMeta && eventMeta.taskContract && typeof eventMeta.taskContract === "object"
-                ? (eventMeta.taskContract as Record<string, unknown>)
-                : null,
-            contextCompilationSnapshot:
-              eventMeta &&
-              eventMeta.contextCompilationSnapshot &&
-              typeof eventMeta.contextCompilationSnapshot === "object"
-                ? (eventMeta.contextCompilationSnapshot as Record<string, unknown>)
-                : null,
-            reviewChecklist:
-              eventMeta && Array.isArray(eventMeta.reviewChecklist)
-                ? eventMeta.reviewChecklist.filter(
-                    (item): item is Record<string, unknown> =>
-                      Boolean(item) && typeof item === "object"
-                  )
-                : [],
-            reviewWorkItems:
-              eventMeta && Array.isArray(eventMeta.reviewWorkItems)
-                ? eventMeta.reviewWorkItems.filter(
-                    (item): item is Record<string, unknown> =>
-                      Boolean(item) && typeof item === "object"
-                  )
-                : [],
-            checkpointId,
+            taskContract: extracted.taskContract,
+            contextCompilationSnapshot: extracted.contextCompilationSnapshot,
+            reviewChecklist: extracted.reviewChecklist,
+            reviewWorkItems: extracted.reviewWorkItems,
+            checkpointId: extracted.checkpointId,
           },
         };
       }

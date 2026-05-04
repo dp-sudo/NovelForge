@@ -6,25 +6,31 @@ import { Badge } from "../../components/ui/Badge.js";
 import { Button } from "../../components/ui/Button.js";
 import { Modal } from "../../components/dialogs/Modal.js";
 import { Textarea } from "../../components/forms/Textarea.js";
-import { useDashboardStats } from "../../hooks/useApi.js";
-import { runModuleAiTaskWithMeta, type ModuleReviewWorkItem } from "../../api/moduleAiApi.js";
-import { listReviewWorkItems, updateReviewQueueItemStatus } from "../../api/contextApi.js";
+import { useQuery } from "@tanstack/react-query";
+import { getDashboardStats } from "../../api/statsApi.js";
+import { useAiTask } from "../../hooks/useAiTask.js";
+import { runModuleAiTaskWithMeta } from "../../api/moduleAiApi.js";
+import { listReviewWorkItems } from "../../api/contextApi.js";
+import { useReviewChecklist } from "../../hooks/useReviewChecklist.js";
 
 export function DashboardPage() {
   const project = useProjectStore((s) => s.currentProject);
   const projectRoot = useProjectStore((s) => s.currentProjectPath);
   const setActiveRoute = useUiStore((s) => s.setActiveRoute);
-  const { data: stats, isLoading } = useDashboardStats(projectRoot);
+  const { data: stats, isLoading } = useQuery({
+    queryKey: ["project", "stats", projectRoot ?? ""],
+    queryFn: () => getDashboardStats(projectRoot!),
+    enabled: !!projectRoot,
+  });
   const [showAiReview, setShowAiReview] = useState(false);
   const [aiPrompt, setAiPrompt] = useState("");
-  const [aiResult, setAiResult] = useState<string | null>(null);
-  const [aiLoading, setAiLoading] = useState(false);
-  const [aiError, setAiError] = useState<string | null>(null);
+  const ai = useAiTask();
   const [reviewPendingCount, setReviewPendingCount] = useState(0);
-  const [reviewChecklistHints, setReviewChecklistHints] = useState<string[]>([]);
-  const [reviewWorkItems, setReviewWorkItems] = useState<ModuleReviewWorkItem[]>([]);
-  const [reviewItemUpdating, setReviewItemUpdating] = useState<Record<string, boolean>>({});
-  const [taskContractHint, setTaskContractHint] = useState<string | null>(null);
+  const { reviewChecklistHints, reviewWorkItemCount, taskContractHint, processReviewResult, resetReview } = useReviewChecklist();
+
+  const blueprintProgress = stats
+    ? Math.round((stats.completedBlueprintCount / (stats.totalBlueprintSteps > 0 ? stats.totalBlueprintSteps : 8)) * 100)
+    : 0;
 
   const statCards = [
     { label: "总字数", value: stats?.totalWords.toLocaleString() ?? "0", color: "text-info" },
@@ -54,7 +60,7 @@ export function DashboardPage() {
       status: "pending",
       limit: 200,
     }).then((items) => setReviewPendingCount(items.length)).catch(() => setReviewPendingCount(0));
-  }, [projectRoot, aiResult]);
+  }, [projectRoot, ai.result]);
 
   return (
     <div className="max-w-5xl mx-auto">
@@ -66,9 +72,9 @@ export function DashboardPage() {
           variant="ghost"
           size="sm"
           onClick={() => {
-            setAiError(null);
-            setAiResult(null);
+            ai.reset();
             setAiPrompt("");
+            resetReview();
             setShowAiReview(true);
           }}
         >
@@ -96,12 +102,12 @@ export function DashboardPage() {
         <div className="space-y-2">
           <div className="flex justify-between text-sm">
             <span className="text-surface-400">蓝图完成度</span>
-            <span className="text-surface-200">{stats?.blueprintProgress ?? 0}%</span>
+            <span className="text-surface-200">{blueprintProgress}%</span>
           </div>
           <div className="w-full bg-surface-700 rounded-full h-2">
             <div
               className="bg-primary h-2 rounded-full transition-all duration-500"
-              style={{ width: `${stats?.blueprintProgress ?? 0}%` }}
+              style={{ width: `${blueprintProgress}%` }}
             />
           </div>
         </div>
@@ -120,6 +126,47 @@ export function DashboardPage() {
           </div>
         </div>
       </Card>
+
+      {stats && !isLoading && (
+        <Card padding="lg" className="mb-6">
+          <h2 className="text-sm font-semibold text-surface-200 mb-3">📋 创作引导 — 下一步建议</h2>
+          <div className="space-y-2">
+            {(() => {
+              type SR = typeof shortcuts[0]["route"];
+              const steps: Array<{ done: boolean; label: string; action: string; route: SR }> = [
+                { done: blueprintProgress >= 50, label: "完成创作蓝图", action: "规划故事大纲和结构，让 AI 有方向可循", route: "blueprint" as SR },
+                { done: stats.characterCount > 0, label: "创建主要角色", action: "定义角色身份、动机与缺陷，AI 生成时自动引用", route: "characters" as SR },
+                { done: stats.worldRuleCount > 0, label: "建立世界设定", action: "定义世界规则和约束，确保叙事一致性", route: "world" as SR },
+                { done: stats.plotNodeCount > 0, label: "搭建剧情骨架", action: "规划情节节点和冲突，控制故事节奏", route: "plot" as SR },
+                { done: stats.chapterCount > 0, label: "开始生成章节", action: "AI 在宪法+资产+状态约束下生成正文", route: "chapters" as SR },
+                { done: reviewPendingCount === 0 && stats.chapterCount > 0, label: "完成审查闭环", action: "审核 AI 产出，通过后正式落库", route: "review-board" as SR },
+              ];
+              const nextStep = steps.find((s) => !s.done);
+              const completedCount = steps.filter((s) => s.done).length;
+              return (
+                <>
+                  <div className="flex items-center gap-2 mb-3">
+                    <div className="flex-1 bg-surface-700 rounded-full h-1.5">
+                      <div className="bg-primary h-1.5 rounded-full transition-all duration-500" style={{ width: `${Math.round((completedCount / steps.length) * 100)}%` }} />
+                    </div>
+                    <span className="text-xs text-surface-400 shrink-0">{completedCount}/{steps.length}</span>
+                  </div>
+                  {steps.map((step, idx) => (
+                    <button key={step.label} onClick={() => setActiveRoute(step.route)} className={`w-full flex items-center gap-3 p-3 rounded-lg text-left transition-colors border ${!step.done && step === nextStep ? "bg-primary/10 border-primary/30 ring-1 ring-primary/20" : step.done ? "bg-surface-800/50 border-surface-700/50" : "bg-surface-800 border-surface-700 hover:border-surface-500"}`}>
+                      <span className={`text-base shrink-0 ${step.done ? "opacity-50" : ""}`}>{step.done ? "✅" : step === nextStep ? "👉" : `${idx + 1}`}</span>
+                      <div className="flex-1 min-w-0">
+                        <p className={`text-sm font-medium ${step.done ? "text-surface-500 line-through" : "text-surface-100"}`}>{step.label}</p>
+                        <p className={`text-xs mt-0.5 ${step.done ? "text-surface-600" : "text-surface-400"}`}>{step.action}</p>
+                      </div>
+                      {!step.done && step === nextStep && <Badge variant="info">推荐</Badge>}
+                    </button>
+                  ))}
+                </>
+              );
+            })()}
+          </div>
+        </Card>
+      )}
 
       <h2 className="text-sm font-semibold text-surface-200 mb-3">快捷操作</h2>
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
@@ -160,59 +207,38 @@ export function DashboardPage() {
           />
           <Button
             variant="primary"
-            loading={aiLoading}
+            loading={ai.loading}
             onClick={async () => {
               if (!projectRoot) return;
-              setAiLoading(true);
-              setAiError(null);
-              setAiResult(null);
-              try {
+              await ai.run(async () => {
                 const result = await runModuleAiTaskWithMeta({
                   projectRoot,
                   taskType: "dashboard.review",
                   uiAction: "dashboard.ai.review",
                   userInstruction: aiPrompt,
                 });
-                setAiResult(result.output || "AI 未返回内容。");
-                const hints = result.reviewChecklist
-                  .filter((item) => item.status === "attention")
-                  .map((item) => `${item.title}: ${item.message}`);
-                setReviewChecklistHints(hints);
-                setReviewWorkItems(result.reviewWorkItems);
-                const contract = result.taskContract;
-                if (contract) {
-                  const authorityLayer = typeof contract.authorityLayer === "string" ? contract.authorityLayer : "n/a";
-                  const stateLayer = typeof contract.stateLayer === "string" ? contract.stateLayer : "n/a";
-                  const capabilityPack = typeof contract.capabilityPack === "string" ? contract.capabilityPack : "n/a";
-                  const reviewGate = typeof contract.reviewGate === "string" ? contract.reviewGate : "n/a";
-                  setTaskContractHint(`权威层: ${authorityLayer} | 状态层: ${stateLayer} | 能力包: ${capabilityPack} | 审查门: ${reviewGate}`);
-                } else {
-                  setTaskContractHint(null);
-                }
+                processReviewResult(result);
                 const pending = await listReviewWorkItems(projectRoot, {
                   taskType: "dashboard.review",
                   status: "pending",
                   limit: 200,
                 });
                 setReviewPendingCount(pending.length);
-              } catch (error) {
-                setAiError(error instanceof Error ? error.message : "AI 诊断失败");
-              } finally {
-                setAiLoading(false);
-              }
+                return result.output || "AI 未返回内容。";
+              });
             }}
             disabled={!projectRoot}
           >
-            {aiLoading ? "分析中..." : "生成诊断"}
+            {ai.loading ? "分析中..." : "生成诊断"}
           </Button>
-          {aiError && (
+          {ai.error && (
             <div className="p-3 rounded-lg bg-error/10 border border-error/30 text-sm text-error">
-              {aiError}
+              {ai.error}
             </div>
           )}
-          {aiResult && (
+          {ai.result && (
             <div className="p-4 rounded-xl bg-primary/5 border border-primary/20">
-              <pre className="text-sm text-surface-200 whitespace-pre-wrap font-sans leading-relaxed max-h-80 overflow-y-auto">{aiResult}</pre>
+              <pre className="text-sm text-surface-200 whitespace-pre-wrap font-sans leading-relaxed max-h-80 overflow-y-auto">{ai.result}</pre>
               {taskContractHint && <div className="mt-3 text-xs text-surface-400">{taskContractHint}</div>}
               {reviewChecklistHints.length > 0 && (
                 <div className="mt-3 space-y-1">
@@ -221,69 +247,15 @@ export function DashboardPage() {
                   ))}
                 </div>
               )}
-              {reviewWorkItems.length > 0 && (
-                <div className="mt-3 space-y-2">
-                  <div className="text-xs text-surface-400">审查工单</div>
-                  {reviewWorkItems.map((item) => (
-                    <div key={item.id} className="p-2 rounded-lg bg-surface-800 border border-surface-700">
-                      <div className="text-xs text-surface-200">{item.title}</div>
-                      <div className="text-[11px] text-surface-400 mt-1">{item.message}</div>
-                      <div className="mt-2 flex flex-wrap gap-2">
-                        <button
-                          onClick={async () => {
-                            if (!projectRoot) return;
-                            setReviewItemUpdating((prev) => ({ ...prev, [item.id]: true }));
-                            try {
-                              await updateReviewQueueItemStatus(projectRoot, item.id, "resolved");
-                              setReviewWorkItems((prev) => prev.map((row) => row.id === item.id ? { ...row, status: "resolved" } : row));
-                              const pending = await listReviewWorkItems(projectRoot, {
-                                taskType: "dashboard.review",
-                                status: "pending",
-                                limit: 200,
-                              });
-                              setReviewPendingCount(pending.length);
-                            } finally {
-                              setReviewItemUpdating((prev) => {
-                                const next = { ...prev };
-                                delete next[item.id];
-                                return next;
-                              });
-                            }
-                          }}
-                          disabled={Boolean(reviewItemUpdating[item.id])}
-                          className="px-2 py-1 text-[11px] bg-surface-700 text-surface-100 rounded border border-surface-600 disabled:opacity-40"
-                        >
-                          已处理
-                        </button>
-                        <button
-                          onClick={async () => {
-                            if (!projectRoot) return;
-                            setReviewItemUpdating((prev) => ({ ...prev, [item.id]: true }));
-                            try {
-                              await updateReviewQueueItemStatus(projectRoot, item.id, "rejected");
-                              setReviewWorkItems((prev) => prev.map((row) => row.id === item.id ? { ...row, status: "rejected" } : row));
-                              const pending = await listReviewWorkItems(projectRoot, {
-                                taskType: "dashboard.review",
-                                status: "pending",
-                                limit: 200,
-                              });
-                              setReviewPendingCount(pending.length);
-                            } finally {
-                              setReviewItemUpdating((prev) => {
-                                const next = { ...prev };
-                                delete next[item.id];
-                                return next;
-                              });
-                            }
-                          }}
-                          disabled={Boolean(reviewItemUpdating[item.id])}
-                          className="px-2 py-1 text-[11px] bg-surface-700 text-warning rounded border border-surface-600 disabled:opacity-40"
-                        >
-                          驳回
-                        </button>
-                      </div>
-                    </div>
-                  ))}
+              {reviewWorkItemCount > 0 && (
+                <div className="mt-3 flex items-center gap-2">
+                  <span className="text-xs text-surface-400">已生成 {reviewWorkItemCount} 条审查工单</span>
+                  <button
+                    onClick={() => { setShowAiReview(false); setActiveRoute("review-board" as never); }}
+                    className="text-xs text-primary hover:text-primary-light underline"
+                  >
+                    前往审查看板 →
+                  </button>
                 </div>
               )}
             </div>

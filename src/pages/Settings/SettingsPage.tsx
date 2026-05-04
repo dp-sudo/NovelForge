@@ -36,14 +36,8 @@ import {
   type AppUpdateInfo,
   type TaskRoute,
 } from "../../api/settingsApi";
-import {
-  checkProjectIntegrity,
-  createBackup,
-  listBackups,
-  restoreBackup,
-  type BackupResult,
-  type IntegrityReport,
-} from "../../api/chapterApi";
+import { checkProjectIntegrity, type IntegrityReport } from "../../api/integrityApi.js";
+import { createBackup, listBackups, restoreBackup, type BackupResult } from "../../api/backupApi.js";
 import { useProjectStore } from "../../stores/projectStore";
 import {
   VENDOR_PRESETS,
@@ -54,7 +48,7 @@ import {
   type CapabilityReport,
 } from "../../types/ai";
 import { SkillsManager } from "../../components/skills/SkillsManager.js";
-import { TASK_ROUTE_OPTIONS, canonicalTaskType } from "../../utils/taskRouting.js";
+import { TASK_ROUTE_OPTIONS } from "../../utils/taskRouting.js";
 
 type TabKey = "model" | "routing" | "skills" | "editor" | "writing" | "backup" | "about";
 
@@ -588,7 +582,7 @@ export function SettingsPage() {
         const routeMap: Record<string, TaskRouteFormState> = {};
         for (const task of TASK_ROUTE_OPTIONS) {
           const existingRoute = routes.find(
-            (route) => canonicalTaskType(route.taskType) === task.value
+            (route) => route.taskType.trim() === task.value
           );
           routeMap[task.value] = {
             route: existingRoute

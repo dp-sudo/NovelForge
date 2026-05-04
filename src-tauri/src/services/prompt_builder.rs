@@ -228,7 +228,7 @@ impl PromptBuilder {
     }
 
     /// Build a de-AI-ify prompt.
-    pub fn build_naturalize(_context: &CollectedContext, selected_text: &str) -> String {
+    pub fn build_naturalize(selected_text: &str) -> String {
         let parts = vec![
             "# 角色".to_string(),
             "你是中文小说文本修订编辑，擅长去除模板化 AI 腔，保持事实不变。".to_string(),

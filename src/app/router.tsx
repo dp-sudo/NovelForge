@@ -17,6 +17,8 @@ import { ChaptersPage } from "../pages/Chapters/ChaptersPage";
 import { EditorPage } from "../pages/Editor/EditorPage";
 import { ConsistencyPage } from "../pages/Consistency/ConsistencyPage";
 import { ConstitutionPage } from "../pages/Constitution/ConstitutionPage";
+import { ConstitutionConflictsPage } from "../pages/ConstitutionConflicts/ConstitutionConflictsPage";
+import { AssetHistoryPage } from "../pages/AssetHistory/AssetHistoryPage";
 import { StateTrackerPage } from "../pages/StateTracker/StateTrackerPage";
 import { ReviewBoardPage } from "../pages/ReviewBoard/ReviewBoardPage";
 import { ExportPage } from "../pages/Export/ExportPage";
@@ -37,6 +39,8 @@ const routeMap: Record<AppRoute, ComponentType> = {
   editor: EditorPage,
   consistency: ConsistencyPage,
   constitution: ConstitutionPage,
+  "constitution-conflicts": ConstitutionConflictsPage,
+  "asset-history": AssetHistoryPage,
   "state-tracker": StateTrackerPage,
   "review-board": ReviewBoardPage,
   export: ExportPage,

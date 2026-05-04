@@ -65,8 +65,6 @@ pub enum StoryStateLayer {
 pub enum ReviewGateMode {
     ManualRequired,
     ManualRecommended,
-    #[allow(dead_code)]
-    AutoAllowed,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

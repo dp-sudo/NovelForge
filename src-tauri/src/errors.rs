@@ -31,3 +31,9 @@ impl AppErrorDto {
         self
     }
 }
+
+impl From<rusqlite::Error> for AppErrorDto {
+    fn from(e: rusqlite::Error) -> Self {
+        AppErrorDto::new("DB_ERROR", "数据库操作失败", true).with_detail(e.to_string())
+    }
+}

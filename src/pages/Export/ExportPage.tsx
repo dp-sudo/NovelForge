@@ -3,11 +3,13 @@ import { Card } from "../../components/cards/Card";
 import { Button } from "../../components/ui/Button";
 import { Modal } from "../../components/dialogs/Modal";
 import { Textarea } from "../../components/forms/Textarea";
+import { useAiTask } from "../../hooks/useAiTask.js";
 import { listChapters, type ChapterRecord } from "../../api/chapterApi";
 import { exportBook, exportChapter, type ExportFormat } from "../../api/exportApi";
-import { runModuleAiTaskWithMeta, type ModuleReviewWorkItem } from "../../api/moduleAiApi";
-import { listReviewWorkItems, updateReviewQueueItemStatus } from "../../api/contextApi";
+import { runModuleAiTaskWithMeta } from "../../api/moduleAiApi";
+import { listReviewWorkItems } from "../../api/contextApi";
 import { useProjectStore } from "../../stores/projectStore";
+import { useReviewChecklist } from "../../hooks/useReviewChecklist.js";
 
 export function ExportPage() {
   const [range, setRange] = useState<"chapter" | "book">("book");
@@ -21,14 +23,9 @@ export function ExportPage() {
   const [selectedChapterId, setSelectedChapterId] = useState("");
   const [showAiReview, setShowAiReview] = useState(false);
   const [aiPrompt, setAiPrompt] = useState("");
-  const [aiResult, setAiResult] = useState<string | null>(null);
-  const [aiError, setAiError] = useState<string | null>(null);
-  const [aiLoading, setAiLoading] = useState(false);
+  const ai = useAiTask();
   const [reviewPendingCount, setReviewPendingCount] = useState(0);
-  const [reviewChecklistHints, setReviewChecklistHints] = useState<string[]>([]);
-  const [reviewWorkItems, setReviewWorkItems] = useState<ModuleReviewWorkItem[]>([]);
-  const [reviewItemUpdating, setReviewItemUpdating] = useState<Record<string, boolean>>({});
-  const [taskContractHint, setTaskContractHint] = useState<string | null>(null);
+  const { reviewChecklistHints, reviewWorkItemCount, taskContractHint, processReviewResult, resetReview } = useReviewChecklist();
   const projectRoot = useProjectStore((s) => s.currentProjectPath);
   const projectName = useProjectStore((s) => s.currentProject?.name ?? "project");
 
@@ -60,7 +57,7 @@ export function ExportPage() {
       status: "pending",
       limit: 200,
     }).then((items) => setReviewPendingCount(items.length)).catch(() => setReviewPendingCount(0));
-  }, [projectRoot, aiResult]);
+  }, [projectRoot, ai.result]);
 
   async function handleExport() {
     if (!projectRoot) {
@@ -97,8 +94,8 @@ export function ExportPage() {
           size="sm"
           onClick={() => {
             setAiPrompt("");
-            setAiResult(null);
-            setAiError(null);
+            ai.reset();
+            resetReview();
             setShowAiReview(true);
           }}
           disabled={!projectRoot}
@@ -294,59 +291,38 @@ export function ExportPage() {
           />
           <Button
             variant="primary"
-            loading={aiLoading}
+            loading={ai.loading}
             onClick={async () => {
               if (!projectRoot) return;
-              setAiLoading(true);
-              setAiError(null);
-              setAiResult(null);
-              try {
+              await ai.run(async () => {
                 const result = await runModuleAiTaskWithMeta({
                   projectRoot,
                   taskType: "export.review",
                   uiAction: "export.ai.review",
                   userInstruction: aiPrompt,
                 });
-                setAiResult(result.output || "AI 未返回内容。");
-                const hints = result.reviewChecklist
-                  .filter((item) => item.status === "attention")
-                  .map((item) => `${item.title}: ${item.message}`);
-                setReviewChecklistHints(hints);
-                setReviewWorkItems(result.reviewWorkItems);
-                const contract = result.taskContract;
-                if (contract) {
-                  const authorityLayer = typeof contract.authorityLayer === "string" ? contract.authorityLayer : "n/a";
-                  const stateLayer = typeof contract.stateLayer === "string" ? contract.stateLayer : "n/a";
-                  const capabilityPack = typeof contract.capabilityPack === "string" ? contract.capabilityPack : "n/a";
-                  const reviewGate = typeof contract.reviewGate === "string" ? contract.reviewGate : "n/a";
-                  setTaskContractHint(`权威层: ${authorityLayer} | 状态层: ${stateLayer} | 能力包: ${capabilityPack} | 审查门: ${reviewGate}`);
-                } else {
-                  setTaskContractHint(null);
-                }
+                processReviewResult(result);
                 const pending = await listReviewWorkItems(projectRoot, {
                   taskType: "export.review",
                   status: "pending",
                   limit: 200,
                 });
                 setReviewPendingCount(pending.length);
-              } catch (err) {
-                setAiError(err instanceof Error ? err.message : "AI 审阅失败");
-              } finally {
-                setAiLoading(false);
-              }
+                return result.output || "AI 未返回内容。";
+              });
             }}
             disabled={!projectRoot}
           >
-            {aiLoading ? "审阅中..." : "生成导出前审阅"}
+            {ai.loading ? "审阅中..." : "生成导出前审阅"}
           </Button>
-          {aiError && (
+          {ai.error && (
             <div className="p-3 rounded-lg bg-error/10 border border-error/30 text-sm text-error">
-              {aiError}
+              {ai.error}
             </div>
           )}
-          {aiResult && (
+          {ai.result && (
             <div className="p-4 rounded-xl bg-primary/5 border border-primary/20">
-              <pre className="text-sm text-surface-200 whitespace-pre-wrap font-sans leading-relaxed max-h-80 overflow-y-auto">{aiResult}</pre>
+              <pre className="text-sm text-surface-200 whitespace-pre-wrap font-sans leading-relaxed max-h-80 overflow-y-auto">{ai.result}</pre>
               {taskContractHint && <div className="mt-3 text-xs text-surface-400">{taskContractHint}</div>}
               {reviewChecklistHints.length > 0 && (
                 <div className="mt-3 space-y-1">
@@ -355,69 +331,9 @@ export function ExportPage() {
                   ))}
                 </div>
               )}
-              {reviewWorkItems.length > 0 && (
-                <div className="mt-3 space-y-2">
-                  <div className="text-xs text-surface-400">审查工单</div>
-                  {reviewWorkItems.map((item) => (
-                    <div key={item.id} className="p-2 rounded-lg bg-surface-800 border border-surface-700">
-                      <div className="text-xs text-surface-200">{item.title}</div>
-                      <div className="text-[11px] text-surface-400 mt-1">{item.message}</div>
-                      <div className="mt-2 flex flex-wrap gap-2">
-                        <button
-                          onClick={async () => {
-                            if (!projectRoot) return;
-                            setReviewItemUpdating((prev) => ({ ...prev, [item.id]: true }));
-                            try {
-                              await updateReviewQueueItemStatus(projectRoot, item.id, "resolved");
-                              setReviewWorkItems((prev) => prev.map((row) => row.id === item.id ? { ...row, status: "resolved" } : row));
-                              const pending = await listReviewWorkItems(projectRoot, {
-                                taskType: "export.review",
-                                status: "pending",
-                                limit: 200,
-                              });
-                              setReviewPendingCount(pending.length);
-                            } finally {
-                              setReviewItemUpdating((prev) => {
-                                const next = { ...prev };
-                                delete next[item.id];
-                                return next;
-                              });
-                            }
-                          }}
-                          disabled={Boolean(reviewItemUpdating[item.id])}
-                          className="px-2 py-1 text-[11px] bg-surface-700 text-surface-100 rounded border border-surface-600 disabled:opacity-40"
-                        >
-                          已处理
-                        </button>
-                        <button
-                          onClick={async () => {
-                            if (!projectRoot) return;
-                            setReviewItemUpdating((prev) => ({ ...prev, [item.id]: true }));
-                            try {
-                              await updateReviewQueueItemStatus(projectRoot, item.id, "rejected");
-                              setReviewWorkItems((prev) => prev.map((row) => row.id === item.id ? { ...row, status: "rejected" } : row));
-                              const pending = await listReviewWorkItems(projectRoot, {
-                                taskType: "export.review",
-                                status: "pending",
-                                limit: 200,
-                              });
-                              setReviewPendingCount(pending.length);
-                            } finally {
-                              setReviewItemUpdating((prev) => {
-                                const next = { ...prev };
-                                delete next[item.id];
-                                return next;
-                              });
-                            }
-                          }}
-                          disabled={Boolean(reviewItemUpdating[item.id])}
-                          className="px-2 py-1 text-[11px] bg-surface-700 text-warning rounded border border-surface-600 disabled:opacity-40"
-                        >
-                          驳回
-                        </button>
-                      </div>
-                    </div>
-                  ))}
+              {reviewWorkItemCount > 0 && (
+                <div className="mt-3 text-xs text-surface-400">
+                  已生成 {reviewWorkItemCount} 条审查工单，请前往审查看板处理。
                 </div>
               )}
             </div>

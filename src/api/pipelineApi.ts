@@ -373,3 +373,64 @@ function toMeta(value: unknown): Record<string, unknown> | null {
   }
   return value as Record<string, unknown>;
 }
+
+export interface PipelineReviewWorkItem {
+  id: string;
+  key: string;
+  title: string;
+  severity: string;
+  message: string;
+  status: string;
+}
+
+export interface PipelineReviewChecklistItem {
+  key: string;
+  title: string;
+  severity: string;
+  status: string;
+  message: string;
+}
+
+export interface ExtractedPipelineMeta {
+  taskContract: Record<string, unknown> | null;
+  contextCompilationSnapshot: Record<string, unknown> | null;
+  reviewChecklist: PipelineReviewChecklistItem[];
+  reviewWorkItems: PipelineReviewWorkItem[];
+  checkpointId: string | null;
+}
+
+export function extractPipelineMeta(meta: unknown): ExtractedPipelineMeta {
+  let taskContract: Record<string, unknown> | null = null;
+  let contextCompilationSnapshot: Record<string, unknown> | null = null;
+  let reviewChecklist: PipelineReviewChecklistItem[] = [];
+  let reviewWorkItems: PipelineReviewWorkItem[] = [];
+  let checkpointId: string | null = null;
+
+  if (meta && typeof meta === "object") {
+    const metaObj = meta as Record<string, unknown>;
+    
+    if (metaObj.taskContract && typeof metaObj.taskContract === "object") {
+      taskContract = metaObj.taskContract as Record<string, unknown>;
+    }
+    if (metaObj.contextCompilationSnapshot && typeof metaObj.contextCompilationSnapshot === "object") {
+      contextCompilationSnapshot = metaObj.contextCompilationSnapshot as Record<string, unknown>;
+    }
+    if (Array.isArray(metaObj.reviewChecklist)) {
+      reviewChecklist = metaObj.reviewChecklist as PipelineReviewChecklistItem[];
+    }
+    if (Array.isArray(metaObj.reviewWorkItems)) {
+      reviewWorkItems = metaObj.reviewWorkItems as PipelineReviewWorkItem[];
+    }
+    if (typeof metaObj.checkpointId === "string") {
+      checkpointId = metaObj.checkpointId;
+    }
+  }
+
+  return {
+    taskContract,
+    contextCompilationSnapshot,
+    reviewChecklist,
+    reviewWorkItems,
+    checkpointId,
+  };
+}

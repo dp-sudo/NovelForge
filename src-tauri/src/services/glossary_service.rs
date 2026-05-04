@@ -3,10 +3,9 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::errors::AppErrorDto;
-use crate::infra::database::open_database;
+use crate::infra::database::open_project_db;
 use crate::infra::time::now_iso;
 use crate::services::project_service::get_project_id;
-use std::path::Path;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -40,9 +39,7 @@ pub struct GlossaryService;
 
 impl GlossaryService {
     pub fn list(&self, project_root: &str) -> Result<Vec<GlossaryTermRecord>, AppErrorDto> {
-        let conn = open_database(Path::new(project_root)).map_err(|e| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
-        })?;
+        let conn = open_project_db(project_root)?;
         let project_id = get_project_id(&conn)?;
         let mut stmt = conn
             .prepare("SELECT id, project_id, term, term_type, COALESCE(aliases,'[]'), description, locked, banned, preferred_usage, created_at, updated_at FROM glossary_terms WHERE project_id = ?1")
@@ -78,9 +75,7 @@ impl GlossaryService {
         project_root: &str,
         input: CreateGlossaryTermInput,
     ) -> Result<String, AppErrorDto> {
-        let conn = open_database(Path::new(project_root)).map_err(|e| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
-        })?;
+        let conn = open_project_db(project_root)?;
         let project_id = get_project_id(&conn)?;
         let id = Uuid::new_v4().to_string();
         let now = now_iso();

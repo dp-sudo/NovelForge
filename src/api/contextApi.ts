@@ -1,5 +1,16 @@
 import { invokeCommand } from "./tauriClient.js";
 
+export interface ReviewWorkItem {
+  id: string;
+  runId: string;
+  taskType: string;
+  title: string;
+  severity: string;
+  message: string;
+  status: string;
+  createdAt: string;
+}
+
 export interface ChapterContext {
   chapter: {
     id: string;
@@ -78,16 +89,7 @@ export interface ChapterContext {
     confidence: number;
     evidence: string;
   }>;
-  reviewQueue: Array<{
-    id: string;
-    runId: string;
-    taskType: string;
-    title: string;
-    severity: string;
-    message: string;
-    status: string;
-    createdAt: string;
-  }>;
+  reviewQueue: ReviewWorkItem[];
   latestCheckpoint: {
     checkpointId: string;
     runId: string;
@@ -189,8 +191,8 @@ export async function listReviewWorkItems(
     status?: "pending" | "resolved" | "rejected";
     limit?: number;
   } = {}
-): Promise<ChapterContext["reviewQueue"]> {
-  return invokeCommand<ChapterContext["reviewQueue"]>("list_review_work_items", {
+): Promise<ReviewWorkItem[]> {
+  return invokeCommand<ReviewWorkItem[]>("list_review_work_items", {
     projectRoot,
     chapterId: options.chapterId,
     taskType: options.taskType,

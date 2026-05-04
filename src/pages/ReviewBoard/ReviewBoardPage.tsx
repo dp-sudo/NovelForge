@@ -7,10 +7,10 @@ import {
   listReviewWorkItems,
   updateReviewQueueItemStatus,
 } from "../../api/contextApi.js";
-import type { ChapterContext } from "../../api/contextApi.js";
+import type { ReviewWorkItem } from "../../api/contextApi.js";
 import { useProjectStore } from "../../stores/projectStore.js";
 
-type ReviewItem = ChapterContext["reviewQueue"][number];
+type ReviewItem = ReviewWorkItem;
 type ReviewStatus = "pending" | "resolved" | "rejected";
 
 const STATUS_OPTIONS = [
@@ -192,6 +192,21 @@ export function ReviewBoardPage() {
                     }
                   >
                     驳回
+                  </Button>
+                </div>
+              )}
+
+              {item.status === "rejected" && (
+                <div className="flex gap-2 shrink-0">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    loading={updating === item.id}
+                    onClick={() =>
+                      void handleUpdateStatus(item.id, "pending")
+                    }
+                  >
+                    重新审查
                   </Button>
                 </div>
               )}

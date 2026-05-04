@@ -808,6 +808,51 @@ impl AiPipelineService {
             },
         );
 
+        // Auto-create state snapshot for chapter tasks after successful persist
+        if matches!(
+            canonical_task,
+            "chapter.draft" | "chapter.continue" | "chapter.rewrite"
+        ) {
+            if let Some(ch_id) = input.chapter_id.as_deref() {
+                let snapshot_input = crate::services::state_tracker_service::CreateSnapshotInput {
+                    chapter_id: ch_id.to_string(),
+                    snapshot_type: Some("post_chapter".to_string()),
+                    notes: Some(format!("Pipeline 自动创建 ({})", canonical_task)),
+                    character_states: context
+                        .related_context
+                        .characters
+                        .iter()
+                        .map(|c| {
+                            crate::services::state_tracker_service::CreateCharacterStateInput {
+                                character_id: c.id.clone(),
+                                location: None,
+                                emotional_state: None,
+                                arc_progress: None,
+                                knowledge_gained: None,
+                                relationships_changed: None,
+                                status_notes: Some(format!("参与章节 {} 任务 {}", ch_id, canonical_task)),
+                            }
+                        })
+                        .collect(),
+                    plot_states: context
+                        .related_context
+                        .plot_nodes
+                        .iter()
+                        .map(|p| {
+                            crate::services::state_tracker_service::CreatePlotStateInput {
+                                plot_node_id: Some(p.id.clone()),
+                                progress_status: "in_progress".to_string(),
+                                tension_level: None,
+                                open_threads: p.conflict.clone(),
+                            }
+                        })
+                        .collect(),
+                    world_states: vec![],
+                };
+                let _ = state_tracker_service.create_snapshot(&input.project_root, snapshot_input);
+            }
+        }
+
         Ok(PipelineSuccess {
             output_text: normalized,
             route,
@@ -1227,28 +1272,6 @@ impl AiPipelineService {
             }
             let review_item_id = Uuid::new_v4().to_string();
             tx.execute(
-                "INSERT INTO ai_review_queue(
-                    id, checkpoint_id, run_id, project_id, chapter_id, task_type, title,
-                    severity, message, status, created_at, updated_at
-                 ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'pending', ?10, ?10)",
-                params![
-                    &review_item_id,
-                    &checkpoint_id,
-                    run_id,
-                    &project_id,
-                    chapter_id.map(str::trim).filter(|v| !v.is_empty()),
-                    task_type,
-                    &item.title,
-                    &item.severity,
-                    &item.message,
-                    &now
-                ],
-            )
-            .map_err(|e| {
-                AppErrorDto::new("DB_WRITE_FAILED", "写入审查队列失败", true)
-                    .with_detail(e.to_string())
-            })?;
-            tx.execute(
                 "INSERT INTO story_os_v2_review_work_items(
                     id, run_id, checkpoint_id, project_id, chapter_id, task_type, checklist_key,
                     title, severity, message, status, created_at, updated_at
@@ -1328,7 +1351,6 @@ impl AiPipelineService {
         match mode {
             task_routing::ReviewGateMode::ManualRequired => "manual_required",
             task_routing::ReviewGateMode::ManualRecommended => "manual_recommended",
-            task_routing::ReviewGateMode::AutoAllowed => "auto_allowed",
         }
     }
 
@@ -1552,7 +1574,7 @@ impl AiPipelineService {
         fallback_instruction: &str,
     ) -> Result<CreatePlotNodeInput, AppErrorDto> {
         let root = Self::extract_output_object(normalized_output, Some("plotNode"))?;
-        let sort_order = Self::next_plot_sort_order(project_root)?;
+        let sort_order = PlotService.next_sort_order(project_root)?;
         Ok(CreatePlotNodeInput {
             title: Self::pick_string(&root, &["title", "name", "节点标题"], Some("未命名节点")),
             node_type: Self::pick_string(
@@ -1663,27 +1685,18 @@ impl AiPipelineService {
         chapter_id: &str,
         normalized_output: &str,
     ) -> Result<usize, AppErrorDto> {
-        let conn = open_database(Path::new(project_root)).map_err(|err| {
-            AppErrorDto::new("PIPELINE_DB_OPEN_FAILED", "数据库打开失败", false)
-                .with_detail(err.to_string())
-        })?;
-        let project_id = get_project_id(&conn)?;
+        use crate::services::consistency_service::{AiConsistencyIssueInput, ConsistencyService};
+
         let value = Self::extract_output_value(normalized_output)?;
-        let issues = value
+        let issues_raw = value
             .get("issues")
             .and_then(|item| item.as_array())
             .cloned()
             .or_else(|| value.as_array().cloned())
             .unwrap_or_default();
 
-        let _ = conn.execute(
-            "DELETE FROM consistency_issues WHERE project_id = ?1 AND chapter_id = ?2 AND status = 'open'",
-            params![project_id, chapter_id],
-        );
-
-        let now = now_iso();
-        let mut inserted = 0usize;
-        for issue in issues {
+        let mut parsed_issues = Vec::new();
+        for issue in issues_raw {
             let issue_obj = match issue.as_object() {
                 Some(obj) => obj,
                 None => continue,
@@ -1692,47 +1705,30 @@ impl AiPipelineService {
             if explanation.trim().is_empty() {
                 continue;
             }
-            let issue_type = Self::pick_string(
-                issue_obj,
-                &["issueType", "issue_type", "type"],
-                Some("prose_style"),
-            );
-            let severity = Self::normalize_consistency_severity(Self::pick_optional_string(
-                issue_obj,
-                &["severity", "level"],
-            ));
-            let source_text = Self::pick_string(
-                issue_obj,
-                &["sourceText", "source_text", "snippet"],
-                Some(""),
-            );
-            let suggested_fix =
-                Self::pick_optional_string(issue_obj, &["suggestedFix", "suggested_fix", "fix"]);
-
-            conn.execute(
-                "INSERT INTO consistency_issues(id, project_id, issue_type, severity, chapter_id, source_text, explanation, suggested_fix, status, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'open', ?9, ?10)",
-                params![
-                    Uuid::new_v4().to_string(),
-                    project_id,
-                    issue_type,
-                    severity,
-                    chapter_id,
-                    source_text,
-                    explanation,
-                    suggested_fix,
-                    now,
-                    now
-                ],
-            )
-            .map_err(|err| {
-                AppErrorDto::new("PIPELINE_PERSIST_FAILED", "写入一致性问题失败", true)
-                    .with_detail(err.to_string())
-            })?;
-            inserted += 1;
+            parsed_issues.push(AiConsistencyIssueInput {
+                issue_type: Self::pick_string(
+                    issue_obj,
+                    &["issueType", "issue_type", "type"],
+                    Some("prose_style"),
+                ),
+                severity: Self::normalize_consistency_severity(Self::pick_optional_string(
+                    issue_obj,
+                    &["severity", "level"],
+                )),
+                source_text: Self::pick_string(
+                    issue_obj,
+                    &["sourceText", "source_text", "snippet"],
+                    Some(""),
+                ),
+                explanation,
+                suggested_fix: Self::pick_optional_string(
+                    issue_obj,
+                    &["suggestedFix", "suggested_fix", "fix"],
+                ),
+            });
         }
 
-        Ok(inserted)
+        ConsistencyService.persist_ai_issues(project_root, chapter_id, parsed_issues)
     }
 
     fn extract_output_value(normalized_output: &str) -> Result<Value, AppErrorDto> {
@@ -1917,23 +1913,6 @@ impl AiPipelineService {
         normalized_output.to_string()
     }
 
-    fn next_plot_sort_order(project_root: &str) -> Result<i64, AppErrorDto> {
-        let conn = open_database(Path::new(project_root)).map_err(|err| {
-            AppErrorDto::new("PIPELINE_DB_OPEN_FAILED", "数据库打开失败", false)
-                .with_detail(err.to_string())
-        })?;
-        let project_id = get_project_id(&conn)?;
-        conn.query_row(
-            "SELECT COALESCE(MAX(sort_order), 0) + 1 FROM plot_nodes WHERE project_id = ?1",
-            params![project_id],
-            |row| row.get::<_, i64>(0),
-        )
-        .map_err(|err| {
-            AppErrorDto::new("PIPELINE_DB_QUERY_FAILED", "读取剧情节点顺序失败", true)
-                .with_detail(err.to_string())
-        })
-    }
-
     fn validate_input(
         &self,
         canonical_task: &str,
@@ -2060,7 +2039,7 @@ impl AiPipelineService {
             "chapter.rewrite" => {
                 PromptBuilder::build_rewrite(context, selected_text, user_instruction)
             }
-            "prose.naturalize" => PromptBuilder::build_naturalize(context, selected_text),
+            "prose.naturalize" => PromptBuilder::build_naturalize(selected_text),
             "chapter.plan" => PromptBuilder::build_chapter_plan(context, user_instruction),
             "character.create" => PromptBuilder::build_character_create(context, user_instruction),
             "world.create_rule" => {

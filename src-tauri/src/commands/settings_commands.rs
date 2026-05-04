@@ -389,7 +389,7 @@ pub async fn get_refresh_logs(
 }
 
 #[tauri::command]
-pub async fn list_task_routes(_state: State<'_, AppState>) -> Result<Vec<TaskRoute>, AppErrorDto> {
+pub async fn list_task_routes() -> Result<Vec<TaskRoute>, AppErrorDto> {
     let conn = app_database::open_or_create()?;
     let providers = app_database::load_all_providers(&conn)?;
     let routes = app_database::load_task_routes(&conn)?;

@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AppErrorDto } from "../types/error.js";
+import type { AppErrorDto } from "../errors/app-error.js";
 
 type InvokeInput = Record<string, unknown> | undefined;
 
@@ -80,7 +80,7 @@ function formatRequestLabel(requestId: string | undefined): string {
 
 function logApiCall(callId: number, command: string, requestId: string | undefined, input: InvokeInput): void {
   const safe = input
-    ? { ...input, apiKey: input.apiKey ? "[REDACTED]" : undefined, content: input.content ? `[${String(input.content).length} chars]` : undefined }
+    ? { ...input, content: input.content ? `[${String(input.content).length} chars]` : undefined }
     : {};
   console.log(`[${nowISO()}] [API] >> #${callId} ${command}${formatRequestLabel(requestId)}`, Object.keys(safe).length ? safe : "");
 }

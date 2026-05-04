@@ -7,8 +7,8 @@ import { Input } from "../../components/forms/Input.js";
 import { Select } from "../../components/forms/Select.js";
 import { Modal } from "../../components/dialogs/Modal.js";
 import { clearRecentProjects, createProject, listRecentProjects, openProject, validateProjectName } from "../../api/projectApi.js";
-import { checkProjectIntegrity, type IntegrityReport } from "../../api/chapterApi.js";
-import type { AppErrorDto } from "../../types/error.js";
+import { checkProjectIntegrity, type IntegrityReport } from "../../api/integrityApi.js";
+import type { AppErrorDto } from "../../errors/app-error.js";
 
 const GENRES = ["玄幻", "都市", "科幻", "悬疑", "言情", "历史", "奇幻", "轻小说", "剧本", "其他"];
 const WINDOWS_INVALID_PATH_CHARS = /[<>:"|?*]/;

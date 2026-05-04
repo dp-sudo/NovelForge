@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useProjectStore } from "../../stores/projectStore.js";
 import { useEditorStore } from "../../stores/editorStore.js";
 import { useUiStore, type AppRoute } from "../../stores/uiStore.js";
-import { rebuildSearchIndex, searchProject, type SearchResult } from "../../api/chapterApi.js";
+import { rebuildSearchIndex, searchProject, type SearchResult } from "../../api/searchApi.js";
 
 const saveStatusLabels: Record<string, { text: string; color: string }> = {
   saved: { text: "已保存", color: "text-success" },

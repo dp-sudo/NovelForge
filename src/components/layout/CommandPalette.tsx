@@ -23,6 +23,8 @@ const PAGES: PageItem[] = [
   { label: "时间线", path: "/timeline", keywords: "timeline 时间线" },
   { label: "角色关系", path: "/relationships", keywords: "relationships 关系 图谱" },
   { label: "故事宪法", path: "/constitution", keywords: "constitution 宪法 规则 约束" },
+  { label: "宪法冲突检测", path: "/constitution-conflicts", keywords: "conflicts 冲突 矛盾 检测" },
+  { label: "资产变更历史", path: "/asset-history", keywords: "history 历史 变更 审计 audit" },
   { label: "状态追踪", path: "/state-tracker", keywords: "state tracker 状态 快照 追踪" },
   { label: "审查看板", path: "/review-board", keywords: "review board 审查 看板 审核" },
 ];

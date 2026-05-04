@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
+import { useAiTask } from "../../hooks/useAiTask.js";
 import { Card } from "../../components/cards/Card.js";
 import { Button } from "../../components/ui/Button.js";
 import { Input } from "../../components/forms/Input.js";
@@ -31,8 +32,7 @@ export function GlossaryPage() {
   const [showAiCreate, setShowAiCreate] = useState(false);
   const [form, setForm] = useState({ term: "", termType: "术语" as string, description: "", locked: false, banned: false });
   const [aiDescription, setAiDescription] = useState("");
-  const [aiResult, setAiResult] = useState<string | null>(null);
-  const [aiLoading, setAiLoading] = useState(false);
+  const ai = useAiTask();
   const projectRoot = useProjectStore((s) => s.currentProjectPath);
 
   const load = useCallback(async () => {
@@ -65,7 +65,7 @@ export function GlossaryPage() {
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold text-surface-100">名词库</h1>
         <div className="flex gap-2">
-          <Button variant="ghost" size="sm" onClick={() => { setAiDescription(""); setAiResult(null); setShowAiCreate(true); }}>AI 生成</Button>
+          <Button variant="ghost" size="sm" onClick={() => { setAiDescription(""); ai.reset(); setShowAiCreate(true); }}>AI 生成</Button>
           <Button variant="primary" size="sm" onClick={() => setShowNew(true)}>新增名词</Button>
         </div>
       </div>
@@ -144,30 +144,27 @@ export function GlossaryPage() {
           />
           <Button
             variant="primary"
-            loading={aiLoading}
+            loading={ai.loading}
             onClick={async () => {
               if (!projectRoot) return;
-              setAiLoading(true);
-              try {
-                setAiResult(await aiGenerateGlossaryTerm(projectRoot, aiDescription));
+              await ai.run(async () => {
+                const result = await aiGenerateGlossaryTerm(projectRoot, aiDescription);
                 await load();
-              } catch {
-                setAiResult("AI 生成失败。请检查 AI 供应商配置。");
-              } finally {
-                setAiLoading(false);
-              }
+                return result;
+              });
             }}
             disabled={!aiDescription.trim()}
           >
-            {aiLoading ? "生成中..." : "生成并入库"}
+            {ai.loading ? "生成中..." : "生成并入库"}
           </Button>
-          {aiResult && (
+          {ai.error && <p className="text-xs text-error">{ai.error}</p>}
+          {ai.result && (
             <div className="p-4 bg-primary/5 border border-primary/20 rounded-xl">
               <p className="text-xs text-success mb-2">AI 结果已自动写入名词库。</p>
-              <pre className="text-sm text-surface-200 whitespace-pre-wrap font-sans leading-relaxed max-h-64 overflow-y-auto">{aiResult}</pre>
+              <pre className="text-sm text-surface-200 whitespace-pre-wrap font-sans leading-relaxed max-h-64 overflow-y-auto">{ai.result}</pre>
               <div className="flex gap-2 mt-3">
-                <Button variant="ghost" size="sm" onClick={() => setAiResult(null)}>重新生成</Button>
-                <Button variant="primary" size="sm" onClick={() => { setAiResult(null); setAiDescription(""); setShowAiCreate(false); }}>关闭</Button>
+                <Button variant="ghost" size="sm" onClick={() => ai.reset()}>重新生成</Button>
+                <Button variant="primary" size="sm" onClick={() => { ai.reset(); setAiDescription(""); setShowAiCreate(false); }}>关闭</Button>
               </div>
             </div>
           )}

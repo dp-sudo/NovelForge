@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
+import { useAiTask } from "../../hooks/useAiTask.js";
 import { Card } from "../../components/cards/Card.js";
 import { Button } from "../../components/ui/Button.js";
 import { Input } from "../../components/forms/Input.js";
@@ -50,8 +51,7 @@ export function CharactersPage() {
   const [relationships, setRelationships] = useState<CharacterRelationship[]>([]);
   const [showAiCreate, setShowAiCreate] = useState(false);
   const [aiDescription, setAiDescription] = useState("");
-  const [aiLoading, setAiLoading] = useState(false);
-  const [aiResult, setAiResult] = useState<string | null>(null);
+  const ai = useAiTask();
   const [showNewRel, setShowNewRel] = useState(false);
   const [relForm, setRelForm] = useState({ targetId: "", relType: "盟友", description: "" });
   const projectRoot = useProjectStore((s) => s.currentProjectPath);
@@ -102,13 +102,11 @@ export function CharactersPage() {
 
   async function handleAiCreate() {
     if (!projectRoot || !aiDescription.trim()) return;
-    setAiLoading(true); setAiResult(null);
-    try {
+    await ai.run(async () => {
       const result = await aiGenerateCharacter(projectRoot, aiDescription);
-      setAiResult(result || "AI 已完成生成并自动入库。");
       await load();
-    } catch { setAiResult("AI 生成失败"); }
-    finally { setAiLoading(false); }
+      return result || "AI 已完成生成并自动入库。";
+    });
   }
 
   async function handleAddRelationship() {
@@ -138,7 +136,7 @@ export function CharactersPage() {
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold text-surface-100">角色工坊</h1>
         <div className="flex gap-2">
-          <Button variant="ghost" size="sm" onClick={() => { setAiDescription(""); setAiResult(null); setShowAiCreate(true); }}>
+          <Button variant="ghost" size="sm" onClick={() => { setAiDescription(""); ai.reset(); setShowAiCreate(true); }}>
             AI 创建
           </Button>
           <Button variant="primary" size="sm" onClick={() => { resetForm(); setShowNew(true); }}>新建角色</Button>
@@ -263,16 +261,17 @@ export function CharactersPage() {
         <div className="space-y-4">
           <Textarea label="描述角色设想" value={aiDescription} onChange={(e) => setAiDescription(e.target.value)}
             placeholder="例如：一位冷峻的剑客，表面冷酷内心温柔，背负着血海深仇..." className="min-h-[120px]" />
-          <Button variant="primary" loading={aiLoading} onClick={() => void handleAiCreate()} disabled={!aiDescription.trim()}>
-            {aiLoading ? "生成中..." : "生成并入库"}
+          <Button variant="primary" loading={ai.loading} onClick={() => void handleAiCreate()} disabled={!aiDescription.trim()}>
+            {ai.loading ? "生成中..." : "生成并入库"}
           </Button>
-          {aiResult && (
+          {ai.error && <p className="text-xs text-error">{ai.error}</p>}
+          {ai.result && (
             <div className="p-4 bg-surface-800 rounded-xl">
               <p className="text-xs text-success mb-2">AI 结果已自动写入角色库。</p>
-              <pre className="text-sm text-surface-200 whitespace-pre-wrap font-sans">{aiResult}</pre>
+              <pre className="text-sm text-surface-200 whitespace-pre-wrap font-sans">{ai.result}</pre>
               <div className="flex gap-2 mt-3">
-                <Button variant="ghost" size="sm" onClick={() => setAiResult(null)}>重新生成</Button>
-                <Button variant="primary" size="sm" onClick={() => { setShowAiCreate(false); setAiDescription(""); setAiResult(null); }}>关闭</Button>
+                <Button variant="ghost" size="sm" onClick={() => ai.reset()}>重新生成</Button>
+                <Button variant="primary" size="sm" onClick={() => { setShowAiCreate(false); setAiDescription(""); ai.reset(); }}>关闭</Button>
               </div>
             </div>
           )}

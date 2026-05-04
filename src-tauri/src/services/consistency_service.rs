@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::errors::AppErrorDto;
-use crate::infra::database::open_database;
+use crate::infra::database::open_project_db;
 use crate::infra::path_utils::resolve_project_relative_path;
 use crate::infra::time::now_iso;
 use crate::services::project_service::get_project_id;
@@ -48,9 +48,7 @@ impl ConsistencyService {
         input: ScanChapterInput,
     ) -> Result<Vec<ConsistencyIssue>, AppErrorDto> {
         let project_root_path = Path::new(project_root);
-        let conn = open_database(project_root_path).map_err(|e| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
-        })?;
+        let conn = open_project_db(project_root)?;
         let project_id = get_project_id(&conn)?;
         let banned_terms = self.load_banned_terms(&conn, &project_id)?;
         let chapter = self.load_chapter_target(&conn, &project_id, &input.chapter_id)?;
@@ -63,9 +61,7 @@ impl ConsistencyService {
 
     pub fn scan_full(&self, project_root: &str) -> Result<Vec<ConsistencyIssue>, AppErrorDto> {
         let project_root_path = Path::new(project_root);
-        let conn = open_database(project_root_path).map_err(|e| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
-        })?;
+        let conn = open_project_db(project_root)?;
         let project_id = get_project_id(&conn)?;
         let banned_terms = self.load_banned_terms(&conn, &project_id)?;
         let chapters = self.list_chapter_targets(&conn, &project_id)?;
@@ -81,9 +77,7 @@ impl ConsistencyService {
     }
 
     pub fn list_issues(&self, project_root: &str) -> Result<Vec<ConsistencyIssue>, AppErrorDto> {
-        let conn = open_database(Path::new(project_root)).map_err(|e| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
-        })?;
+        let conn = open_project_db(project_root)?;
         let project_id = get_project_id(&conn)?;
         let mut stmt = conn
             .prepare("SELECT id, issue_type, severity, COALESCE(chapter_id,''), COALESCE(source_text,''), explanation, suggested_fix, status FROM consistency_issues WHERE project_id = ?1 ORDER BY created_at DESC")
@@ -119,9 +113,7 @@ impl ConsistencyService {
         issue_id: &str,
         status: &str,
     ) -> Result<(), AppErrorDto> {
-        let conn = open_database(Path::new(project_root)).map_err(|e| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
-        })?;
+        let conn = open_project_db(project_root)?;
         let now = now_iso();
         conn.execute(
             "UPDATE consistency_issues SET status = ?1, updated_at = ?2 WHERE id = ?3",
@@ -328,4 +320,62 @@ impl ConsistencyService {
         }
         Ok(())
     }
+
+    /// Persist AI-discovered consistency issues, replacing old open issues for the chapter.
+    pub fn persist_ai_issues(
+        &self,
+        project_root: &str,
+        chapter_id: &str,
+        issues: Vec<AiConsistencyIssueInput>,
+    ) -> Result<usize, AppErrorDto> {
+        let conn = open_project_db(project_root)?;
+        let project_id = get_project_id(&conn)?;
+
+        let _ = conn.execute(
+            "DELETE FROM consistency_issues WHERE project_id = ?1 AND chapter_id = ?2 AND status = 'open'",
+            params![project_id, chapter_id],
+        );
+
+        let now = now_iso();
+        let mut inserted = 0usize;
+        for issue in &issues {
+            if issue.explanation.trim().is_empty() {
+                continue;
+            }
+            conn.execute(
+                "INSERT INTO consistency_issues(id, project_id, issue_type, severity, chapter_id, source_text, explanation, suggested_fix, status, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'open', ?9, ?10)",
+                params![
+                    Uuid::new_v4().to_string(),
+                    project_id,
+                    issue.issue_type,
+                    issue.severity,
+                    chapter_id,
+                    issue.source_text,
+                    issue.explanation,
+                    issue.suggested_fix,
+                    now,
+                    now
+                ],
+            )
+            .map_err(|e| {
+                AppErrorDto::new("PIPELINE_PERSIST_FAILED", "写入一致性问题失败", true)
+                    .with_detail(e.to_string())
+            })?;
+            inserted += 1;
+        }
+
+        Ok(inserted)
+    }
 }
+
+/// Pre-parsed AI consistency issue input, constructed by the pipeline's JSON parser.
+#[derive(Debug, Clone)]
+pub struct AiConsistencyIssueInput {
+    pub issue_type: String,
+    pub severity: String,
+    pub source_text: String,
+    pub explanation: String,
+    pub suggested_fix: Option<String>,
+}
+

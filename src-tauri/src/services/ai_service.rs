@@ -296,65 +296,6 @@ impl AiService {
         Self::resolve_request_target(req)
     }
 
-    /// Execute text generation with task routing + fallback.
-    /// Optionally accepts a SkillRegistry for skill taskRoute override support.
-    #[allow(dead_code)]
-    pub async fn generate_text(
-        &self,
-        req: UnifiedGenerateRequest,
-        skill_registry: Option<&SkillRegistry>,
-    ) -> Result<UnifiedGenerateResponse, AppErrorDto> {
-        let (provider_id, model, route) = match skill_registry {
-            Some(reg) => Self::resolve_with_skill_override(&req, reg)?,
-            None => Self::resolve_request_target(&req)?,
-        };
-
-        let attempts = Self::build_attempt_chain(&provider_id, &model, route.as_ref());
-
-        let mut last_error = None;
-        for (attempt_provider, attempt_model_hint) in attempts {
-            let resolved_model =
-                match Self::resolve_request_model(&attempt_provider, &attempt_model_hint) {
-                    Ok(model_id) => model_id,
-                    Err(_) => {
-                        last_error = Some(LlmError::ModelNotFound);
-                        continue;
-                    }
-                };
-
-            if self
-                .ensure_provider_registered(&attempt_provider)
-                .await
-                .is_err()
-            {
-                last_error = Some(LlmError::ModelNotFound);
-                continue;
-            }
-
-            let guard = self.adapters.read().await;
-            if let Some(adapter) = guard.get(&attempt_provider) {
-                let mut attempt_req = req.clone();
-                attempt_req.provider_id = Some(attempt_provider.clone());
-                attempt_req.model = resolved_model;
-                match adapter.generate_text(attempt_req).await {
-                    Ok(resp) => return Ok(resp),
-                    Err(e) => {
-                        last_error = Some(e);
-                        continue;
-                    }
-                }
-            } else {
-                last_error = Some(LlmError::ModelNotFound);
-                continue;
-            }
-        }
-
-        Err(match last_error {
-            Some(e) => AppErrorDto::from(e),
-            None => AppErrorDto::new("LLM_GENERATE_FAILED", "All providers failed", false),
-        })
-    }
-
     fn encode_pipeline_stream_error(error: &AppErrorDto) -> String {
         format!(
             "{}{}::{}",
@@ -370,18 +311,6 @@ impl AiService {
             return None;
         }
         Some((code.to_string(), message.to_string()))
-    }
-
-    /// Start streaming generation with task routing.
-    /// Returns an mpsc receiver that yields StreamChunks.
-    /// Optionally accepts a SkillRegistry for skill taskRoute override support.
-    #[allow(dead_code)]
-    pub async fn stream_generate(
-        &self,
-        req: UnifiedGenerateRequest,
-        skill_registry: Option<&SkillRegistry>,
-    ) -> Result<mpsc::Receiver<StreamChunk>, AppErrorDto> {
-        self.stream_generate_inner(req, skill_registry, false).await
     }
 
     /// Start streaming generation with diagnostic error envelope for pipeline consumers.

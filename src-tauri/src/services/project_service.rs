@@ -203,7 +203,7 @@ impl ProjectService {
         })?;
 
         let created_at = now_iso();
-        initialize_database(project_root_path, &created_at).map_err(|err| {
+        initialize_database(project_root_path).map_err(|err| {
             AppErrorDto::new("PROJECT_CREATE_FAILED", "创建项目失败", true)
                 .with_detail(err.to_string())
                 .with_suggested_action("请检查数据库初始化权限")

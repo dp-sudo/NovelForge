@@ -51,10 +51,8 @@ fn default_strategy() -> String {
 }
 
 /// Parsed skill file: metadata + body text.
-#[allow(dead_code)]
 pub struct SkillFile {
     pub manifest: SkillManifest,
-    pub body: String,
 }
 
 pub struct SkillRegistry {
@@ -360,7 +358,7 @@ impl SkillRegistry {
                 .with_detail(e.to_string())
         })?;
 
-        let (frontmatter_str, body) = split_frontmatter(&content)?;
+        let (frontmatter_str, _) = split_frontmatter(&content)?;
 
         let mut manifest: SkillManifest = serde_yaml::from_str(frontmatter_str).map_err(|e| {
             AppErrorDto::new(
@@ -379,10 +377,7 @@ impl SkillRegistry {
             manifest.category = "utility".to_string();
         }
 
-        Ok(SkillFile {
-            manifest,
-            body: body.to_string(),
-        })
+        Ok(SkillFile { manifest })
     }
 }
 

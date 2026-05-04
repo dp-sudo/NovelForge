@@ -3,10 +3,9 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::errors::AppErrorDto;
-use crate::infra::database::open_database;
+use crate::infra::database::open_project_db;
 use crate::infra::time::now_iso;
 use crate::services::project_service::get_project_id;
-use std::path::Path;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -37,9 +36,7 @@ pub struct BlueprintService;
 
 impl BlueprintService {
     pub fn list_steps(&self, project_root: &str) -> Result<Vec<BlueprintStep>, AppErrorDto> {
-        let conn = open_database(Path::new(project_root)).map_err(|e| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
-        })?;
+        let conn = open_project_db(project_root)?;
         let project_id = get_project_id(&conn)?;
         let mut stmt = conn
             .prepare("SELECT id, project_id, step_key, title, COALESCE(content,''), COALESCE(content_path,''), status, ai_generated, completed_at, created_at, updated_at FROM blueprint_steps WHERE project_id = ?1")
@@ -77,9 +74,7 @@ impl BlueprintService {
         project_root: &str,
         input: SaveBlueprintStepInput,
     ) -> Result<BlueprintStep, AppErrorDto> {
-        let conn = open_database(Path::new(project_root)).map_err(|e| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
-        })?;
+        let conn = open_project_db(project_root)?;
         let project_id = get_project_id(&conn)?;
         let now = now_iso();
         let ai_gen = input.ai_generated.unwrap_or(false);
@@ -121,9 +116,7 @@ impl BlueprintService {
     }
 
     pub fn mark_completed(&self, project_root: &str, step_key: &str) -> Result<(), AppErrorDto> {
-        let conn = open_database(Path::new(project_root)).map_err(|e| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
-        })?;
+        let conn = open_project_db(project_root)?;
         let project_id = get_project_id(&conn)?;
         let now = now_iso();
         conn.execute(
@@ -135,9 +128,7 @@ impl BlueprintService {
     }
 
     pub fn reset_step(&self, project_root: &str, step_key: &str) -> Result<(), AppErrorDto> {
-        let conn = open_database(Path::new(project_root)).map_err(|e| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
-        })?;
+        let conn = open_project_db(project_root)?;
         let project_id = get_project_id(&conn)?;
         let now = now_iso();
         conn.execute(

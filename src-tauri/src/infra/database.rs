@@ -4,11 +4,20 @@ use std::path::{Path, PathBuf};
 use log::info;
 use rusqlite::{Connection, Result as SqlResult};
 
+use crate::errors::AppErrorDto;
+
 pub fn get_database_path(project_root: &Path) -> PathBuf {
     project_root.join("database").join("project.sqlite")
 }
 
-pub fn initialize_database(project_root: &Path, _now: &str) -> SqlResult<()> {
+/// Open a project database and return AppErrorDto on failure.
+/// Convenience wrapper that eliminates repeated `.map_err(...)` boilerplate.
+pub fn open_project_db(project_root: &str) -> Result<Connection, AppErrorDto> {
+    open_database(Path::new(project_root))
+        .map_err(|e| AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string()))
+}
+
+pub fn initialize_database(project_root: &Path) -> SqlResult<()> {
     let db_path = get_database_path(project_root);
     if let Some(parent) = db_path.parent() {
         let _ = fs::create_dir_all(parent);

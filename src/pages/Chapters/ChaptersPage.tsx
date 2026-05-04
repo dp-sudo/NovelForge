@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useAiTask } from "../../hooks/useAiTask.js";
 import { useUiStore } from "../../stores/uiStore.js";
 import { useEditorStore } from "../../stores/editorStore.js";
 import { Card } from "../../components/cards/Card.js";
@@ -16,12 +17,12 @@ import {
   createVolume,
   deleteChapter,
   deleteVolume,
-  importChapterFiles,
   listChapters,
   listVolumes,
   type ChapterRecord,
   type VolumeRecord,
 } from "../../api/chapterApi.js";
+import { importChapterFiles } from "../../api/importApi.js";
 import { useProjectStore } from "../../stores/projectStore.js";
 
 const statusColors: Record<string, "default" | "success" | "warning" | "error" | "info"> = {
@@ -57,9 +58,7 @@ export function ChaptersPage() {
   const [volumeForm, setVolumeForm] = useState({ title: "", description: "" });
   const [showAiReview, setShowAiReview] = useState(false);
   const [aiPrompt, setAiPrompt] = useState("");
-  const [aiResult, setAiResult] = useState<string | null>(null);
-  const [aiError, setAiError] = useState<string | null>(null);
-  const [aiLoading, setAiLoading] = useState(false);
+  const ai = useAiTask();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const setActiveRoute = useUiStore((s) => s.setActiveRoute);
   const setActiveChapter = useEditorStore((s) => s.setActiveChapter);
@@ -220,8 +219,7 @@ export function ChaptersPage() {
             size="sm"
             onClick={() => {
               setAiPrompt("");
-              setAiResult(null);
-              setAiError(null);
+              ai.reset();
               setShowAiReview(true);
             }}
             disabled={!projectRoot}
@@ -436,38 +434,31 @@ export function ChaptersPage() {
           />
           <Button
             variant="primary"
-            loading={aiLoading}
+            loading={ai.loading}
             onClick={async () => {
               if (!projectRoot) return;
-              setAiLoading(true);
-              setAiResult(null);
-              setAiError(null);
-              try {
+              await ai.run(async () => {
                 const result = await runModuleAiTask({
                   projectRoot,
                   taskType: "chapter.plan",
                   uiAction: "chapters.ai.plan",
                   userInstruction: aiPrompt,
                 });
-                setAiResult(result || "AI 未返回内容。");
-              } catch (err) {
-                setAiError(err instanceof Error ? err.message : "AI 规划失败");
-              } finally {
-                setAiLoading(false);
-              }
+                return result || "AI 未返回内容。";
+              });
             }}
             disabled={!projectRoot}
           >
-            {aiLoading ? "分析中..." : "生成章节规划建议"}
+            {ai.loading ? "分析中..." : "生成章节规划建议"}
           </Button>
-          {aiError && (
+          {ai.error && (
             <div className="p-3 rounded-lg bg-error/10 border border-error/30 text-sm text-error">
-              {aiError}
+              {ai.error}
             </div>
           )}
-          {aiResult && (
+          {ai.result && (
             <div className="p-4 rounded-xl bg-primary/5 border border-primary/20">
-              <pre className="text-sm text-surface-200 whitespace-pre-wrap font-sans leading-relaxed max-h-80 overflow-y-auto">{aiResult}</pre>
+              <pre className="text-sm text-surface-200 whitespace-pre-wrap font-sans leading-relaxed max-h-80 overflow-y-auto">{ai.result}</pre>
             </div>
           )}
         </div>

@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
+import { useAiTask } from "../../hooks/useAiTask.js";
 import { Card } from "../../components/cards/Card.js";
 import { Badge } from "../../components/ui/Badge.js";
 import { Button } from "../../components/ui/Button.js";
@@ -291,8 +292,7 @@ export function BlueprintPage() {
     parseBlueprintContent(STEPS[0].key, "")
   );
   const [saving, setSaving] = useState(false);
-  const [aiLoading, setAiLoading] = useState(false);
-  const [aiResult, setAiResult] = useState<string | null>(null);
+  const ai = useAiTask();
   const projectRoot = useProjectStore((s) => s.currentProjectPath);
 
   const cur = STEPS[activeIdx];
@@ -310,7 +310,7 @@ export function BlueprintPage() {
   useEffect(() => {
     const content = steps[activeIdx]?.content ?? "";
     setFormData(parseBlueprintContent(cur.key, content));
-    setAiResult(null);
+    ai.reset();
   }, [steps, activeIdx, cur.key]);
 
   function hasContent(): boolean {
@@ -353,15 +353,13 @@ export function BlueprintPage() {
     if (!projectRoot) return;
     await resetBlueprintStep(cur.key, projectRoot);
     setFormData(parseBlueprintContent(cur.key, ""));
-    setAiResult(null);
+    ai.reset();
     await load();
   }
 
   async function handleAiSuggest() {
     if (!projectRoot) return;
-    setAiLoading(true);
-    setAiResult(null);
-    try {
+    await ai.run(async () => {
       const textSummary = Object.entries(formData)
         .filter(([, v]) => v.trim())
         .map(([k, v]) => `${(FIELD_LABELS[cur.key]?.[k] ?? k)}：${v}`)
@@ -372,19 +370,17 @@ export function BlueprintPage() {
         stepTitle: cur.label,
         userInstruction: textSummary || ""
       });
-      setAiResult(suggestion.trim() ? suggestion : "AI 返回为空内容，请重试或切换模型后再试。");
       await load();
-    } catch {
-      setAiResult("AI 建议生成失败。请检查 AI 供应商配置。");
-    } finally { setAiLoading(false); }
+      return suggestion.trim() ? suggestion : "AI 返回为空内容，请重试或切换模型后再试。";
+    });
   }
 
   function handleApplyAiResult() {
-    if (!aiResult) return;
+    if (!ai.result) return;
     const defaults = parseBlueprintContent(cur.key, "");
     // Try to parse AI result as JSON and merge into form fields
     try {
-      const parsed = JSON.parse(aiResult);
+      const parsed = JSON.parse(ai.result);
       if (typeof parsed === "object" && parsed !== null) {
         const merged = { ...defaults };
         for (const key of Object.keys(defaults)) {
@@ -393,14 +389,14 @@ export function BlueprintPage() {
           }
         }
         setFormData(merged);
-        setAiResult(null);
+        ai.reset();
         return;
       }
     } catch { /* not JSON, fall through to full-text replace */ }
     // Fallback: paste AI result into the first field
     const firstKey = Object.keys(defaults)[0];
-    setFormData((prev) => ({ ...prev, [firstKey]: aiResult }));
-    setAiResult(null);
+    setFormData((prev) => ({ ...prev, [firstKey]: ai.result ?? "" }));
+    ai.reset();
   }
 
   function handleFormChange(newData: Record<string, string>) {
@@ -465,16 +461,17 @@ export function BlueprintPage() {
             )}
 
             {/* ── AI result panel ── */}
-            {aiResult && (
+            {ai.error && <p className="text-xs text-error mt-2">{ai.error}</p>}
+            {ai.result && (
               <div className="mt-4 p-4 bg-primary/5 border border-primary/20 rounded-xl">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-xs font-medium text-primary">AI 建议（已自动写入当前步骤，可选同步到表单）</span>
                   <div className="flex gap-2">
                     <Button variant="primary" size="sm" onClick={handleApplyAiResult}>填充到表单</Button>
-                    <Button variant="ghost" size="sm" onClick={() => setAiResult(null)}>忽略</Button>
+                    <Button variant="ghost" size="sm" onClick={() => ai.reset()}>忽略</Button>
                   </div>
                 </div>
-                <pre className="text-sm text-surface-200 whitespace-pre-wrap font-sans leading-relaxed max-h-64 overflow-y-auto">{aiResult}</pre>
+                <pre className="text-sm text-surface-200 whitespace-pre-wrap font-sans leading-relaxed max-h-64 overflow-y-auto">{ai.result}</pre>
               </div>
             )}
           </Card>
@@ -491,10 +488,10 @@ export function BlueprintPage() {
               variant="secondary"
               size="sm"
               className="w-full justify-center mb-3"
-              loading={aiLoading}
+              loading={ai.loading}
               onClick={() => void handleAiSuggest()}
             >
-              {aiLoading ? "生成中..." : "生成并写入"}
+              {ai.loading ? "生成中..." : "生成并写入"}
             </Button>
             {!projectRoot && <p className="text-xs text-warning mb-2">请先打开项目</p>}
           </Card>

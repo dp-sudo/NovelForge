@@ -3,10 +3,9 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::errors::AppErrorDto;
-use crate::infra::database::open_database;
+use crate::infra::database::open_project_db;
 use crate::infra::time::now_iso;
 use crate::services::project_service::get_project_id;
-use std::path::Path;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -43,9 +42,7 @@ pub struct NarrativeService;
 
 impl NarrativeService {
     pub fn list(&self, project_root: &str) -> Result<Vec<NarrativeObligation>, AppErrorDto> {
-        let conn = open_database(Path::new(project_root)).map_err(|e| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
-        })?;
+        let conn = open_project_db(project_root)?;
         let project_id = get_project_id(&conn)?;
         let mut stmt = conn
             .prepare(
@@ -92,9 +89,7 @@ impl NarrativeService {
         project_root: &str,
         input: CreateObligationInput,
     ) -> Result<String, AppErrorDto> {
-        let conn = open_database(Path::new(project_root)).map_err(|e| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
-        })?;
+        let conn = open_project_db(project_root)?;
         let project_id = get_project_id(&conn)?;
         let id = Uuid::new_v4().to_string();
         let now = now_iso();
@@ -132,9 +127,7 @@ impl NarrativeService {
         id: &str,
         status: &str,
     ) -> Result<(), AppErrorDto> {
-        let conn = open_database(Path::new(project_root)).map_err(|e| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
-        })?;
+        let conn = open_project_db(project_root)?;
         let now = now_iso();
         conn.execute(
             "UPDATE narrative_obligations SET payoff_status = ?1, updated_at = ?2 WHERE id = ?3",
@@ -148,9 +141,7 @@ impl NarrativeService {
     }
 
     pub fn delete(&self, project_root: &str, id: &str) -> Result<(), AppErrorDto> {
-        let conn = open_database(Path::new(project_root)).map_err(|e| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
-        })?;
+        let conn = open_project_db(project_root)?;
         conn.execute(
             "DELETE FROM narrative_obligations WHERE id = ?1",
             params![id],

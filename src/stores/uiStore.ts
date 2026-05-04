@@ -15,6 +15,8 @@ export type AppRoute =
   | "editor"
   | "consistency"
   | "constitution"
+  | "constitution-conflicts"
+  | "asset-history"
   | "state-tracker"
   | "review-board"
   | "export"

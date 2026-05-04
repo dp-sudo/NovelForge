@@ -37,7 +37,7 @@ import { Select } from "../../components/forms/Select";
 import { Textarea } from "../../components/forms/Textarea";
 import { Button } from "../../components/ui/Button.js";
 import { FindBar } from "../../components/editor/FindBar.js";
-import { canonicalTaskType, getTaskRequirements } from "../../utils/taskRouting.js";
+import { getTaskRequirements } from "../../utils/taskRouting.js";
 import { loadEditorChapterContentWithRecovery } from "./chapterLoadFlow.js";
 
 const AUTOSAVE_DELAY_MS = 5000;
@@ -443,7 +443,7 @@ export function EditorPage() {
   async function handleAiCommand(taskType: string, userInstruction: string) {
     if (!chapterId || !projectRoot) return;
 
-    const canonicalTask = canonicalTaskType(taskType);
+    const canonicalTask = taskType.trim();
     const requirements = getTaskRequirements(canonicalTask);
     const selectedText = selRef.current.start !== selRef.current.end
       ? content.slice(selRef.current.start, selRef.current.end)

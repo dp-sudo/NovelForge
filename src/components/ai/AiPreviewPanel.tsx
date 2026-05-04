@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { DiffView } from "./DiffView.js";
 import type { AiStreamStatus } from "../../stores/editorStore";
-import { TASK_TYPE_LABELS, DIFF_TASK_TYPES, canonicalTaskType } from "../../utils/taskRouting.js";
+import { TASK_TYPE_LABELS, DIFF_TASK_TYPES } from "../../utils/taskRouting.js";
 
 interface AiPreviewPanelProps {
   status: AiStreamStatus;
@@ -43,7 +43,7 @@ export function AiPreviewPanel({
   onCopy
 }: AiPreviewPanelProps) {
   const [showDiff, setShowDiff] = useState(true);
-  const normalizedTaskType = canonicalTaskType(taskType);
+  const normalizedTaskType = taskType.trim();
   const canDiff = DIFF_TASK_TYPES.has(normalizedTaskType) && status === "completed" && !!originalText;
 
   if (status === "idle") return null;

@@ -18,6 +18,8 @@ const PATH_TO_ROUTE: Record<string, string> = {
   "/editor": "editor",
   "/consistency": "consistency",
   "/constitution": "constitution",
+  "/constitution-conflicts": "constitution-conflicts",
+  "/asset-history": "asset-history",
   "/state-tracker": "state-tracker",
   "/review-board": "review-board",
   "/export": "export",

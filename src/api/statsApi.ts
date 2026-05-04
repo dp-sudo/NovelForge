@@ -13,7 +13,7 @@ export interface DashboardStats {
   worldRuleCount: number;
   plotNodeCount: number;
   openIssueCount: number;
-  blueprintProgress: number;
+  blueprintProgress?: number; // Optional as we now compute it on client
   completedBlueprintCount: number;
   totalBlueprintSteps: number;
   completedChapterCount?: number;
@@ -21,11 +21,5 @@ export interface DashboardStats {
 }
 
 export async function getDashboardStats(projectRoot: string): Promise<DashboardStats | null> {
-  const raw = await invokeCommand<Omit<DashboardStats, "blueprintProgress">>("get_dashboard_stats", { projectRoot });
-  const totalSteps = raw.totalBlueprintSteps > 0 ? raw.totalBlueprintSteps : 8;
-  const blueprintProgress = Math.round((raw.completedBlueprintCount / totalSteps) * 100);
-  return {
-    ...raw,
-    blueprintProgress,
-  };
+  return invokeCommand<DashboardStats>("get_dashboard_stats", { projectRoot });
 }

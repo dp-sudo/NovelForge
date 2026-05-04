@@ -3,10 +3,9 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::errors::AppErrorDto;
-use crate::infra::database::open_database;
+use crate::infra::database::open_project_db;
 use crate::infra::time::now_iso;
 use crate::services::project_service::get_project_id;
-use std::path::Path;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -43,9 +42,7 @@ pub struct PlotService;
 
 impl PlotService {
     pub fn list(&self, project_root: &str) -> Result<Vec<PlotNodeRecord>, AppErrorDto> {
-        let conn = open_database(Path::new(project_root)).map_err(|e| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
-        })?;
+        let conn = open_project_db(project_root)?;
         let project_id = get_project_id(&conn)?;
         let mut stmt = conn
             .prepare("SELECT id, project_id, title, node_type, sort_order, goal, conflict, emotional_curve, status, COALESCE(related_characters,'[]'), created_at, updated_at FROM plot_nodes WHERE project_id = ?1 ORDER BY sort_order")
@@ -84,9 +81,7 @@ impl PlotService {
         project_root: &str,
         input: CreatePlotNodeInput,
     ) -> Result<String, AppErrorDto> {
-        let conn = open_database(Path::new(project_root)).map_err(|e| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
-        })?;
+        let conn = open_project_db(project_root)?;
         let project_id = get_project_id(&conn)?;
         let id = Uuid::new_v4().to_string();
         let now = now_iso();
@@ -102,9 +97,7 @@ impl PlotService {
     }
 
     pub fn reorder(&self, project_root: &str, ordered_ids: Vec<String>) -> Result<(), AppErrorDto> {
-        let conn = open_database(Path::new(project_root)).map_err(|e| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
-        })?;
+        let conn = open_project_db(project_root)?;
         let now = now_iso();
         for (i, node_id) in ordered_ids.iter().enumerate() {
             let order = (i + 1) as i64;
@@ -118,7 +111,22 @@ impl PlotService {
         }
         Ok(())
     }
+
+    pub fn next_sort_order(&self, project_root: &str) -> Result<i64, AppErrorDto> {
+        let conn = open_project_db(project_root)?;
+        let project_id = get_project_id(&conn)?;
+        conn.query_row(
+            "SELECT COALESCE(MAX(sort_order), 0) + 1 FROM plot_nodes WHERE project_id = ?1",
+            params![project_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(|e| {
+            AppErrorDto::new("PIPELINE_DB_QUERY_FAILED", "读取剧情节点顺序失败", true)
+                .with_detail(e.to_string())
+        })
+    }
 }
+
 
 #[cfg(test)]
 mod tests {

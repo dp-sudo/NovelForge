@@ -76,15 +76,3 @@ export async function deleteCharacterRelationship(projectRoot: string, id: strin
   await invokeCommand<void>("delete_character_relationship", { projectRoot, id });
 }
 
-export interface RelationshipGraphData {
-  characters: CharacterRow[];
-  relationships: CharacterRelationship[];
-}
-
-export async function getRelationshipGraphData(projectRoot: string): Promise<RelationshipGraphData> {
-  const [characters, relationships] = await Promise.all([
-    listCharacters(projectRoot),
-    listCharacterRelationships(projectRoot)
-  ]);
-  return { characters, relationships };
-}

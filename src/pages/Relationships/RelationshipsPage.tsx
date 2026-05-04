@@ -3,8 +3,11 @@ import { Card } from "../../components/cards/Card";
 import { Button } from "../../components/ui/Button";
 import { Modal } from "../../components/dialogs/Modal";
 import { Textarea } from "../../components/forms/Textarea";
-import { getRelationshipGraphData, type CharacterRelationship, type CharacterRow } from "../../api/characterApi";
-import { runModuleAiTaskWithMeta, type ModuleReviewWorkItem } from "../../api/moduleAiApi";
+import { useAiTask } from "../../hooks/useAiTask.js";
+import { useReviewChecklist } from "../../hooks/useReviewChecklist.js";
+import { listCharacters, listCharacterRelationships, type CharacterRelationship, type CharacterRow } from "../../api/characterApi";
+import { runModuleAiTaskWithMeta } from "../../api/moduleAiApi";
+import type { PipelineReviewWorkItem } from "../../api/pipelineApi";
 import { listReviewWorkItems, updateReviewQueueItemStatus } from "../../api/contextApi";
 import { useProjectStore } from "../../stores/projectStore";
 import { useUiStore } from "../../stores/uiStore";
@@ -29,14 +32,11 @@ export function RelationshipsPage() {
   const [error, setError] = useState<string | null>(null);
   const [showAiReview, setShowAiReview] = useState(false);
   const [aiPrompt, setAiPrompt] = useState("");
-  const [aiResult, setAiResult] = useState<string | null>(null);
-  const [aiError, setAiError] = useState<string | null>(null);
-  const [aiLoading, setAiLoading] = useState(false);
+  const ai = useAiTask();
   const [reviewPendingCount, setReviewPendingCount] = useState(0);
-  const [reviewChecklistHints, setReviewChecklistHints] = useState<string[]>([]);
-  const [reviewWorkItems, setReviewWorkItems] = useState<ModuleReviewWorkItem[]>([]);
+  const [reviewWorkItems, setReviewWorkItems] = useState<PipelineReviewWorkItem[]>([]);
   const [reviewItemUpdating, setReviewItemUpdating] = useState<Record<string, boolean>>({});
-  const [taskContractHint, setTaskContractHint] = useState<string | null>(null);
+  const { reviewChecklistHints, reviewWorkItemCount, taskContractHint, processReviewResult, resetReview } = useReviewChecklist();
 
   useEffect(() => {
     if (!projectRoot) {
@@ -48,8 +48,11 @@ export function RelationshipsPage() {
 
     setLoading(true);
     setError(null);
-    getRelationshipGraphData(projectRoot)
-      .then(({ characters: characterRows, relationships: relationRows }) => {
+    Promise.all([
+      listCharacters(projectRoot),
+      listCharacterRelationships(projectRoot)
+    ])
+      .then(([characterRows, relationRows]) => {
         setCharacters(characterRows);
         setRelationships(relationRows);
         setFocusedCharacterId((current) =>
@@ -76,7 +79,7 @@ export function RelationshipsPage() {
       status: "pending",
       limit: 200,
     }).then((items) => setReviewPendingCount(items.length)).catch(() => setReviewPendingCount(0));
-  }, [projectRoot, aiResult]);
+  }, [projectRoot, ai.result]);
 
   const nodePositions = useMemo(() => {
     const map = new Map<string, NodePosition>();
@@ -119,7 +122,11 @@ export function RelationshipsPage() {
         </div>
         <div className="flex items-center gap-2">
           <span className="text-xs text-surface-500">待办审查 {reviewPendingCount}</span>
-          <Button variant="ghost" size="sm" onClick={() => { setShowAiReview(true); setAiError(null); setAiResult(null); }}>
+          <Button variant="ghost" size="sm" onClick={() => {
+            setShowAiReview(true);
+            ai.reset();
+            resetReview();
+          }}>
             AI 审阅
           </Button>
           <Button variant="secondary" size="sm" onClick={() => setActiveRoute("characters")}>
@@ -238,59 +245,40 @@ export function RelationshipsPage() {
           />
           <Button
             variant="primary"
-            loading={aiLoading}
+            loading={ai.loading}
             onClick={async () => {
               if (!projectRoot) return;
-              setAiLoading(true);
-              setAiError(null);
-              setAiResult(null);
-              try {
+              await ai.run(async () => {
                 const result = await runModuleAiTaskWithMeta({
                   projectRoot,
                   taskType: "relationship.review",
                   uiAction: "relationship.ai.review",
                   userInstruction: aiPrompt,
                 });
-                setAiResult(result.output || "AI 未返回内容。");
-                const hints = result.reviewChecklist
-                  .filter((item) => item.status === "attention")
-                  .map((item) => `${item.title}: ${item.message}`);
-                setReviewChecklistHints(hints);
+                processReviewResult(result);
                 setReviewWorkItems(result.reviewWorkItems);
-                const contract = result.taskContract;
-                if (contract) {
-                  const authorityLayer = typeof contract.authorityLayer === "string" ? contract.authorityLayer : "n/a";
-                  const stateLayer = typeof contract.stateLayer === "string" ? contract.stateLayer : "n/a";
-                  const capabilityPack = typeof contract.capabilityPack === "string" ? contract.capabilityPack : "n/a";
-                  const reviewGate = typeof contract.reviewGate === "string" ? contract.reviewGate : "n/a";
-                  setTaskContractHint(`权威层: ${authorityLayer} | 状态层: ${stateLayer} | 能力包: ${capabilityPack} | 审查门: ${reviewGate}`);
-                } else {
-                  setTaskContractHint(null);
-                }
+                
                 const pending = await listReviewWorkItems(projectRoot, {
                   taskType: "relationship.review",
                   status: "pending",
                   limit: 200,
                 });
                 setReviewPendingCount(pending.length);
-              } catch (err) {
-                setAiError(err instanceof Error ? err.message : "AI 审阅失败");
-              } finally {
-                setAiLoading(false);
-              }
+                return result.output || "AI 未返回内容。";
+              });
             }}
             disabled={!projectRoot}
           >
-            {aiLoading ? "审阅中..." : "生成关系审阅报告"}
+            {ai.loading ? "审阅中..." : "生成关系审阅报告"}
           </Button>
-          {aiError && (
+          {ai.error && (
             <div className="p-3 rounded-lg bg-error/10 border border-error/30 text-sm text-error">
-              {aiError}
+              {ai.error}
             </div>
           )}
-          {aiResult && (
+          {ai.result && (
             <div className="p-4 rounded-xl bg-primary/5 border border-primary/20">
-              <pre className="text-sm text-surface-200 whitespace-pre-wrap font-sans leading-relaxed max-h-80 overflow-y-auto">{aiResult}</pre>
+              <pre className="text-sm text-surface-200 whitespace-pre-wrap font-sans leading-relaxed max-h-80 overflow-y-auto">{ai.result}</pre>
               {taskContractHint && <div className="mt-3 text-xs text-surface-400">{taskContractHint}</div>}
               {reviewChecklistHints.length > 0 && (
                 <div className="mt-3 space-y-1">

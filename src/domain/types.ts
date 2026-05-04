@@ -1,10 +1,4 @@
-import type {
-  BlueprintStepKey,
-  BlueprintStepStatus,
-  ChapterStatus,
-  IssueSeverity,
-  IssueStatus
-} from "./constants.js";
+import type { ChapterStatus } from "./constants.js";
 
 export interface CreateProjectInput {
   name: string;
@@ -31,20 +25,6 @@ export interface ProjectJson {
     language: string;
     autosaveIntervalMs: number;
   };
-}
-
-export interface BlueprintStep {
-  id: string;
-  projectId: string;
-  stepKey: BlueprintStepKey;
-  title: string;
-  content: string;
-  contentPath: string;
-  status: BlueprintStepStatus;
-  aiGenerated: boolean;
-  completedAt?: string;
-  createdAt: string;
-  updatedAt: string;
 }
 
 export interface CharacterInput {
@@ -100,65 +80,6 @@ export interface ChapterInput {
   summary?: string;
   targetWords?: number;
   status?: ChapterStatus;
-}
-
-export interface ChapterRecord {
-  id: string;
-  chapterIndex: number;
-  title: string;
-  summary: string;
-  status: ChapterStatus;
-  targetWords: number;
-  currentWords: number;
-  contentPath: string;
-  volumeId?: string | null;
-  version: number;
-  updatedAt: string;
-}
-
-export interface ProviderConfigInput {
-  providerName: string;
-  baseUrl: string;
-  model: string;
-  temperature: number;
-  maxTokens: number;
-  stream: boolean;
-  apiKey?: string;
-}
-
-export interface AiPreviewRequest {
-  taskType:
-    | "generate_blueprint_step"
-    | "generate_chapter_draft"
-    | "continue_chapter"
-    | "rewrite_selection"
-    | "deai_text"
-    | "scan_consistency";
-  userInstruction: string;
-  chapterId?: string;
-  selectedText?: string;
-}
-
-export interface AiPreviewResponse {
-  requestId: string;
-  preview: string;
-  usedContext: string[];
-  risks: string[];
-}
-
-export interface ConsistencyIssue {
-  id: string;
-  issueType: "glossary" | "character" | "world_rule" | "timeline" | "prose_style";
-  severity: IssueSeverity;
-  chapterId: string;
-  sourceText: string;
-  sourceStart?: number;
-  sourceEnd?: number;
-  relatedAssetType?: string;
-  relatedAssetId?: string;
-  explanation: string;
-  suggestedFix?: string;
-  status: IssueStatus;
 }
 
 export interface ExportOptions {
