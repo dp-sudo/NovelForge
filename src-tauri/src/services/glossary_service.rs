@@ -42,8 +42,7 @@ impl GlossaryService {
         let conn = open_project_db(project_root)?;
         let project_id = get_project_id(&conn)?;
         let mut stmt = conn
-            .prepare("SELECT id, project_id, term, term_type, COALESCE(aliases,'[]'), description, locked, banned, preferred_usage, created_at, updated_at FROM glossary_terms WHERE project_id = ?1")
-            .map_err(|e| AppErrorDto::new("QUERY_FAILED", "查询名词失败", true).with_detail(e.to_string()))?;
+            .prepare("SELECT id, project_id, term, term_type, COALESCE(aliases,'[]'), description, locked, banned, preferred_usage, created_at, updated_at FROM glossary_terms WHERE project_id = ?1")?;
         let terms = stmt
             .query_map(params![project_id], |row| {
                 Ok(GlossaryTermRecord {
@@ -59,14 +58,8 @@ impl GlossaryService {
                     created_at: row.get(9)?,
                     updated_at: row.get(10)?,
                 })
-            })
-            .map_err(|e| {
-                AppErrorDto::new("QUERY_FAILED", "查询名词失败", true).with_detail(e.to_string())
             })?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| {
-                AppErrorDto::new("QUERY_FAILED", "查询名词失败", true).with_detail(e.to_string())
-            })?;
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(terms)
     }
 
@@ -85,8 +78,7 @@ impl GlossaryService {
         conn.execute(
             "INSERT INTO glossary_terms(id, project_id, term, term_type, aliases, description, locked, banned, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
             params![id, project_id, input.term, input.term_type, aliases, input.description, locked, banned, now, now],
-        )
-        .map_err(|e| AppErrorDto::new("INSERT_FAILED", "创建名词失败", true).with_detail(e.to_string()))?;
+        )?;
         Ok(id)
     }
 }

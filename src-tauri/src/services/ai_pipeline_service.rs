@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use crate::adapters::llm_types::{ContentBlock, Message, UnifiedGenerateRequest};
 use crate::errors::AppErrorDto;
-use crate::infra::database::open_database;
+use crate::infra::database::{open_database, open_project_db};
 use crate::infra::time::now_iso;
 use crate::services::ai_service::{AiService, TaskRouteResolution};
 use crate::services::capability_pack_service::CapabilityPackService;
@@ -958,9 +958,7 @@ impl AiPipelineService {
         chapter_id: Option<&str>,
         snapshot: &Value,
     ) -> Result<String, AppErrorDto> {
-        let conn = open_database(Path::new(project_root)).map_err(|err| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(err.to_string())
-        })?;
+        let conn = open_project_db(project_root)?;
         let project_id = get_project_id(&conn)?;
         let now = now_iso();
         let snapshot_id = Uuid::new_v4().to_string();
@@ -1205,10 +1203,7 @@ impl AiPipelineService {
         auto_persist: bool,
         persisted_records: &[PersistedRecord],
     ) -> Result<StoryCheckpointRecord, AppErrorDto> {
-        let project_root_path = Path::new(project_root);
-        let mut conn = open_database(project_root_path).map_err(|e| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
-        })?;
+        let mut conn = open_project_db(project_root)?;
         let project_id = get_project_id(&conn)?;
         let now = now_iso();
         let checkpoint_id = Uuid::new_v4().to_string();
@@ -2161,10 +2156,7 @@ impl AiPipelineService {
         ui_action: Option<&str>,
         task_contract: &task_routing::TaskExecutionContract,
     ) -> Result<(), AppErrorDto> {
-        let conn = open_database(Path::new(project_root)).map_err(|err| {
-            AppErrorDto::new("PIPELINE_DB_OPEN_FAILED", "数据库打开失败", false)
-                .with_detail(err.to_string())
-        })?;
+        let conn = open_project_db(project_root)?;
         let project_id = get_project_id(&conn)?;
         let now = now_iso();
 
@@ -2409,7 +2401,7 @@ mod tests {
     use uuid::Uuid;
 
     use super::{AiPipelineService, RunAiTaskPipelineInput, PHASE_ROUTE};
-    use crate::infra::database::open_database;
+    use crate::infra::database::{open_database, open_project_db};
     use crate::services::project_service::{CreateProjectInput, ProjectService};
     use crate::services::task_routing;
 

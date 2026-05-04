@@ -175,18 +175,7 @@ pub async fn ai_generate_character(
     run_pipeline_text_result(
         &app_handle,
         &state,
-        RunAiTaskPipelineInput {
-            project_root: input.project_root,
-            task_type: "character.create".to_string(),
-            chapter_id: None,
-            ui_action: Some("ai_generate_character".to_string()),
-            user_instruction: input.user_description,
-            selected_text: None,
-            chapter_content: None,
-            blueprint_step_key: None,
-            blueprint_step_title: None,
-            auto_persist: true,
-        },
+        build_simple_task_input(input.project_root, "character.create", "ai_generate_character", input.user_description),
     )
     .await
 }
@@ -208,18 +197,7 @@ pub async fn ai_generate_world_rule(
     run_pipeline_text_result(
         &app_handle,
         &state,
-        RunAiTaskPipelineInput {
-            project_root: input.project_root,
-            task_type: "world.create_rule".to_string(),
-            chapter_id: None,
-            ui_action: Some("ai_generate_world_rule".to_string()),
-            user_instruction: input.user_description,
-            selected_text: None,
-            chapter_content: None,
-            blueprint_step_key: None,
-            blueprint_step_title: None,
-            auto_persist: true,
-        },
+        build_simple_task_input(input.project_root, "world.create_rule", "ai_generate_world_rule", input.user_description),
     )
     .await
 }
@@ -241,18 +219,7 @@ pub async fn ai_generate_plot_node(
     run_pipeline_text_result(
         &app_handle,
         &state,
-        RunAiTaskPipelineInput {
-            project_root: input.project_root,
-            task_type: "plot.create_node".to_string(),
-            chapter_id: None,
-            ui_action: Some("ai_generate_plot_node".to_string()),
-            user_instruction: input.user_description,
-            selected_text: None,
-            chapter_content: None,
-            blueprint_step_key: None,
-            blueprint_step_title: None,
-            auto_persist: true,
-        },
+        build_simple_task_input(input.project_root, "plot.create_node", "ai_generate_plot_node", input.user_description),
     )
     .await
 }
@@ -308,18 +275,7 @@ pub async fn ai_generate_glossary_term(
     run_pipeline_text_result(
         &app_handle,
         &state,
-        RunAiTaskPipelineInput {
-            project_root: input.project_root,
-            task_type: "glossary.create_term".to_string(),
-            chapter_id: None,
-            ui_action: Some("ai_generate_glossary_term".to_string()),
-            user_instruction: input.user_description,
-            selected_text: None,
-            chapter_content: None,
-            blueprint_step_key: None,
-            blueprint_step_title: None,
-            auto_persist: true,
-        },
+        build_simple_task_input(input.project_root, "glossary.create_term", "ai_generate_glossary_term", input.user_description),
     )
     .await
 }
@@ -341,20 +297,29 @@ pub async fn ai_generate_narrative_obligation(
     run_pipeline_text_result(
         &app_handle,
         &state,
-        RunAiTaskPipelineInput {
-            project_root: input.project_root,
-            task_type: "narrative.create_obligation".to_string(),
-            chapter_id: None,
-            ui_action: Some("ai_generate_narrative_obligation".to_string()),
-            user_instruction: input.user_description,
-            selected_text: None,
-            chapter_content: None,
-            blueprint_step_key: None,
-            blueprint_step_title: None,
-            auto_persist: true,
-        },
+        build_simple_task_input(input.project_root, "narrative.create_obligation", "ai_generate_narrative_obligation", input.user_description),
     )
     .await
+}
+
+fn build_simple_task_input(
+    project_root: String,
+    task_type: &str,
+    ui_action: &str,
+    user_instruction: String,
+) -> RunAiTaskPipelineInput {
+    RunAiTaskPipelineInput {
+        project_root,
+        task_type: task_type.to_string(),
+        chapter_id: None,
+        ui_action: Some(ui_action.to_string()),
+        user_instruction,
+        selected_text: None,
+        chapter_content: None,
+        blueprint_step_key: None,
+        blueprint_step_title: None,
+        auto_persist: true,
+    }
 }
 
 async fn run_pipeline_text_result(

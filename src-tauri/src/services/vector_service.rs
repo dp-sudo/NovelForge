@@ -7,7 +7,7 @@ use rusqlite::params;
 use serde::{Deserialize, Serialize};
 
 use crate::errors::AppErrorDto;
-use crate::infra::database::open_database;
+use crate::infra::database::open_project_db;
 use crate::infra::fs_utils::{read_text_if_exists, write_file_atomic};
 use crate::infra::path_utils::resolve_project_relative_path;
 use crate::services::project_service::get_project_id;
@@ -58,10 +58,7 @@ pub struct VectorService;
 impl VectorService {
     pub fn rebuild_index(&self, project_root: &str) -> Result<usize, AppErrorDto> {
         let root = Path::new(project_root);
-        let conn = open_database(root).map_err(|err| {
-            AppErrorDto::new("DB_OPEN_FAILED", "Cannot open project database", false)
-                .with_detail(err.to_string())
-        })?;
+        let conn = open_project_db(project_root)?;
         let project_id = get_project_id(&conn)?;
 
         let mut stmt = conn

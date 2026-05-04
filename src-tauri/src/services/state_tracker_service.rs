@@ -3,10 +3,9 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::errors::AppErrorDto;
-use crate::infra::database::open_database;
+use crate::infra::database::open_project_db;
 use crate::infra::time::now_iso;
 use crate::services::project_service::get_project_id;
-use std::path::Path;
 
 // --- Data types ---
 
@@ -125,9 +124,7 @@ impl StateTrackerService {
         project_root: &str,
         input: CreateSnapshotInput,
     ) -> Result<String, AppErrorDto> {
-        let conn = open_database(Path::new(project_root)).map_err(|e| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
-        })?;
+        let conn = open_project_db(project_root)?;
         let project_id = get_project_id(&conn)?;
         let snapshot_id = Uuid::new_v4().to_string();
         let now = now_iso();
@@ -215,9 +212,7 @@ impl StateTrackerService {
         project_root: &str,
         chapter_id: &str,
     ) -> Result<Option<StoryStateSnapshot>, AppErrorDto> {
-        let conn = open_database(Path::new(project_root)).map_err(|e| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
-        })?;
+        let conn = open_project_db(project_root)?;
         let project_id = get_project_id(&conn)?;
 
         let snapshot_row: Option<(String, String, String, Option<String>, String)> = conn
@@ -276,9 +271,7 @@ impl StateTrackerService {
         &self,
         project_root: &str,
     ) -> Result<Vec<StateSnapshotSummary>, AppErrorDto> {
-        let conn = open_database(Path::new(project_root)).map_err(|e| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
-        })?;
+        let conn = open_project_db(project_root)?;
         let project_id = get_project_id(&conn)?;
 
         let mut stmt = conn
@@ -325,9 +318,7 @@ impl StateTrackerService {
         project_root: &str,
         snapshot_id: &str,
     ) -> Result<(), AppErrorDto> {
-        let conn = open_database(Path::new(project_root)).map_err(|e| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
-        })?;
+        let conn = open_project_db(project_root)?;
         // Delete children first
         for table in &[
             "character_state_entries",
@@ -361,9 +352,7 @@ impl StateTrackerService {
         chapter_id: &str,
     ) -> Result<String, AppErrorDto> {
         // Find the previous chapter to get its state snapshot
-        let conn = open_database(Path::new(project_root)).map_err(|e| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
-        })?;
+        let conn = open_project_db(project_root)?;
         let project_id = get_project_id(&conn)?;
 
         // Get current chapter's index

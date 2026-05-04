@@ -9,7 +9,7 @@ use zip::write::FileOptions;
 use zip::{CompressionMethod, ZipWriter};
 
 use crate::errors::AppErrorDto;
-use crate::infra::database::open_database;
+use crate::infra::database::open_project_db;
 use crate::infra::fs_utils::{write_bytes_atomic, write_file_atomic};
 use crate::infra::path_utils::resolve_project_relative_path;
 use crate::infra::time::now_iso;
@@ -92,11 +92,7 @@ impl ExportService {
         });
 
         let project_root_path = Path::new(project_root);
-        let conn = open_database(project_root_path).map_err(|err| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false)
-                .with_detail(err.to_string())
-                .with_suggested_action("请检查 database/project.sqlite 是否存在并可读写")
-        })?;
+        let conn = open_project_db(project_root)?;
         let (project_id, project_name) = load_project_identity(&conn)?;
 
         let chapter = conn
@@ -169,11 +165,7 @@ impl ExportService {
         });
 
         let project_root_path = Path::new(project_root);
-        let conn = open_database(project_root_path).map_err(|err| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false)
-                .with_detail(err.to_string())
-                .with_suggested_action("请检查 database/project.sqlite 是否存在并可读写")
-        })?;
+        let conn = open_project_db(project_root)?;
         let (project_id, project_name) = load_project_identity(&conn)?;
 
         let mut stmt = conn

@@ -1,10 +1,27 @@
-use crate::services::context_service::CollectedContext;
+use crate::services::context_service::{BlueprintStepSummary, CollectedContext};
 use crate::services::project_service::WritingStyle;
 
 /// Structured prompt builder following the spec Document 4 §8 template format.
 pub struct PromptBuilder;
 
 impl PromptBuilder {
+    /// Format completed blueprint steps for prompt context injection.
+    fn format_blueprint_steps(
+        steps: &[BlueprintStepSummary],
+        prefix: &str,
+        max_chars: usize,
+    ) -> Vec<String> {
+        steps
+            .iter()
+            .filter(|s| s.status == "completed")
+            .filter_map(|s| s.content.as_ref().map(|c| (s, c)))
+            .map(|(s, content)| {
+                let preview: String = content.chars().take(max_chars).collect();
+                format!("[{}] {}: {}", prefix, s.title, preview)
+            })
+            .collect()
+    }
+
     /// Format writing style into a human-readable block for prompt injection.
     fn format_writing_style(style: &WritingStyle) -> String {
         let lang_label = match style.language_style.as_str() {
@@ -554,15 +571,7 @@ impl PromptBuilder {
         parts.push(format!("题材：{}", global.genre));
         parts.push(String::new());
 
-        // Include existing completed blueprint steps for context
-        for step in &global.blueprint_summary {
-            if step.status == "completed" {
-                if let Some(ref content) = step.content {
-                    let preview: String = content.chars().take(150).collect();
-                    parts.push(format!("[已有设定] {}: {}", step.title, preview));
-                }
-            }
-        }
+        parts.extend(Self::format_blueprint_steps(&global.blueprint_summary, "已有设定", 150));
         parts.push(String::new());
 
         if !user_instruction.is_empty() {
@@ -611,14 +620,7 @@ impl PromptBuilder {
         parts.push(format!("题材：{}", global.genre));
         parts.push(String::new());
 
-        for step in &global.blueprint_summary {
-            if step.status == "completed" {
-                if let Some(ref content) = step.content {
-                    let preview: String = content.chars().take(150).collect();
-                    parts.push(format!("[已有设定] {}: {}", step.title, preview));
-                }
-            }
-        }
+        parts.extend(Self::format_blueprint_steps(&global.blueprint_summary, "已有设定", 150));
         parts.push(String::new());
 
         if !user_instruction.is_empty() {
@@ -710,14 +712,7 @@ impl PromptBuilder {
         parts.push("# 项目上下文".to_string());
         parts.push(format!("作品名称：{}", context.global_context.project_name));
         parts.push(format!("题材：{}", context.global_context.genre));
-        for step in &context.global_context.blueprint_summary {
-            if step.status == "completed" {
-                if let Some(ref content) = step.content {
-                    let preview: String = content.chars().take(120).collect();
-                    parts.push(format!("[蓝图] {}: {}", step.title, preview));
-                }
-            }
-        }
+        parts.extend(Self::format_blueprint_steps(&context.global_context.blueprint_summary, "蓝图", 120));
         parts.push(String::new());
         parts.push("# 用户需求".to_string());
         parts.push(user_instruction.to_string());
@@ -737,14 +732,13 @@ impl PromptBuilder {
     }
 
     pub fn build_timeline_review(context: &CollectedContext, user_instruction: &str) -> String {
-        let parts = vec![
+        let mut parts = vec![
             "# 角色".to_string(),
             "你是小说时间线审阅编辑。".to_string(),
             String::new(),
             "# 任务".to_string(),
             "结合已有蓝图与上下文，给出时间线风险与修复建议。".to_string(),
         ];
-        let mut parts = parts;
         if !user_instruction.trim().is_empty() {
             parts.push(format!("附加要求：{}", user_instruction.trim()));
         }
@@ -752,14 +746,7 @@ impl PromptBuilder {
         parts.push("# 上下文".to_string());
         parts.push(format!("作品名称：{}", context.global_context.project_name));
         parts.push(format!("题材：{}", context.global_context.genre));
-        for step in &context.global_context.blueprint_summary {
-            if step.status == "completed" {
-                if let Some(ref content) = step.content {
-                    let preview: String = content.chars().take(120).collect();
-                    parts.push(format!("[蓝图] {}: {}", step.title, preview));
-                }
-            }
-        }
+        parts.extend(Self::format_blueprint_steps(&context.global_context.blueprint_summary, "蓝图", 120));
         parts.push(String::new());
         parts.push("# 输出".to_string());
         parts.push("输出 Markdown，包含：时间线风险、冲突点、建议修复步骤。".to_string());
@@ -767,14 +754,13 @@ impl PromptBuilder {
     }
 
     pub fn build_relationship_review(context: &CollectedContext, user_instruction: &str) -> String {
-        let parts = vec![
+        let mut parts = vec![
             "# 角色".to_string(),
             "你是角色关系审阅编辑。".to_string(),
             String::new(),
             "# 任务".to_string(),
             "评估当前角色关系与剧情推进的一致性，并给出可执行建议。".to_string(),
         ];
-        let mut parts = parts;
         if !user_instruction.trim().is_empty() {
             parts.push(format!("附加要求：{}", user_instruction.trim()));
         }
@@ -809,14 +795,13 @@ impl PromptBuilder {
     }
 
     pub fn build_dashboard_review(context: &CollectedContext, user_instruction: &str) -> String {
-        let parts = vec![
+        let mut parts = vec![
             "# 角色".to_string(),
             "你是小说项目运营分析助手。".to_string(),
             String::new(),
             "# 任务".to_string(),
             "生成当前项目进展诊断，指出优先风险与下一步行动。".to_string(),
         ];
-        let mut parts = parts;
         if !user_instruction.trim().is_empty() {
             parts.push(format!("附加要求：{}", user_instruction.trim()));
         }
@@ -834,14 +819,13 @@ impl PromptBuilder {
     }
 
     pub fn build_export_review(context: &CollectedContext, user_instruction: &str) -> String {
-        let parts = vec![
+        let mut parts = vec![
             "# 角色".to_string(),
             "你是出版交付审阅助手。".to_string(),
             String::new(),
             "# 任务".to_string(),
             "在导出前给出可执行的内容质检清单和修复优先级。".to_string(),
         ];
-        let mut parts = parts;
         if !user_instruction.trim().is_empty() {
             parts.push(format!("附加要求：{}", user_instruction.trim()));
         }

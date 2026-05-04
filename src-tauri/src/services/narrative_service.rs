@@ -50,11 +50,7 @@ impl NarrativeService {
                  planted_chapter_id, expected_payoff_chapter_id, actual_payoff_chapter_id, \
                  payoff_status, severity, related_entities, created_at, updated_at \
                  FROM narrative_obligations WHERE project_id = ?1 ORDER BY created_at DESC",
-            )
-            .map_err(|e| {
-                AppErrorDto::new("QUERY_FAILED", "查询叙事义务失败", true)
-                    .with_detail(e.to_string())
-            })?;
+            )?;
         let obligations = stmt
             .query_map(params![project_id], |row| {
                 Ok(NarrativeObligation {
@@ -71,16 +67,8 @@ impl NarrativeService {
                     created_at: row.get(10)?,
                     updated_at: row.get(11)?,
                 })
-            })
-            .map_err(|e| {
-                AppErrorDto::new("QUERY_FAILED", "查询叙事义务失败", true)
-                    .with_detail(e.to_string())
             })?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| {
-                AppErrorDto::new("QUERY_FAILED", "查询叙事义务失败", true)
-                    .with_detail(e.to_string())
-            })?;
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(obligations)
     }
 
@@ -114,10 +102,7 @@ impl NarrativeService {
                 now,
                 now
             ],
-        )
-        .map_err(|e| {
-            AppErrorDto::new("INSERT_FAILED", "创建叙事义务失败", true).with_detail(e.to_string())
-        })?;
+        )?;
         Ok(id)
     }
 
@@ -132,11 +117,7 @@ impl NarrativeService {
         conn.execute(
             "UPDATE narrative_obligations SET payoff_status = ?1, updated_at = ?2 WHERE id = ?3",
             params![status, now, id],
-        )
-        .map_err(|e| {
-            AppErrorDto::new("UPDATE_FAILED", "更新叙事义务状态失败", true)
-                .with_detail(e.to_string())
-        })?;
+        )?;
         Ok(())
     }
 
@@ -145,10 +126,7 @@ impl NarrativeService {
         conn.execute(
             "DELETE FROM narrative_obligations WHERE id = ?1",
             params![id],
-        )
-        .map_err(|e| {
-            AppErrorDto::new("DELETE_FAILED", "删除叙事义务失败", true).with_detail(e.to_string())
-        })?;
+        )?;
         Ok(())
     }
 }

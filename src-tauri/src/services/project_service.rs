@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::errors::AppErrorDto;
-use crate::infra::database::{initialize_database, open_database};
+use crate::infra::database::{initialize_database, open_database, open_project_db};
 use crate::infra::fs_utils::write_file_atomic;
 use crate::infra::path_utils::{resolve_project_relative_path, sanitize_project_directory_name};
 use crate::infra::recent_projects::{
@@ -333,11 +333,7 @@ impl ProjectService {
             );
         }
 
-        let conn = open_database(project_root_path).map_err(|err| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false)
-                .with_detail(err.to_string())
-                .with_suggested_action("请检查 database/project.sqlite 是否存在并可读写")
-        })?;
+        let conn = open_project_db(project_root)?;
         validate_project_db_paths(project_root_path, &conn)?;
 
         let _ = mark_recent_project(normalized_root);
@@ -366,11 +362,7 @@ impl ProjectService {
         project_root: &str,
         style: &WritingStyle,
     ) -> Result<(), AppErrorDto> {
-        let project_root_path = Path::new(project_root);
-        let conn = open_database(project_root_path).map_err(|err| {
-            AppErrorDto::new("DB_OPEN_FAILED", "无法打开项目数据库", false)
-                .with_detail(err.to_string())
-        })?;
+        let conn = open_project_db(project_root)?;
         let project_id = get_project_id(&conn)?;
         let style_json = serde_json::to_string(style).map_err(|err| {
             AppErrorDto::new("STYLE_SERIALIZE_FAILED", "无法序列化写作风格配置", true)
@@ -389,11 +381,7 @@ impl ProjectService {
     }
 
     pub fn get_writing_style(&self, project_root: &str) -> Result<WritingStyle, AppErrorDto> {
-        let project_root_path = Path::new(project_root);
-        let conn = open_database(project_root_path).map_err(|err| {
-            AppErrorDto::new("DB_OPEN_FAILED", "无法打开项目数据库", false)
-                .with_detail(err.to_string())
-        })?;
+        let conn = open_project_db(project_root)?;
         let project_id = get_project_id(&conn)?;
         let style_json: Option<String> = conn
             .query_row(

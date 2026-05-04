@@ -129,8 +129,7 @@ impl CharacterService {
         conn.execute(
             "INSERT INTO characters(id, project_id, name, aliases, role_type, age, gender, identity_text, appearance, motivation, desire, fear, flaw, arc_stage, locked_fields, notes, is_deleted, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,0,?17,?18)",
             params![id, project_id, input.name, aliases, input.role_type, input.age, input.gender, input.identity_text, input.appearance, input.motivation, input.desire, input.fear, input.flaw, input.arc_stage, locked, input.notes, now, now],
-        )
-        .map_err(|e| AppErrorDto::new("INSERT_FAILED", "创建角色失败", true).with_detail(e.to_string()))?;
+        )?;
         Ok(id)
     }
 
@@ -145,28 +144,19 @@ impl CharacterService {
             conn.execute(
                 "UPDATE characters SET name = ?1, updated_at = ?2 WHERE id = ?3",
                 params![name, now, input.id],
-            )
-            .map_err(|e| {
-                AppErrorDto::new("UPDATE_FAILED", "更新角色失败", true).with_detail(e.to_string())
-            })?;
+            )?;
         }
         if let Some(role) = &input.role_type {
             conn.execute(
                 "UPDATE characters SET role_type = ?1, updated_at = ?2 WHERE id = ?3",
                 params![role, now, input.id],
-            )
-            .map_err(|e| {
-                AppErrorDto::new("UPDATE_FAILED", "更新角色失败", true).with_detail(e.to_string())
-            })?;
+            )?;
         }
         if let Some(age) = &input.age {
             conn.execute(
                 "UPDATE characters SET age = ?1, updated_at = ?2 WHERE id = ?3",
                 params![age, now, input.id],
-            )
-            .map_err(|e| {
-                AppErrorDto::new("UPDATE_FAILED", "更新角色失败", true).with_detail(e.to_string())
-            })?;
+            )?;
         }
         if let Some(aliases) = &input.aliases {
             let aliases_json = serde_json::to_string(aliases).map_err(|e| {
@@ -175,82 +165,55 @@ impl CharacterService {
             conn.execute(
                 "UPDATE characters SET aliases = ?1, updated_at = ?2 WHERE id = ?3",
                 params![aliases_json, now, input.id],
-            )
-            .map_err(|e| {
-                AppErrorDto::new("UPDATE_FAILED", "更新角色失败", true).with_detail(e.to_string())
-            })?;
+            )?;
         }
         if let Some(gender) = &input.gender {
             conn.execute(
                 "UPDATE characters SET gender = ?1, updated_at = ?2 WHERE id = ?3",
                 params![gender, now, input.id],
-            )
-            .map_err(|e| {
-                AppErrorDto::new("UPDATE_FAILED", "更新角色失败", true).with_detail(e.to_string())
-            })?;
+            )?;
         }
         if let Some(identity_text) = &input.identity_text {
             conn.execute(
                 "UPDATE characters SET identity_text = ?1, updated_at = ?2 WHERE id = ?3",
                 params![identity_text, now, input.id],
-            )
-            .map_err(|e| {
-                AppErrorDto::new("UPDATE_FAILED", "更新角色失败", true).with_detail(e.to_string())
-            })?;
+            )?;
         }
         if let Some(appearance) = &input.appearance {
             conn.execute(
                 "UPDATE characters SET appearance = ?1, updated_at = ?2 WHERE id = ?3",
                 params![appearance, now, input.id],
-            )
-            .map_err(|e| {
-                AppErrorDto::new("UPDATE_FAILED", "更新角色失败", true).with_detail(e.to_string())
-            })?;
+            )?;
         }
         if let Some(motivation) = &input.motivation {
             conn.execute(
                 "UPDATE characters SET motivation = ?1, updated_at = ?2 WHERE id = ?3",
                 params![motivation, now, input.id],
-            )
-            .map_err(|e| {
-                AppErrorDto::new("UPDATE_FAILED", "更新角色失败", true).with_detail(e.to_string())
-            })?;
+            )?;
         }
         if let Some(desire) = &input.desire {
             conn.execute(
                 "UPDATE characters SET desire = ?1, updated_at = ?2 WHERE id = ?3",
                 params![desire, now, input.id],
-            )
-            .map_err(|e| {
-                AppErrorDto::new("UPDATE_FAILED", "更新角色失败", true).with_detail(e.to_string())
-            })?;
+            )?;
         }
         if let Some(fear) = &input.fear {
             conn.execute(
                 "UPDATE characters SET fear = ?1, updated_at = ?2 WHERE id = ?3",
                 params![fear, now, input.id],
-            )
-            .map_err(|e| {
-                AppErrorDto::new("UPDATE_FAILED", "更新角色失败", true).with_detail(e.to_string())
-            })?;
+            )?;
         }
         if let Some(flaw) = &input.flaw {
             conn.execute(
                 "UPDATE characters SET flaw = ?1, updated_at = ?2 WHERE id = ?3",
                 params![flaw, now, input.id],
-            )
-            .map_err(|e| {
-                AppErrorDto::new("UPDATE_FAILED", "更新角色失败", true).with_detail(e.to_string())
-            })?;
+            )?;
         }
         if let Some(arc_stage) = &input.arc_stage {
             conn.execute(
                 "UPDATE characters SET arc_stage = ?1, updated_at = ?2 WHERE id = ?3",
                 params![arc_stage, now, input.id],
-            )
-            .map_err(|e| {
-                AppErrorDto::new("UPDATE_FAILED", "更新角色失败", true).with_detail(e.to_string())
-            })?;
+            )?;
         }
         if let Some(locked_fields) = &input.locked_fields {
             let locked_json = serde_json::to_string(locked_fields).map_err(|e| {
@@ -259,19 +222,13 @@ impl CharacterService {
             conn.execute(
                 "UPDATE characters SET locked_fields = ?1, updated_at = ?2 WHERE id = ?3",
                 params![locked_json, now, input.id],
-            )
-            .map_err(|e| {
-                AppErrorDto::new("UPDATE_FAILED", "更新角色失败", true).with_detail(e.to_string())
-            })?;
+            )?;
         }
         if let Some(notes) = &input.notes {
             conn.execute(
                 "UPDATE characters SET notes = ?1, updated_at = ?2 WHERE id = ?3",
                 params![notes, now, input.id],
-            )
-            .map_err(|e| {
-                AppErrorDto::new("UPDATE_FAILED", "更新角色失败", true).with_detail(e.to_string())
-            })?;
+            )?;
         }
         Ok(())
     }
@@ -282,10 +239,7 @@ impl CharacterService {
         conn.execute(
             "UPDATE characters SET is_deleted = 1, updated_at = ?1 WHERE id = ?2",
             params![now, id],
-        )
-        .map_err(|e| {
-            AppErrorDto::new("DELETE_FAILED", "删除角色失败", true).with_detail(e.to_string())
-        })?;
+        )?;
         Ok(())
     }
 }

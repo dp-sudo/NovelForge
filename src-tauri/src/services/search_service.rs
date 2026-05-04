@@ -1,10 +1,9 @@
-use std::path::Path;
 
 use rusqlite::params;
 use serde::Serialize;
 
 use crate::errors::AppErrorDto;
-use crate::infra::database::open_database;
+use crate::infra::database::open_project_db;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -31,9 +30,7 @@ impl SearchService {
             return Ok(vec![]);
         }
 
-        let conn = open_database(Path::new(project_root)).map_err(|e| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
-        })?;
+        let conn = open_project_db(project_root)?;
 
         let fts_query = query
             .chars()
@@ -74,9 +71,7 @@ impl SearchService {
 
     /// Rebuild the entire search index from project data.
     pub fn rebuild_index(&self, project_root: &str) -> Result<usize, AppErrorDto> {
-        let conn = open_database(Path::new(project_root)).map_err(|e| {
-            AppErrorDto::new("DB_OPEN_FAILED", "数据库打开失败", false).with_detail(e.to_string())
-        })?;
+        let conn = open_project_db(project_root)?;
         conn.execute("DELETE FROM search_index", []).map_err(|e| {
             AppErrorDto::new("SEARCH_REBUILD_FAILED", "重建索引失败", true)
                 .with_detail(e.to_string())
